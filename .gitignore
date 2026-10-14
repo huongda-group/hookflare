@@ -1,4 +1,5 @@
 .idea/
+.superpowers/
 node_modules/
 .wrangler/
 dist/
