@@ -4,8 +4,8 @@
 
 Hookflare sits between webhook providers (Stripe, GitHub, Shopify, your own services…) and your backends. It verifies each incoming webhook, persists it durably, and acknowledges it, all before your backend is involved. It then delivers the webhook with automatic retries, keeps a full delivery log, and lets you replay anything from a dashboard.
 
-> [!WARNING]
-> **Status: design phase.** No code has been written yet. This repository currently contains the system design and roadmap. See [Roadmap](#roadmap) for progress. The setup instructions below describe the *planned* deployment and may change as milestones land.
+> [!NOTE]
+> **Status: M0 (Foundation) done.** Monorepo scaffold, Wrangler config, D1 migrations, and CI are in place. The setup instructions below describe the current M0 setup; Queues and R2 buckets arrive in later milestones when first used.
 
 ---
 
@@ -56,10 +56,10 @@ D1 is the source of truth. The queue is only a transport, so the reconciler can 
 - **Dashboard:** React, Vite, Tailwind CSS, TanStack Router / Query
 - **Tooling:** pnpm workspaces, Wrangler, Vitest with `@cloudflare/vitest-pool-workers`
 
-## Getting started (planned)
+## Getting started
 
 > [!NOTE]
-> These steps describe the intended setup. Exact commands, resource names, and config files will be finalized in milestone M0.
+> These steps describe the current M0 setup. Exact commands, resource names, and config files may still evolve as later milestones (Queues, R2) land.
 
 ### Prerequisites
 

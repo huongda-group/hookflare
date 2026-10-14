@@ -1,9 +1,5 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
-
-const dir = path.dirname(fileURLToPath(import.meta.url));
 
 // Fixed 32-byte test keys (base64). Do NOT use outside tests.
 const TEST_SECRETS_KEY = "ERERERERERERERERERERERERERERERERERERERERERE=";
@@ -13,7 +9,9 @@ const TEST_SECRETS_KEY_PREVIOUS =
 export default defineConfig({
 	plugins: [
 		cloudflareTest(async () => {
-			const migrations = await readD1Migrations(path.join(dir, "migrations"));
+			// Resolved against the vitest process cwd, which is this package
+			// directory (same assumption as `configPath: "./wrangler.jsonc"`).
+			const migrations = await readD1Migrations("migrations");
 			return {
 				wrangler: { configPath: "./wrangler.jsonc" },
 				miniflare: {
