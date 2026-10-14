@@ -169,14 +169,21 @@ export async function decryptSecret(
 		);
 	}
 
+	// Load the previous key only when the current one doesn't match, so a bad
+	// SECRETS_KEY_PREVIOUS can't break decryption of current-key secrets.
 	const current = await loadKey(env.SECRETS_KEY, "SECRETS_KEY");
-	const candidates: LoadedKey[] = [current];
-	if (env.SECRETS_KEY_PREVIOUS) {
-		candidates.push(
-			await loadKey(env.SECRETS_KEY_PREVIOUS, "SECRETS_KEY_PREVIOUS"),
+	let match: LoadedKey | undefined;
+	if (current.kid === kid) {
+		match = current;
+	} else if (env.SECRETS_KEY_PREVIOUS) {
+		const previous = await loadKey(
+			env.SECRETS_KEY_PREVIOUS,
+			"SECRETS_KEY_PREVIOUS",
 		);
+		if (previous.kid === kid) {
+			match = previous;
+		}
 	}
-	const match = candidates.find((c) => c.kid === kid);
 	if (!match) {
 		throw new DecryptError(
 			`cannot decrypt secret: unknown key id "${kid}" (not current or previous key)`,

@@ -77,7 +77,7 @@ pnpm exec wrangler d1 create hookflare
 
 (Queues and R2 buckets are created by later milestones when they are first used.)
 
-Copy the resulting `database_id` into `apps/gateway/wrangler.jsonc`.
+Replace the committed `database_id` in `apps/gateway/wrangler.jsonc` (the maintainers' production database) with the ID from that command.
 
 Run Wrangler from the repository root with `pnpm exec wrangler … --config apps/gateway/wrangler.jsonc`, or `cd apps/gateway` first.
 

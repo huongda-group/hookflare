@@ -185,9 +185,6 @@ importers:
       '@cloudflare/vitest-plugin':
         specifier: ^1.4.1
         version: 1.4.1(@cloudflare/workers-types@5.20261013.1)(vitest@5.0.4(vite@8.3.4(esbuild@0.28.2)))
-      '@cloudflare/workers-types':
-        specifier: ^5.20261013.1
-        version: 5.20261013.1
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -1399,7 +1396,8 @@ snapshots:
   '@cloudflare/workerd-windows-64@1.20261012.1':
     optional: true
 
-  '@cloudflare/workers-types@5.20261013.1': {}
+  '@cloudflare/workers-types@5.20261013.1':
+    optional: true
 
   '@cspotcode/source-map-support@0.8.1':
     dependencies:

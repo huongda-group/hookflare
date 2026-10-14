@@ -53,7 +53,10 @@ function serializeError(err: Error): Record<string, unknown> {
 	return out;
 }
 
-/** Recursive depth-limited redaction walk. Never throws on odd inputs. */
+/**
+ * Recursive depth-limited redaction walk. Handles cycles and exotic types, but
+ * throwing getters or toJSON() propagate; log() catches them.
+ */
 export function redactValue(
 	value: unknown,
 	extraNames: string[] = [],

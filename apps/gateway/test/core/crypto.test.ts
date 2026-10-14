@@ -84,6 +84,31 @@ describe("crypto", () => {
 		).rejects.toThrow(/unknown key id/);
 	});
 
+	it("decrypts current-key secrets even if the previous key is malformed", async () => {
+		const env: SecretsEnv = { SECRETS_KEY: randomKeyB64() };
+		const stored = await encryptSecret(env, "s3cr3t", "ctx");
+		await expect(
+			decryptSecret(
+				{ ...env, SECRETS_KEY_PREVIOUS: "!!!not-base64!!!" },
+				stored,
+				"ctx",
+			),
+		).resolves.toBe("s3cr3t");
+		// A previous-key ciphertext still surfaces the bad config loudly.
+		const other = await encryptSecret(
+			{ SECRETS_KEY: randomKeyB64() },
+			"s3cr3t",
+			"ctx",
+		);
+		await expect(
+			decryptSecret(
+				{ ...env, SECRETS_KEY_PREVIOUS: "!!!not-base64!!!" },
+				other,
+				"ctx",
+			),
+		).rejects.toBeInstanceOf(SecretKeyError);
+	});
+
 	it("fails on an unknown kid", async () => {
 		const envA: SecretsEnv = { SECRETS_KEY: randomKeyB64() };
 		const envB: SecretsEnv = { SECRETS_KEY: randomKeyB64() };
