@@ -69,18 +69,25 @@ D1 is the source of truth. The queue is only a transport, so the reconciler can 
 
 ### 1. Create Cloudflare resources
 
-Each deployment is one isolated environment. To run staging and production, repeat these steps with different names.
+Each deployment is one isolated environment. For another independent deployment, use a separate copy of `wrangler.jsonc` with its own resource names and IDs.
 
 ```bash
 wrangler d1 create hookflare
-wrangler r2 bucket create hookflare-payloads
-wrangler queues create hookflare-deliveries
-wrangler queues create hookflare-deliveries-dlq
 ```
 
-Copy the resulting IDs into `wrangler.toml`.
+(Queues and R2 buckets are created by later milestones when they are first used.)
+
+Copy the resulting `database_id` into `apps/gateway/wrangler.jsonc`.
 
 ### 2. Configure secrets
+
+`SECRETS_KEY` is 32 random bytes, base64-encoded. Generate one with:
+
+```bash
+openssl rand -base64 32
+```
+
+Then store it (and the bootstrap admin list) as Worker secrets:
 
 ```bash
 wrangler secret put SECRETS_KEY              # key that encrypts stored secrets
@@ -91,14 +98,14 @@ Also set `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` (the Access application audience 
 
 ### 3. Protect the dashboard with Cloudflare Access
 
-Create an Access application that covers the dashboard (`/`) and the admin API (`/api/admin/*`). Leave `/in/*` **public**, because webhook providers must be able to reach it.
+Create an Access application that covers the dashboard (`/`) and the admin API (`/api/admin/*`). Bypass (leave public) `/in/*` and `/healthz`, because webhook providers and uptime monitors must be able to reach them without logging in.
 
 ### 4. Migrate and deploy
 
 ```bash
 pnpm install
 wrangler d1 migrations apply hookflare --remote
-pnpm deploy
+pnpm run deploy
 ```
 
 ### 5. Receive your first webhook
@@ -125,7 +132,7 @@ Return any `2xx` to acknowledge. Return `429` (optionally with `Retry-After`) or
 
 | Milestone | Scope | Status |
 |---|---|---|
-| **M0: Foundation** | Monorepo, Wrangler config, migrations, CI | Planned |
+| **M0: Foundation** | Monorepo, Wrangler config, migrations, CI | Done |
 | **M1: Core pipeline** | Ingress, D1 ledger, queue, single-shot delivery, signing, SSRF guard | Planned |
 | **M2: Reliability** | Retries, dead letter, idempotency, R2 payloads, reconciler, pause/resume | Planned |
 | **M3: Admin API & security** | Access + RBAC, audit log, replay, test delivery, secret rotation | Planned |

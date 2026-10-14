@@ -196,7 +196,7 @@ M0 ─▶ M1 ─▶ M2 ─▶ M3 ─┬─▶ M4 ─┬─▶ M6
 ```
 
 ### M0 — Foundation
-- **Scope:** pnpm monorepo; `apps/gateway` (Hono) with a `wrangler.toml` holding one environment per deployment; D1 migration tooling; prefixed IDs; AES-GCM secret encryption; logger with redaction; CI (typecheck, lint, test); `vitest-pool-workers` setup.
+- **Scope:** pnpm monorepo; `apps/gateway` (Hono) with a `wrangler.jsonc` holding one environment per deployment; D1 migration tooling; prefixed IDs; AES-GCM secret encryption; logger with redaction; CI (typecheck, lint, test); `vitest-pool-workers` setup.
 - **Exit:** CI is green; an empty Worker with `/healthz` deploys; migrations run on both local and remote D1.
 
 ### M1 — Core pipeline
