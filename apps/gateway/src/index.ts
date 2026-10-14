@@ -1,5 +1,7 @@
-import app from "./app";
+import { createApp } from "./app";
+
+const app = createApp();
 
 export default {
-	fetch: (...args: Parameters<typeof app.fetch>) => app.fetch(...args),
-};
+	fetch: app.fetch,
+} satisfies ExportedHandler<Env>;

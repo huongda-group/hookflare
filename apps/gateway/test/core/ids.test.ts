@@ -60,4 +60,27 @@ describe("ids", () => {
 		// @ts-expect-error - intentionally invalid prefix
 		expect(() => newId("nope")).toThrow(/invalid id prefix/);
 	});
+
+	it("decodes the ULID spec example timestamp", () => {
+		expect(idTimestamp("evt_01ARYZ6S41TSV4RRFFQ69G5FAV")).toBe(1469918176385);
+	});
+
+	it("stays strictly increasing when the clock moves backwards", () => {
+		const t = Date.now() + 60_000;
+		const a = newId("evt", t);
+		const b = newId("evt", t - 5_000);
+		const c = newId("evt", t - 10_000);
+		expect(b > a).toBe(true);
+		expect(c > b).toBe(true);
+		expect(idTimestamp(b)).toBe(t);
+	});
+
+	it("rejects ids whose timestamp exceeds 48 bits", () => {
+		expect(isId("evt_81ARZ3NDEKTSV4RRFFQ69G5FAV")).toBe(false);
+		expect(isId("evt_7ZZZZZZZZZZZZZZZZZZZZZZZZZ")).toBe(true);
+	});
+
+	it("does not echo untrusted input in the idTimestamp error", () => {
+		expect(() => idTimestamp("<script>")).toThrow(/^invalid id$/);
+	});
 });

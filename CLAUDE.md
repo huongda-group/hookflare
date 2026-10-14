@@ -22,12 +22,12 @@ All commands run from the repository root.
 | `pnpm test` | Vitest for every workspace |
 | `pnpm typecheck` | `tsc --noEmit` for every workspace |
 | `pnpm lint` / `pnpm format` | `biome check` / `biome check --write` |
-| `pnpm cf-typegen` | `wrangler types` (regenerates `worker-configuration.d.ts`) |
+| `pnpm cf-typegen` | `wrangler types --strict-vars=false` (regenerates the committed `worker-configuration.d.ts`; run it without a local `.dev.vars`, or local secrets end up in `Env` and CI fails its staleness check) |
 | `pnpm db:migrate:local` | `wrangler d1 migrations apply DB --local` |
 | `pnpm db:migrate:remote` | `wrangler d1 migrations apply DB --remote` |
 | `pnpm run deploy` | `db:migrate:remote`, then `wrangler deploy` |
 
-To run a single test: `pnpm --filter gateway test -- test/core/ids.test.ts -t "monotonic"`.
+To run a single test: `pnpm --filter gateway exec vitest run test/core/ids.test.ts -t "strictly increasing"`.
 
 > `pnpm deploy` is a built-in pnpm command, so the deploy script must be invoked as **`pnpm run deploy`**.
 

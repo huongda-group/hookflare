@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { SecretsEnv } from "../../src/core/crypto";
 import {
+	DecryptError,
 	decryptSecret,
 	encryptSecret,
+	SecretKeyError,
 	secretFingerprint,
 } from "../../src/core/crypto";
 
@@ -119,5 +121,57 @@ describe("crypto", () => {
 		expect(a).toMatch(/^[0-9a-f]{8}$/);
 		const c = await secretFingerprint("different-value");
 		expect(c).not.toBe(a);
+	});
+
+	it("classifies failures as DecryptError or SecretKeyError", async () => {
+		const env: SecretsEnv = { SECRETS_KEY: randomKeyB64() };
+		const stored = await encryptSecret(env, "s3cr3t", "ctx");
+		await expect(decryptSecret(env, stored, "other")).rejects.toBeInstanceOf(
+			DecryptError,
+		);
+		await expect(decryptSecret(env, "garbage", "ctx")).rejects.toBeInstanceOf(
+			DecryptError,
+		);
+		await expect(
+			encryptSecret({ SECRETS_KEY: "short" }, "x", "ctx"),
+		).rejects.toBeInstanceOf(SecretKeyError);
+	});
+
+	it("rejects truncated or corrupted ciphertext with DecryptError", async () => {
+		const env: SecretsEnv = { SECRETS_KEY: randomKeyB64() };
+		const stored = await encryptSecret(env, "s3cr3t", "ctx");
+		const [v, kid, iv, ct] = stored.split(".") as [
+			string,
+			string,
+			string,
+			string,
+		];
+		for (const bad of [
+			`${v}.${kid}.${iv}.${ct.slice(0, 4)}`,
+			`${v}.${kid}.${iv.slice(0, 2)}.${ct}`,
+			`${v}.${kid}.@@@@.${ct}`,
+			`${v}.${kid}.${iv}.${ct}x`,
+		]) {
+			await expect(decryptSecret(env, bad, "ctx")).rejects.toBeInstanceOf(
+				DecryptError,
+			);
+		}
+	});
+
+	it("accepts a key with surrounding whitespace (e.g. a trailing newline)", async () => {
+		const key = randomKeyB64();
+		const stored = await encryptSecret({ SECRETS_KEY: key }, "s3cr3t", "ctx");
+		await expect(
+			decryptSecret({ SECRETS_KEY: `  ${key}\n` }, stored, "ctx"),
+		).resolves.toBe("s3cr3t");
+	});
+
+	it("never echoes a malformed key in the error message", async () => {
+		const badKey = "my-very-private-but-broken-key!!";
+		const err = await encryptSecret({ SECRETS_KEY: badKey }, "x", "ctx").catch(
+			(e: unknown) => e,
+		);
+		expect(err).toBeInstanceOf(SecretKeyError);
+		expect((err as Error).message).not.toContain(badKey);
 	});
 });

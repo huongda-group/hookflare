@@ -18,7 +18,7 @@
 - `apps/gateway`: Hono app skeleton, `wrangler.jsonc`, `/healthz`, error and not-found handlers.
 - D1 migration tooling and the first migration (`settings` table).
 - `core/` building blocks: prefixed ULIDs, AES-GCM secret encryption, structured logger with redaction.
-- Vitest + `@cloudflare/vitest-pool-workers` test setup, with migrations applied in tests.
+- Vitest + `@cloudflare/vitest-plugin` test setup, with migrations applied in tests.
 - GitHub Actions CI.
 - Docs: the Commands section of `CLAUDE.md`, and Getting started in `README.md`.
 
@@ -49,7 +49,7 @@ There is **one deployment and one environment** (DEC-1). The repository commits 
 ├── pnpm-workspace.yaml       # apps/*, packages/*
 ├── tsconfig.base.json        # strict, ES2022+, moduleResolution "bundler"
 ├── biome.json                # lint + format
-├── .nvmrc                    # Node LTS
+├── .nvmrc                    # Node LTS (24)
 ├── .github/workflows/ci.yml
 └── apps/gateway/
     ├── package.json
@@ -80,7 +80,7 @@ Module directories `ingress/`, `delivery/`, `admin/`, and `jobs/` are created by
 | Wrangler config | `wrangler.jsonc` | Cloudflare's recommended format for new projects; it allows comments |
 | Binding types | `wrangler types` → committed `worker-configuration.d.ts` | Keeps `Env` in sync with config; CI fails if it is stale |
 | Lint + format | Biome | One fast tool, zero plugin setup |
-| Tests | Vitest + `@cloudflare/vitest-pool-workers` | Runs in workerd with real local D1 (DEC-8) |
+| Tests | Vitest + `@cloudflare/vitest-plugin` (successor of `vitest-pool-workers`) | Runs in workerd with real local D1 (DEC-8) |
 | CI | GitHub Actions | Repo is hosted on GitHub; CI only, no CD in M0 |
 | Dependency versions | Latest stable at scaffold time, locked by `pnpm-lock.yaml` | No version is fixed in this spec |
 
@@ -94,12 +94,14 @@ All commands run from the repository root.
 | `pnpm test` | Vitest for every workspace |
 | `pnpm typecheck` | `tsc --noEmit` for every workspace |
 | `pnpm lint` / `pnpm format` | `biome check` / `biome check --write` |
-| `pnpm cf-typegen` | `wrangler types` (regenerates `worker-configuration.d.ts`) |
+| `pnpm cf-typegen` | `wrangler types --strict-vars=false` (regenerates `worker-configuration.d.ts`) |
 | `pnpm db:migrate:local` | `wrangler d1 migrations apply DB --local` |
 | `pnpm db:migrate:remote` | `wrangler d1 migrations apply DB --remote` |
 | `pnpm run deploy` | `db:migrate:remote`, then `wrangler deploy` |
 
-To run a single test: `pnpm --filter gateway test -- test/core/ids.test.ts -t "monotonic"`.
+To run a single test: `pnpm --filter gateway exec vitest run test/core/ids.test.ts -t "strictly increasing"`.
+
+> Run `cf-typegen` without a local `.dev.vars`: `wrangler types` also reads `.dev.vars`, and secrets found there would leak into the committed `Env`, failing the CI staleness check.
 
 > `pnpm deploy` is a built-in pnpm command, so the deploy script must be invoked as **`pnpm run deploy`**. The README is corrected to match.
 
@@ -122,7 +124,7 @@ All JSON error bodies use the shape `{"error": "<snake_case_code>", ...}`, which
 - Format: `<prefix>_<ULID>`, for example `evt_01JA2X3Y4Z5W6V7U8T9S0R1Q2P`. A ULID is 26 Crockford base32 characters: a 48-bit ms timestamp plus 80 random bits from `crypto.getRandomValues`.
 - **Monotonic within an isolate:** when the same millisecond repeats, the random part is incremented, so IDs from one isolate always sort in creation order. Across isolates, ordering is only by millisecond, which is enough for cursor pagination.
 - Allowed prefixes form a closed union type: `prj`, `src`, `dst`, `evt`, `dlv`, `att`, `aud`, `alr`. Adding one is a code change.
-- API: `newId(prefix)`, `isId(value, prefix?)` (validates format), `idTimestamp(id)` (ms epoch, used for time-bounded queries).
+- API: `newId(prefix, nowMs?)` (`nowMs` is injectable for tests; on a clock regression the last timestamp is held so IDs stay increasing), `isId(value, prefix?)` (validates format), `idTimestamp(id)` (ms epoch, used for time-bounded queries).
 - Implemented in-house (about 60 lines) rather than adding a dependency.
 
 ### 8.2 Secret encryption — `core/crypto.ts`
@@ -132,16 +134,19 @@ All JSON error bodies use the shape `{"error": "<snake_case_code>", ...}`, which
 - **Rotation:** an optional `SECRETS_KEY_PREVIOUS` secret is used for decryption only. Re-encrypting old rows is a later admin job; M0 only needs decryption to try both keys.
 - Stored format (a string in a TEXT column): `v1.<kid>.<iv>.<ciphertext>`, all base64url. `kid` is the first 8 hex characters of SHA-256(key), so decryption picks the right key without trial and error.
 - **AAD binds a ciphertext to its location:** callers pass a context string such as `sources.secret_enc:src_01J…`. Copying an encrypted secret into another row or column then fails to decrypt.
+- Errors: `SecretKeyError` (missing or malformed key, a config problem) and `DecryptError` (malformed, tampered, wrong-context, or unknown-`kid` ciphertext). Key material is never included in error messages; surrounding whitespace in the key is ignored.
 - API: `encryptSecret(env, plaintext, context)`, `decryptSecret(env, stored, context)`, `secretFingerprint(plaintext)` (the first 8 hex characters of SHA-256, shown in the UI after creation per roadmap §8).
 - Imported `CryptoKey`s are cached per isolate.
 
 ### 8.3 Structured logging — `core/log.ts`
 
-- One JSON object per line via `console.log`/`console.error`: `{ "level", "msg", "request_id"?, ...fields }`. Levels: `debug`, `info`, `warn`, `error`. The minimum level comes from the `LOG_LEVEL` var (default `info`).
+- One JSON object per line via `console.log`/`console.warn`/`console.error` (by level): `{ "level", "msg", "request_id"?, ...fields }`. Levels: `debug`, `info`, `warn`, `error`. The minimum level comes from the `LOG_LEVEL` var (default `info`).
 - `msg` uses dotted, stable event names (`health.d1_failed`, later `ingress.accepted`, …) so logs can be filtered.
 - **Redaction runs on every log call:** fields are walked recursively (depth-limited), and any value whose key matches the sensitive pattern (`authorization`, `cookie`, `set-cookie`, `secret`, `token`, `password`, `signature`, `api-key`/`api_key`/`apikey`, `x-api-key`) is replaced with `"[REDACTED]"`. Matching is case-insensitive.
 - `redactHeaders(headers, extraNames)` is exported as well. M1 reuses it with the same list for the header denylist (roadmap §7.1), so logging and storage share one source of truth.
-- `Error` values are serialized as `{name, message, stack}`. Stacks only go to logs.
+- `Error` values are serialized as `{name, message, stack}`. Stacks only go to logs. `BigInt`, `Date`, `Map`, `Set`, `URL`, and circular references are serialized safely; fields can never override `level` or `msg`.
+- Logging never throws: if serialization fails, a `log_error` line is emitted instead.
+- The app middleware binds a per-request logger carrying `request_id` (`cf-ray`, or a random UUID locally); `/healthz` and `onError` log through it.
 
 ## 9. First migration
 
@@ -162,15 +167,15 @@ The migration has no seed rows: code holds the defaults, and a row exists only w
 
 ## 10. Testing
 
-- `vitest.config.ts` uses the pool-workers integration with `wrangler.jsonc` and reads `migrations/`. A setup file applies the migrations to the test D1 before each test file. The exact API follows the current `@cloudflare/vitest-pool-workers` docs at scaffold time.
+- `vitest.config.ts` uses `cloudflareTest()` from `@cloudflare/vitest-plugin` with `wrangler.jsonc` and reads `migrations/`. A setup file applies the migrations to the test D1 before each test.
 - Test bindings set `SECRETS_KEY`/`SECRETS_KEY_PREVIOUS` to fixed test keys.
 
 | Area | Tests |
 |---|---|
-| `ids` | format and prefix validation; 10k IDs in a tight loop are strictly increasing; `idTimestamp` round-trips; invalid IDs are rejected |
-| `crypto` | round-trip; wrong context fails; tampered ciphertext fails; a value encrypted with the previous key decrypts after rotation; an unknown `kid` fails; a malformed key gives a clear error; a stable fingerprint |
-| `log` | nested sensitive keys are redacted, regardless of case; non-sensitive fields are untouched; `Error` serialization; level filtering |
-| `app` | `/healthz` returns 200 with migrations applied; `/healthz` returns 503 when the D1 query throws; unknown routes return 404 JSON; a thrown error returns 500 without leaking its message |
+| `ids` | format and prefix validation; 10k IDs in a tight loop are strictly increasing; a backwards clock keeps IDs increasing; the ULID spec vector decodes; `idTimestamp` round-trips; invalid IDs are rejected |
+| `crypto` | round-trip; wrong context fails; tampered ciphertext fails; a value encrypted with the previous key decrypts after rotation; an unknown `kid` fails; truncated/corrupted ciphertext throws `DecryptError`; a key with surrounding whitespace works; a malformed key gives a clear `SecretKeyError` that never echoes the key; a stable fingerprint |
+| `log` | nested sensitive keys are redacted, regardless of case; non-sensitive fields are untouched; `Error` serialization; level filtering; `BigInt`/circular/`Date`/`Map` values; fields cannot override `level`/`msg`; a throwing getter never makes logging throw |
+| `app` | `/healthz` returns 200 with migrations applied; `/healthz` returns 503 when the D1 query throws or hangs past the timeout; unknown routes return 404 JSON; a thrown error returns 500 without leaking its message |
 
 ## 11. CI — `.github/workflows/ci.yml`
 

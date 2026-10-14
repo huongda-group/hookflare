@@ -69,7 +69,8 @@ function isValidPrefix(prefix: string): prefix is IdPrefix {
 }
 
 function isValidUlid(ulid: string): boolean {
-	if (ulid.length !== ULID_LEN) {
+	// First char must be 0-7: anything higher exceeds the 48-bit timestamp.
+	if (ulid.length !== ULID_LEN || !/^[0-7]/.test(ulid)) {
 		return false;
 	}
 	for (const ch of ulid) {
@@ -80,16 +81,19 @@ function isValidUlid(ulid: string): boolean {
 	return true;
 }
 
-/** Generate a new `<prefix>_<ULID>` id, monotonically increasing per isolate. */
-export function newId(prefix: IdPrefix): string {
+/**
+ * Generate a new `<prefix>_<ULID>` id, monotonically increasing per isolate.
+ * `nowMs` is injectable for tests; production callers omit it.
+ */
+export function newId(prefix: IdPrefix, nowMs: number = Date.now()): string {
 	if (!isValidPrefix(prefix)) {
 		throw new Error(
 			`invalid id prefix "${prefix}"; expected one of ${ID_PREFIXES.join(", ")}`,
 		);
 	}
-	let now = Date.now();
-	if (now > MAX_TIME) {
-		throw new Error("clock exceeds ULID 48-bit timestamp range");
+	let now = nowMs;
+	if (!Number.isInteger(now) || now < 0 || now > MAX_TIME) {
+		throw new Error("timestamp outside the ULID 48-bit range");
 	}
 	if (now < lastMs) {
 		// Clock moved backwards: hold the last timestamp to stay monotonic.
@@ -101,7 +105,7 @@ export function newId(prefix: IdPrefix): string {
 			// clock forward 1ms so ordering is still strictly increasing.
 			now = lastMs + 1;
 			if (now > MAX_TIME) {
-				throw new Error("clock exceeds ULID 48-bit timestamp range");
+				throw new Error("timestamp outside the ULID 48-bit range");
 			}
 			lastMs = now;
 			crypto.getRandomValues(lastRand);
@@ -136,7 +140,8 @@ export function isId(value: unknown, prefix?: IdPrefix): boolean {
 /** Extract the millisecond epoch timestamp embedded in an id. Throws if invalid. */
 export function idTimestamp(id: string): number {
 	if (!isId(id)) {
-		throw new Error(`invalid id "${typeof id === "string" ? id : typeof id}"`);
+		// Do not echo the input: ids often come from untrusted requests.
+		throw new Error("invalid id");
 	}
 	const ulid = id.slice(id.indexOf("_") + 1);
 	const timePart = ulid.slice(0, TIME_LEN);

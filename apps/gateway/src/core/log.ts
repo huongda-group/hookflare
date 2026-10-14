@@ -89,6 +89,9 @@ export function redactValue(
 		if (obj instanceof Error) {
 			return serializeError(obj);
 		}
+		if (obj instanceof Date) {
+			return Number.isNaN(obj.getTime()) ? "Invalid Date" : obj.toISOString();
+		}
 		if (obj instanceof Headers) {
 			const asRecord: Record<string, string> = {};
 			obj.forEach((v, k) => {
@@ -101,8 +104,28 @@ export function redactValue(
 				redactValue(item, extraNames, depth + 1, seenSet),
 			);
 		}
-		if (ArrayBuffer.isView(obj)) {
+		if (ArrayBuffer.isView(obj) || obj instanceof ArrayBuffer) {
 			return "[BINARY]";
+		}
+		if (obj instanceof Map) {
+			return redactValue(
+				Object.fromEntries(
+					Array.from(obj, ([k, v]) => [String(k), v] as const),
+				),
+				extraNames,
+				depth,
+				seenSet,
+			);
+		}
+		if (obj instanceof Set) {
+			return redactValue(Array.from(obj), extraNames, depth, seenSet);
+		}
+		if (obj instanceof URL) {
+			return obj.toString();
+		}
+		const toJSON = (obj as { toJSON?: unknown }).toJSON;
+		if (typeof toJSON === "function") {
+			return redactValue(toJSON.call(obj), extraNames, depth + 1, seenSet);
 		}
 		const extra = new Set(extraNames.map((n) => n.toLowerCase()));
 		const extraNorm = new Set(extraNames.map((n) => normalizeKey(n)));
@@ -182,20 +205,38 @@ export function log(
 	if (!shouldLog(level, env)) {
 		return;
 	}
-	const redacted = redactValue(fields) as LogFields;
-	const line = JSON.stringify({ level, msg, ...redacted });
+	let line: string;
+	try {
+		const redacted = redactValue(fields) as LogFields;
+		// level and msg come last so fields can never override them.
+		line = JSON.stringify({ ...redacted, level, msg });
+	} catch (err) {
+		// Logging must never throw (e.g. a getter that throws, a Proxy).
+		line = JSON.stringify({
+			level: "error",
+			msg: "log_error",
+			original_msg: msg,
+			error: err instanceof Error ? err.name : "unknown",
+		});
+		console.error(line);
+		return;
+	}
 	if (level === "error") {
 		console.error(line);
+	} else if (level === "warn") {
+		console.warn(line);
 	} else {
 		console.log(line);
 	}
 }
 
+export type Logger = Record<
+	LogLevel,
+	(msg: string, fields?: LogFields) => void
+>;
+
 /** Logger with env (and optional base fields like request_id) bound. */
-export function createLogger(
-	env?: LogEnv,
-	baseFields: LogFields = {},
-): Record<LogLevel, (msg: string, fields?: LogFields) => void> {
+export function createLogger(env?: LogEnv, baseFields: LogFields = {}): Logger {
 	const withBase =
 		(level: LogLevel) =>
 		(msg: string, fields: LogFields = {}) => {

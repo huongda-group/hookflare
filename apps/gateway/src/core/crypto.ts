@@ -3,6 +3,16 @@ export type SecretsEnv = {
 	SECRETS_KEY_PREVIOUS?: string;
 };
 
+/** SECRETS_KEY / SECRETS_KEY_PREVIOUS is missing or malformed (a config error). */
+export class SecretKeyError extends Error {
+	override name = "SecretKeyError";
+}
+
+/** A stored secret is malformed, tampered, bound to another context, or uses an unknown key. */
+export class DecryptError extends Error {
+	override name = "DecryptError";
+}
+
 const KEY_BYTES = 32;
 const IV_BYTES = 12;
 const KID_LEN = 8;
@@ -68,12 +78,12 @@ async function loadKey(b64: string, label: string): Promise<LoadedKey> {
 	try {
 		raw = b64ToBytes(b64);
 	} catch {
-		throw new Error(
+		throw new SecretKeyError(
 			`${label} is not valid base64; generate one with: openssl rand -base64 32`,
 		);
 	}
 	if (raw.length !== KEY_BYTES) {
-		throw new Error(
+		throw new SecretKeyError(
 			`${label} must decode to ${KEY_BYTES} bytes (got ${raw.length}); generate one with: openssl rand -base64 32`,
 		);
 	}
@@ -102,7 +112,7 @@ export async function encryptSecret(
 	context: string,
 ): Promise<string> {
 	if (!env?.SECRETS_KEY) {
-		throw new Error(
+		throw new SecretKeyError(
 			"SECRETS_KEY is not configured; generate one with: openssl rand -base64 32",
 		);
 	}
@@ -128,10 +138,10 @@ export async function decryptSecret(
 	context: string,
 ): Promise<string> {
 	if (!env?.SECRETS_KEY) {
-		throw new Error("SECRETS_KEY is not configured");
+		throw new SecretKeyError("SECRETS_KEY is not configured");
 	}
 	if (typeof stored !== "string") {
-		throw new Error(
+		throw new DecryptError(
 			"malformed encrypted secret: expected v1.<kid>.<iv>.<ciphertext>",
 		);
 	}
@@ -143,7 +153,7 @@ export async function decryptSecret(
 		!parts[2] ||
 		!parts[3]
 	) {
-		throw new Error(
+		throw new DecryptError(
 			"malformed encrypted secret: expected v1.<kid>.<iv>.<ciphertext>",
 		);
 	}
@@ -154,7 +164,7 @@ export async function decryptSecret(
 		iv = b64urlToBytes(ivPart);
 		ct = b64urlToBytes(ctPart);
 	} catch {
-		throw new Error(
+		throw new DecryptError(
 			"malformed encrypted secret: iv and ciphertext must be base64url",
 		);
 	}
@@ -168,7 +178,7 @@ export async function decryptSecret(
 	}
 	const match = candidates.find((c) => c.kid === kid);
 	if (!match) {
-		throw new Error(
+		throw new DecryptError(
 			`cannot decrypt secret: unknown key id "${kid}" (not current or previous key)`,
 		);
 	}
@@ -181,7 +191,7 @@ export async function decryptSecret(
 		);
 		return new TextDecoder().decode(pt);
 	} catch {
-		throw new Error(
+		throw new DecryptError(
 			"failed to decrypt secret: wrong context, tampered data, or wrong key",
 		);
 	}

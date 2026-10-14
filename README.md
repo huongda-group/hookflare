@@ -54,7 +54,7 @@ D1 is the source of truth. The queue is only a transport, so the reconciler can 
 - **Storage:** Cloudflare D1 (ledger), R2 (large payloads and archives), Queues (delivery), Durable Objects (per-destination limiter)
 - **Auth:** Cloudflare Access + server-side RBAC
 - **Dashboard:** React, Vite, Tailwind CSS, TanStack Router / Query
-- **Tooling:** pnpm workspaces, Wrangler, Vitest with `@cloudflare/vitest-pool-workers`
+- **Tooling:** pnpm workspaces, Wrangler, Vitest with `@cloudflare/vitest-plugin`
 
 ## Getting started
 
@@ -72,12 +72,14 @@ D1 is the source of truth. The queue is only a transport, so the reconciler can 
 Each deployment is one isolated environment. For another independent deployment, use a separate copy of `wrangler.jsonc` with its own resource names and IDs.
 
 ```bash
-wrangler d1 create hookflare
+pnpm exec wrangler d1 create hookflare
 ```
 
 (Queues and R2 buckets are created by later milestones when they are first used.)
 
 Copy the resulting `database_id` into `apps/gateway/wrangler.jsonc`.
+
+Run Wrangler from the repository root with `pnpm exec wrangler … --config apps/gateway/wrangler.jsonc`, or `cd apps/gateway` first.
 
 ### 2. Configure secrets
 
@@ -87,14 +89,15 @@ Copy the resulting `database_id` into `apps/gateway/wrangler.jsonc`.
 openssl rand -base64 32
 ```
 
-Then store it (and the bootstrap admin list) as Worker secrets:
+Then store it as a Worker secret (run from the repository root):
 
 ```bash
-wrangler secret put SECRETS_KEY              # key that encrypts stored secrets
-wrangler secret put BOOTSTRAP_ADMIN_EMAILS   # comma-separated emails that become Admin on first login
+pnpm exec wrangler secret put SECRETS_KEY --config apps/gateway/wrangler.jsonc
 ```
 
-Also set `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` (the Access application audience tag) so the Worker can verify Access JWTs.
+For local development, copy `apps/gateway/.dev.vars.example` to `apps/gateway/.dev.vars` and fill in a key.
+
+(The Access-related settings, `BOOTSTRAP_ADMIN_EMAILS`, `ACCESS_TEAM_DOMAIN`, and `ACCESS_AUD`, arrive with the admin API in M3.)
 
 ### 3. Protect the dashboard with Cloudflare Access
 
@@ -104,11 +107,11 @@ Create an Access application that covers the dashboard (`/`) and the admin API (
 
 ```bash
 pnpm install
-wrangler d1 migrations apply hookflare --remote
-pnpm run deploy
+pnpm run deploy   # applies remote D1 migrations, then deploys the Worker
+curl https://<your-worker-domain>/healthz   # {"status":"ok","version":"..."}
 ```
 
-### 5. Receive your first webhook
+### 5. Receive your first webhook (from M1/M3)
 
 1. Sign in to the dashboard with a bootstrap admin email.
 2. Create a **project**, a **destination** (your backend URL), and a **source** that points to it.
@@ -148,7 +151,7 @@ Hookflare is deliberately **not** an integration platform. The following are out
 
 ## Contributing
 
-The project is in its design phase, and feedback on the [roadmap](docs/superpowers/specs/2026-10-14-hookflare-roadmap.md) is very welcome. Please open an issue to discuss a change before you send a pull request.
+The project is in early development (M0 done, M1 next), and feedback on the [roadmap](docs/superpowers/specs/2026-10-14-hookflare-roadmap.md) is very welcome. Please open an issue to discuss a change before you send a pull request.
 
 ## License
 

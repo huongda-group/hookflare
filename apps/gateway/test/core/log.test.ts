@@ -8,10 +8,12 @@ function lastJson(spy: ReturnType<typeof vi.spyOn>): Record<string, unknown> {
 }
 
 const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
 afterEach(() => {
 	logSpy.mockClear();
+	warnSpy.mockClear();
 	errorSpy.mockClear();
 });
 
@@ -91,7 +93,7 @@ describe("log", () => {
 		log("info", "test.info", {}, { LOG_LEVEL: "warn" });
 		expect(logSpy).not.toHaveBeenCalled();
 		log("warn", "test.warn", {}, { LOG_LEVEL: "warn" });
-		expect(logSpy).toHaveBeenCalledTimes(1);
+		expect(warnSpy).toHaveBeenCalledTimes(1);
 		log("error", "test.error", {}, { LOG_LEVEL: "warn" });
 		expect(errorSpy).toHaveBeenCalledTimes(1);
 
@@ -127,5 +129,54 @@ describe("log", () => {
 		expect(
 			redactHeaders({ "X-Tenant": "t_1", "x-custom": "v" }, ["x-custom"]),
 		).toEqual({ "x-tenant": "t_1", "x-custom": "[REDACTED]" });
+	});
+
+	it("never lets fields override level or msg", () => {
+		log("error", "real.msg", { level: "debug", msg: "spoofed" });
+		expect(lastJson(errorSpy)).toMatchObject({
+			level: "error",
+			msg: "real.msg",
+		});
+	});
+
+	it("serializes BigInt, circular refs, Date, Map, Set, and URL", () => {
+		const circular: Record<string, unknown> = { name: "loop" };
+		circular.self = circular;
+		expect(() =>
+			log("info", "test.odd", {
+				big: 10n ** 20n,
+				circular,
+				at: new Date(0),
+				map: new Map([
+					["token", "t-1"],
+					["k", "v"],
+				]),
+				set: new Set([1, 2]),
+				url: new URL("https://example.com/a"),
+			}),
+		).not.toThrow();
+		const line = lastJson(logSpy);
+		expect(line).toMatchObject({
+			big: "100000000000000000000",
+			circular: { name: "loop", self: "[CIRCULAR]" },
+			at: "1970-01-01T00:00:00.000Z",
+			map: { token: "[REDACTED]", k: "v" },
+			set: [1, 2],
+			url: "https://example.com/a",
+		});
+	});
+
+	it("never throws, even when a getter throws", () => {
+		const evil = {
+			get boom(): string {
+				throw new Error("getter exploded");
+			},
+		};
+		expect(() => log("info", "test.evil", { evil })).not.toThrow();
+		expect(lastJson(errorSpy)).toMatchObject({
+			level: "error",
+			msg: "log_error",
+			original_msg: "test.evil",
+		});
 	});
 });
