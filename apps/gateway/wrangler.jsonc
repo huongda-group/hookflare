@@ -1,0 +1,22 @@
+{
+	"$schema": "../../node_modules/wrangler/config-schema.json",
+	"name": "hookflare",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-10-14",
+	"compatibility_flags": ["nodejs_compat"],
+	"observability": {
+		"enabled": true
+	},
+	"version_metadata": {
+		"binding": "CF_VERSION_METADATA"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "hookflare",
+			// Placeholder: fill in with the real ID after `wrangler d1 create hookflare`.
+			// Any non-empty string works for local dev and tests (local D1).
+			"database_id": "PLACEHOLDER_RUN_WRANGLER_D1_CREATE"
+		}
+	]
+}

@@ -2,5 +2,16 @@
 	"name": "gateway",
 	"private": true,
 	"version": "0.0.0",
-	"type": "module"
+	"type": "module",
+	"scripts": {
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"hono": "^4.13.13"
+	},
+	"devDependencies": {
+		"@cloudflare/workers-types": "^5.20261013.1",
+		"typescript": "7.0.2",
+		"vitest": "^5.0.4"
+	}
 }
