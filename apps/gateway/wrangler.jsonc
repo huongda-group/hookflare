@@ -1,0 +1,27 @@
+{
+	"$schema": "../../node_modules/wrangler/config-schema.json",
+	"name": "hookflare",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-10-14",
+	"compatibility_flags": ["nodejs_compat"],
+	"observability": {
+		"enabled": true
+	},
+	"vars": {
+		// debug | info | warn | error
+		"LOG_LEVEL": "info"
+	},
+	"version_metadata": {
+		"binding": "CF_VERSION_METADATA"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "hookflare",
+			// Production D1 database. A fork or separate deployment must replace this
+			// with its own ID from `wrangler d1 create hookflare`. Local dev and tests
+			// use local D1 and never contact it.
+			"database_id": "29d2c40d-c643-4a67-bba1-ccd2e5c04bc1"
+		}
+	]
+}

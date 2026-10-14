@@ -1,0 +1,21 @@
+{
+	"name": "hookflare",
+	"private": true,
+	"packageManager": "pnpm@12.11.2",
+	"scripts": {
+		"dev": "wrangler dev --config apps/gateway/wrangler.jsonc",
+		"test": "pnpm --recursive --if-present run test",
+		"typecheck": "pnpm --recursive --if-present run typecheck",
+		"lint": "biome check .",
+		"format": "biome check --write .",
+		"cf-typegen": "wrangler types --strict-vars=false --config apps/gateway/wrangler.jsonc apps/gateway/worker-configuration.d.ts",
+		"db:migrate:local": "wrangler d1 migrations apply DB --local --config apps/gateway/wrangler.jsonc",
+		"db:migrate:remote": "wrangler d1 migrations apply DB --remote --config apps/gateway/wrangler.jsonc",
+		"deploy": "pnpm db:migrate:remote && wrangler deploy --config apps/gateway/wrangler.jsonc"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.5.15",
+		"typescript": "7.0.2",
+		"wrangler": "4.151.0"
+	}
+}

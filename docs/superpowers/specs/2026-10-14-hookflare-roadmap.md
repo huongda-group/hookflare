@@ -21,7 +21,7 @@ This roadmap covers features and their dependency order only. It does not cover 
 | DEC-5 | RBAC | A `users` table in D1, keyed by the email from the Access JWT. The first admin comes from `BOOTSTRAP_ADMIN_EMAILS`. Deny by default. Roles are **global** (Admin / Operator / Viewer). |
 | DEC-6 | Alerting | A generic outbound webhook (works with Slack/Discord/Google Chat incoming webhooks), plus display on the dashboard. One incident per (rule, resource) pair, with cooldown and auto-resolve. |
 | DEC-7 | Topology | **A single Worker** with a `fetch` handler (ingress, admin API, dashboard static assets), a `queue` handler (main + DLQ), and a `scheduled` handler (jobs). Strict module boundaries keep it possible to split ingress into its own Worker later. |
-| DEC-8 | Stack | pnpm monorepo: `apps/gateway` (Hono), `apps/dashboard` (React + Vite + Tailwind + TanStack Router/Query), `packages/shared` (types, zod schemas). Tests use Vitest + `@cloudflare/vitest-pool-workers`. |
+| DEC-8 | Stack | pnpm monorepo: `apps/gateway` (Hono), `apps/dashboard` (React + Vite + Tailwind + TanStack Router/Query), `packages/shared` (types, zod schemas). Tests use Vitest + `@cloudflare/vitest-plugin`. |
 | DEC-9 | SSRF | `https` only. Block IP literals, `localhost`, `*.internal`, and metadata hosts. Resolve DNS over DoH to block private/loopback/link-local/CGNAT/IPv6 ULA ranges, both when a destination is saved **and** before every delivery. Use `redirect: "manual"`. |
 | DEC-10 | Pause | Deliveries to a paused destination are held in D1 with status `paused` and do not consume attempts. Resume re-enqueues them in batches. |
 | DEC-11 | Per-destination policy | Each destination has its own policy (timeout, max attempts, backoff, max in-flight, rate limit), editable in the UI. All destinations share one statically configured queue. Concurrency and rate limits use one Durable Object per destination. |
@@ -183,7 +183,7 @@ When `archive_enabled = false`, the job deletes eligible data directly under the
 ## 9. Testing strategy
 
 - **Unit:** auth verifiers, provider event ID extraction, retry classifier, backoff/jitter/`Retry-After`, SSRF guard (IPv4/IPv6, CGNAT, link-local), header denylist/redaction, Standard Webhooks signing, archive eligibility.
-- **Integration** (`@cloudflare/vitest-pool-workers`): real D1, Queues, R2, and Durable Objects in Miniflare; the backend is simulated with `fetchMock` (2xx/3xx/4xx/429/5xx/timeout).
+- **Integration** (`@cloudflare/vitest-plugin`): real D1, Queues, R2, and Durable Objects in Miniflare; the backend is simulated with a mocked outbound fetch (2xx/3xx/4xx/429/5xx/timeout).
 - **Fault injection:** adapters around D1/R2/Queue that can be forced to fail, used to test: 503 when D1/R2/Queue fails, reconciler recovery, a successful send followed by a failed D1 update, duplicate messages, expired leases, and an archive run that fails midway.
 - **Smoke test** after every deploy: send a webhook → delivered → replay.
 - Every criterion in `DESIGN.md` §11 must map to at least one automated test or one runbook step.
@@ -196,7 +196,7 @@ M0 ─▶ M1 ─▶ M2 ─▶ M3 ─┬─▶ M4 ─┬─▶ M6
 ```
 
 ### M0 — Foundation
-- **Scope:** pnpm monorepo; `apps/gateway` (Hono) with a `wrangler.toml` holding one environment per deployment; D1 migration tooling; prefixed IDs; AES-GCM secret encryption; logger with redaction; CI (typecheck, lint, test); `vitest-pool-workers` setup.
+- **Scope:** pnpm monorepo; `apps/gateway` (Hono) with a `wrangler.jsonc` holding one environment per deployment; D1 migration tooling; prefixed IDs; AES-GCM secret encryption; logger with redaction; CI (typecheck, lint, test); `@cloudflare/vitest-plugin` setup.
 - **Exit:** CI is green; an empty Worker with `/healthz` deploys; migrations run on both local and remote D1.
 
 ### M1 — Core pipeline

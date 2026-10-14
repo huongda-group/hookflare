@@ -4,8 +4,8 @@
 
 Hookflare sits between webhook providers (Stripe, GitHub, Shopify, your own services…) and your backends. It verifies each incoming webhook, persists it durably, and acknowledges it, all before your backend is involved. It then delivers the webhook with automatic retries, keeps a full delivery log, and lets you replay anything from a dashboard.
 
-> [!WARNING]
-> **Status: design phase.** No code has been written yet. This repository currently contains the system design and roadmap. See [Roadmap](#roadmap) for progress. The setup instructions below describe the *planned* deployment and may change as milestones land.
+> [!NOTE]
+> **Status: M0 (Foundation) done.** Monorepo scaffold, Wrangler config, D1 migrations, and CI are in place. The setup instructions below describe the current M0 setup; Queues and R2 buckets arrive in later milestones when first used.
 
 ---
 
@@ -54,12 +54,12 @@ D1 is the source of truth. The queue is only a transport, so the reconciler can 
 - **Storage:** Cloudflare D1 (ledger), R2 (large payloads and archives), Queues (delivery), Durable Objects (per-destination limiter)
 - **Auth:** Cloudflare Access + server-side RBAC
 - **Dashboard:** React, Vite, Tailwind CSS, TanStack Router / Query
-- **Tooling:** pnpm workspaces, Wrangler, Vitest with `@cloudflare/vitest-pool-workers`
+- **Tooling:** pnpm workspaces, Wrangler, Vitest with `@cloudflare/vitest-plugin`
 
-## Getting started (planned)
+## Getting started
 
 > [!NOTE]
-> These steps describe the intended setup. Exact commands, resource names, and config files will be finalized in milestone M0.
+> These steps describe the current M0 setup. Exact commands, resource names, and config files may still evolve as later milestones (Queues, R2) land.
 
 ### Prerequisites
 
@@ -69,39 +69,49 @@ D1 is the source of truth. The queue is only a transport, so the reconciler can 
 
 ### 1. Create Cloudflare resources
 
-Each deployment is one isolated environment. To run staging and production, repeat these steps with different names.
+Each deployment is one isolated environment. For another independent deployment, use a separate copy of `wrangler.jsonc` with its own resource names and IDs.
 
 ```bash
-wrangler d1 create hookflare
-wrangler r2 bucket create hookflare-payloads
-wrangler queues create hookflare-deliveries
-wrangler queues create hookflare-deliveries-dlq
+pnpm exec wrangler d1 create hookflare
 ```
 
-Copy the resulting IDs into `wrangler.toml`.
+(Queues and R2 buckets are created by later milestones when they are first used.)
+
+Replace the committed `database_id` in `apps/gateway/wrangler.jsonc` (the maintainers' production database) with the ID from that command.
+
+Run Wrangler from the repository root with `pnpm exec wrangler … --config apps/gateway/wrangler.jsonc`, or `cd apps/gateway` first.
 
 ### 2. Configure secrets
 
+`SECRETS_KEY` is 32 random bytes, base64-encoded. Generate one with:
+
 ```bash
-wrangler secret put SECRETS_KEY              # key that encrypts stored secrets
-wrangler secret put BOOTSTRAP_ADMIN_EMAILS   # comma-separated emails that become Admin on first login
+openssl rand -base64 32
 ```
 
-Also set `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` (the Access application audience tag) so the Worker can verify Access JWTs.
+Then store it as a Worker secret (run from the repository root):
+
+```bash
+pnpm exec wrangler secret put SECRETS_KEY --config apps/gateway/wrangler.jsonc
+```
+
+For local development, copy `apps/gateway/.dev.vars.example` to `apps/gateway/.dev.vars` and fill in a key.
+
+(The Access-related settings, `BOOTSTRAP_ADMIN_EMAILS`, `ACCESS_TEAM_DOMAIN`, and `ACCESS_AUD`, arrive with the admin API in M3.)
 
 ### 3. Protect the dashboard with Cloudflare Access
 
-Create an Access application that covers the dashboard (`/`) and the admin API (`/api/admin/*`). Leave `/in/*` **public**, because webhook providers must be able to reach it.
+Create an Access application that covers the dashboard (`/`) and the admin API (`/api/admin/*`). Bypass (leave public) `/in/*` and `/healthz`, because webhook providers and uptime monitors must be able to reach them without logging in.
 
 ### 4. Migrate and deploy
 
 ```bash
 pnpm install
-wrangler d1 migrations apply hookflare --remote
-pnpm deploy
+pnpm run deploy   # applies remote D1 migrations, then deploys the Worker
+curl https://<your-worker-domain>/healthz   # {"status":"ok","version":"..."}
 ```
 
-### 5. Receive your first webhook
+### 5. Receive your first webhook (from M1/M3)
 
 1. Sign in to the dashboard with a bootstrap admin email.
 2. Create a **project**, a **destination** (your backend URL), and a **source** that points to it.
@@ -125,7 +135,7 @@ Return any `2xx` to acknowledge. Return `429` (optionally with `Retry-After`) or
 
 | Milestone | Scope | Status |
 |---|---|---|
-| **M0: Foundation** | Monorepo, Wrangler config, migrations, CI | Planned |
+| **M0: Foundation** | Monorepo, Wrangler config, migrations, CI | Done |
 | **M1: Core pipeline** | Ingress, D1 ledger, queue, single-shot delivery, signing, SSRF guard | Planned |
 | **M2: Reliability** | Retries, dead letter, idempotency, R2 payloads, reconciler, pause/resume | Planned |
 | **M3: Admin API & security** | Access + RBAC, audit log, replay, test delivery, secret rotation | Planned |
@@ -141,7 +151,7 @@ Hookflare is deliberately **not** an integration platform. The following are out
 
 ## Contributing
 
-The project is in its design phase, and feedback on the [roadmap](docs/superpowers/specs/2026-10-14-hookflare-roadmap.md) is very welcome. Please open an issue to discuss a change before you send a pull request.
+The project is in early development (M0 done, M1 next), and feedback on the [roadmap](docs/superpowers/specs/2026-10-14-hookflare-roadmap.md) is very welcome. Please open an issue to discuss a change before you send a pull request.
 
 ## License
 

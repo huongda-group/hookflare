@@ -1,0 +1,11 @@
+packages:
+  - apps/*
+  - packages/*
+allowBuilds:
+  esbuild: true
+  workerd: true
+# wrangler 4.151.0 is newer than the minimum release age and depends on a
+# miniflare beta. Remove these exclusions on the next wrangler upgrade.
+minimumReleaseAgeExclude:
+  - miniflare@5.20261012.0-beta
+  - wrangler@4.151.0

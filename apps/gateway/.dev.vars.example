@@ -1,0 +1,4 @@
+# Local dev secrets. Copy to `.dev.vars` (git-ignored) and fill in real values.
+# Never commit real secrets.
+# Generate a key with: openssl rand -base64 32
+SECRETS_KEY="REPLACE_ME"

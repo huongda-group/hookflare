@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Hookflare is an inbound webhook gateway on Cloudflare (Workers + Hono, D1, Queues, R2, Durable Objects, Access). The repo currently holds **design documents only**; no code is scaffolded yet. Milestone M0 (Foundation) creates the monorepo, so update the Commands section below once it lands.
+Hookflare is an inbound webhook gateway on Cloudflare (Workers + Hono, D1, Queues, R2, Durable Objects, Access). Milestone M0 (Foundation) is done: the monorepo, gateway Worker skeleton, D1 migration tooling, and core building blocks are scaffolded.
 
 ## Source documents and precedence
 
@@ -14,7 +14,22 @@ Hookflare is an inbound webhook gateway on Cloudflare (Workers + Hono, D1, Queue
 
 ## Commands
 
-Not available yet. The planned tooling (roadmap DEC-8) is: pnpm workspaces, `wrangler` for dev/deploy/D1 migrations, and Vitest with `@cloudflare/vitest-pool-workers`, so tests run against real D1/Queues/R2/DO bindings in Miniflare.
+All commands run from the repository root.
+
+| Script | Runs |
+|---|---|
+| `pnpm dev` | `wrangler dev` for the gateway (local D1, `.dev.vars`) |
+| `pnpm test` | Vitest for every workspace |
+| `pnpm typecheck` | `tsc --noEmit` for every workspace |
+| `pnpm lint` / `pnpm format` | `biome check` / `biome check --write` |
+| `pnpm cf-typegen` | `wrangler types --strict-vars=false` (regenerates the committed `worker-configuration.d.ts`; run it without a local `.dev.vars`, or local secrets end up in `Env` and CI fails its staleness check) |
+| `pnpm db:migrate:local` | `wrangler d1 migrations apply DB --local` |
+| `pnpm db:migrate:remote` | `wrangler d1 migrations apply DB --remote` |
+| `pnpm run deploy` | `db:migrate:remote`, then `wrangler deploy` |
+
+To run a single test: `pnpm --filter gateway exec vitest run test/core/ids.test.ts -t "strictly increasing"`.
+
+> `pnpm deploy` is a built-in pnpm command, so the deploy script must be invoked as **`pnpm run deploy`**.
 
 ## Planned architecture (big picture)
 
