@@ -20,7 +20,7 @@
 			"database_name": "hookflare",
 			// Placeholder: fill in with the real ID after `wrangler d1 create hookflare`.
 			// Any non-empty string works for local dev and tests (local D1).
-			"database_id": "PLACEHOLDER_RUN_WRANGLER_D1_CREATE"
+			"database_id": "29d2c40d-c643-4a67-bba1-ccd2e5c04bc1"
 		}
 	]
 }
