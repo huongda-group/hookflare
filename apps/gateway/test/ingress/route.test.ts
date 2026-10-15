@@ -18,7 +18,12 @@ import {
 	withFailingBatch,
 } from "../helpers/deps";
 import { denyAllLimiter, testEnv } from "../helpers/env";
-import { seedPipeline, TEST_SOURCE_SECRET } from "../helpers/seed";
+import { faultyDeps } from "../helpers/faults";
+import {
+	seedDelivery,
+	seedPipeline,
+	TEST_SOURCE_SECRET,
+} from "../helpers/seed";
 
 function post(
 	deps: Deps,
@@ -278,5 +283,192 @@ describe("POST /in/:sourceId", () => {
 			.where(eq(deliveries.eventId, event.id));
 		expect(delivery.status).toBe("pending");
 		expect(delivery.enqueuedAt).toBeNull();
+	});
+
+	const withEventId = {
+		eventIdFrom: "header" as const,
+		eventIdSelector: "x-event-id",
+	};
+	const big = (n: number) => new Uint8Array(n).fill(0x61);
+
+	async function deliveriesOf(deps: Deps, eventId: string) {
+		return deps.db
+			.select()
+			.from(deliveries)
+			.where(eq(deliveries.eventId, eventId));
+	}
+
+	it("stores a body above 64 KiB in R2 with an empty inline body", async () => {
+		const deps = testDeps();
+		const p = await seedPipeline(deps);
+		const body = big(200_000);
+		const res = await post(deps, `/in/${p.source.id}`, body, {
+			"content-type": "application/octet-stream",
+		});
+		expect(res.status).toBe(202);
+		const [event] = await eventsOf(deps, p.source.id);
+		expect(event.r2Key).toMatch(/^events\/\d{4}\/\d{2}\/\d{2}\/evt_/);
+		expect(event.bodyInline.byteLength).toBe(0);
+		expect(event.sizeBytes).toBe(200_000);
+		const obj = await deps.payloads.get(event.r2Key as string);
+		expect(new Uint8Array(await (obj as R2ObjectBody).arrayBuffer())).toEqual(
+			body,
+		);
+	});
+
+	it("keeps exactly 64 KiB inline and moves 64 KiB + 1 to R2", async () => {
+		const deps = testDeps();
+		const p = await seedPipeline(deps);
+		await post(deps, `/in/${p.source.id}`, big(65_536));
+		await post(deps, `/in/${p.source.id}`, big(65_537));
+		const events = (await eventsOf(deps, p.source.id)).sort(
+			(a, b) => a.sizeBytes - b.sizeBytes,
+		);
+		expect(
+			events.map((e) => [
+				e.sizeBytes,
+				e.r2Key === null,
+				e.bodyInline.byteLength,
+			]),
+		).toEqual([
+			[65_536, true, 65_536],
+			[65_537, false, 0],
+		]);
+	});
+
+	it("caps at 1 MiB by default and at max_body_bytes when set", async () => {
+		const deps = testDeps();
+		const def = await seedPipeline(deps);
+		expect(
+			(await post(deps, `/in/${def.source.id}`, big(1_048_577))).status,
+		).toBe(413);
+		const large = await seedPipeline(deps, {
+			source: { maxBodyBytes: 10_485_760 },
+		});
+		expect(
+			(await post(deps, `/in/${large.source.id}`, big(2_000_000))).status,
+		).toBe(202);
+	});
+
+	it("returns 503 and stores nothing when the R2 put fails", async () => {
+		const deps = faultyDeps(testDeps(), { r2: [{ match: /^put / }] });
+		const p = await seedPipeline(deps);
+		expect((await post(deps, `/in/${p.source.id}`, big(100_000))).status).toBe(
+			503,
+		);
+		expect(await eventsOf(deps, p.source.id)).toHaveLength(0);
+		expect((deps.queue as RecordingQueue).sent).toHaveLength(0);
+	});
+
+	it("returns 503 and deletes the R2 object when the D1 write fails", async () => {
+		const deps = faultyDeps(testDeps(), {
+			d1: [{ match: /insert into "webhook_events"/ }],
+		});
+		const p = await seedPipeline(testDeps());
+		const res = await post(deps, `/in/${p.source.id}`, big(100_000));
+		expect(res.status).toBe(503);
+		const put = deps.r2Log.find((l) => l.startsWith("put "));
+		expect(deps.r2Log).toContain(`delete ${put?.slice(4)}`);
+		expect(await deps.payloads.head(put?.slice(4) as string)).toBeNull();
+	});
+
+	it("returns 200 duplicate for a known provider event id and creates nothing", async () => {
+		const queue = recordingQueue();
+		const deps = testDeps({ queue });
+		const p = await seedPipeline(deps, { source: withEventId });
+		const first = await post(deps, `/in/${p.source.id}`, "{}", {
+			"x-event-id": "e1",
+		});
+		const { event_id } = (await first.json()) as { event_id: string };
+		const again = await post(deps, `/in/${p.source.id}`, "{}", {
+			"x-event-id": "e1",
+		});
+		expect(again.status).toBe(200);
+		expect(await again.json()).toEqual({ duplicate: true, event_id });
+		expect(await eventsOf(deps, p.source.id)).toHaveLength(1);
+		expect(await deliveriesOf(deps, event_id)).toHaveLength(1);
+		expect(queue.sent).toHaveLength(1);
+		expect(loggedLines().some((l) => l.msg === "ingress.duplicate")).toBe(true);
+	});
+
+	it("returns 200 for a large duplicate without touching R2", async () => {
+		const deps = faultyDeps(testDeps(), {});
+		const p = await seedPipeline(deps, { source: withEventId });
+		await post(deps, `/in/${p.source.id}`, big(100_000), {
+			"x-event-id": "e2",
+		});
+		const puts = deps.r2Log.length;
+		const again = await post(deps, `/in/${p.source.id}`, big(100_000), {
+			"x-event-id": "e2",
+		});
+		expect(again.status).toBe(200);
+		expect(deps.r2Log).toHaveLength(puts);
+	});
+
+	it("returns 200 duplicate even when the first event's delivery failed", async () => {
+		const deps = testDeps();
+		const p = await seedPipeline(deps, { source: withEventId });
+		const { eventId } = await seedDelivery(deps, p, {
+			status: "failed_final",
+			event: { providerEventId: "e3" },
+		});
+		const res = await post(deps, `/in/${p.source.id}`, "{}", {
+			"x-event-id": "e3",
+		});
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ duplicate: true, event_id: eventId });
+	});
+
+	it("handles two concurrent duplicates: one event, no orphan R2 object", async () => {
+		const deps = faultyDeps(testDeps(), {});
+		const p = await seedPipeline(deps, { source: withEventId });
+		const responses = await Promise.all([
+			post(deps, `/in/${p.source.id}`, big(100_000), { "x-event-id": "race" }),
+			post(deps, `/in/${p.source.id}`, big(100_000), { "x-event-id": "race" }),
+		]);
+		expect(responses.map((r) => r.status).sort()).toEqual([200, 202]);
+		const events = await eventsOf(deps, p.source.id);
+		expect(events).toHaveLength(1);
+		const puts = deps.r2Log
+			.filter((l) => l.startsWith("put "))
+			.map((l) => l.slice(4));
+		const deletes = deps.r2Log
+			.filter((l) => l.startsWith("delete "))
+			.map((l) => l.slice(7));
+		expect(puts.filter((k) => !deletes.includes(k))).toEqual([events[0].r2Key]);
+	});
+
+	it("does not dedupe when the provider event id is absent", async () => {
+		const deps = testDeps();
+		const p = await seedPipeline(deps, { source: withEventId });
+		await post(deps, `/in/${p.source.id}`, "{}");
+		await post(deps, `/in/${p.source.id}`, "{}");
+		expect(await eventsOf(deps, p.source.id)).toHaveLength(2);
+	});
+
+	it("does not dedupe the same provider event id across sources", async () => {
+		const deps = testDeps();
+		const a = await seedPipeline(deps, { source: withEventId });
+		const b = await seedPipeline(deps, { source: withEventId });
+		expect(
+			(await post(deps, `/in/${a.source.id}`, "{}", { "x-event-id": "same" }))
+				.status,
+		).toBe(202);
+		expect(
+			(await post(deps, `/in/${b.source.id}`, "{}", { "x-event-id": "same" }))
+				.status,
+		).toBe(202);
+	});
+
+	it("stores a paused delivery and enqueues nothing for a paused destination", async () => {
+		const queue = recordingQueue();
+		const deps = testDeps({ queue });
+		const p = await seedPipeline(deps, { destination: { status: "paused" } });
+		const res = await post(deps, `/in/${p.source.id}`, "{}");
+		expect(res.status).toBe(202);
+		const { event_id } = (await res.json()) as { event_id: string };
+		const [delivery] = await deliveriesOf(deps, event_id);
+		expect(delivery.status).toBe("paused");
+		expect(queue.sent).toHaveLength(0);
 	});
 });

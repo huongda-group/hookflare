@@ -26,3 +26,19 @@ export async function listDestinations(
 		.limit(q.limit + 1)
 		.all();
 }
+
+/** Conditional status change; undefined when the row is not in `from`. */
+export async function transitionDestination(
+	db: Db,
+	id: string,
+	from: DestinationRow["status"],
+	to: DestinationRow["status"],
+	now: number,
+): Promise<DestinationRow | undefined> {
+	const [row] = await db
+		.update(destinations)
+		.set({ status: to, updatedAt: now })
+		.where(and(eq(destinations.id, id), eq(destinations.status, from)))
+		.returning();
+	return row;
+}

@@ -127,8 +127,8 @@ describe("admin sources", () => {
 			},
 		],
 		[
-			"max_body_bytes above 64 KB",
-			{ auth_type: "none", auth_config: {}, max_body_bytes: 65_537 },
+			"max_body_bytes above 10 MiB",
+			{ auth_type: "none", auth_config: {}, max_body_bytes: 10_485_761 },
 		],
 	])("returns 400 for %s", async (_label, fields) => {
 		const deps = testDeps();
@@ -259,5 +259,29 @@ describe("admin sources", () => {
 		).json<{ data: Src[] }>();
 		expect(list.data.map((s) => s.id)).toEqual([a.source.id]);
 		expect(list.data.map((s) => s.id)).not.toContain(b.source.id);
+	});
+
+	it("accepts max_body_bytes up to 10 MiB", async () => {
+		const deps = testDeps();
+		const { project, destination } = await seedPipeline(deps);
+		const api = await adminApp(deps);
+		const ok = await api.request("POST", "/sources", {
+			project_id: project.id,
+			destination_id: destination.id,
+			name: "Big",
+			auth_type: "none",
+			auth_config: {},
+			max_body_bytes: 10_485_760,
+		});
+		expect(ok.status).toBe(201);
+		const tooBig = await api.request("POST", "/sources", {
+			project_id: project.id,
+			destination_id: destination.id,
+			name: "TooBig",
+			auth_type: "none",
+			auth_config: {},
+			max_body_bytes: 10_485_761,
+		});
+		expect(tooBig.status).toBe(400);
 	});
 });

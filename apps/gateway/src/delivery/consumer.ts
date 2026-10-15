@@ -1,20 +1,31 @@
 import { decryptSecret } from "../core/crypto";
 import {
-	claimDelivery,
+	acquireLease,
 	type DeliveryContext,
 	finishWithoutAttempt,
+	holdDelivery,
+	isClaimable,
 	loadDeliveryContext,
-	recordAttempt,
+	recordLeasedAttempt,
 } from "../core/db/deliveries";
 import { DnsError } from "../core/dns";
 import { createLogger, type Logger } from "../core/log";
+import { loadPayload } from "../core/payloads";
+import { resolvePolicy } from "../core/policy";
 import { checkUrl } from "../core/ssrf";
 import type { DeliveryMessage, Deps } from "../deps";
-import { classifyError, classifyResponse, type Outcome } from "./classify";
+import { infraDelaySeconds } from "./backoff";
+import { classifyAttempt, type SendResult } from "./classify";
 import { buildOutboundHeaders, signWebhook } from "./sign";
 
-export const DEFAULT_TIMEOUT_MS = 10_000;
 export const SNIPPET_BYTES = 2048;
+/** The lease outlives the request timeout by this much (spec §7 step 7). */
+export const LEASE_GRACE_MS = 30_000;
+
+export type Disposition =
+	| { action: "ack" }
+	| { action: "retry"; delaySeconds: number };
+const ACK: Disposition = { action: "ack" };
 
 /** At most `maxBytes` of the body as lossy UTF-8; stream errors keep what was read. */
 export async function readSnippet(
@@ -49,23 +60,19 @@ type SignedRequest = {
 	signature: string;
 };
 
-/** Gateway-side work: a failure here is our fault and never counts as an attempt. */
-async function prepare(
+async function sign(
 	deps: Deps,
 	ctx: DeliveryContext,
+	body: Uint8Array<ArrayBuffer>,
 ): Promise<SignedRequest> {
-	const { delivery, event, destination } = ctx;
 	const secret = await decryptSecret(
 		deps.env,
-		destination.signingSecretEnc,
-		`destinations.signing_secret_enc:${destination.id}`,
+		ctx.destination.signingSecretEnc,
+		`destinations.signing_secret_enc:${ctx.destination.id}`,
 	);
-	const body = new Uint8Array(
-		event.bodyInline ?? new Uint8Array(),
-	) as Uint8Array<ArrayBuffer>;
 	const timestampSec = Math.floor(deps.now() / 1000);
 	const signature = await signWebhook({
-		id: delivery.id,
+		id: ctx.delivery.id,
 		timestampSec,
 		body,
 		secret,
@@ -77,9 +84,9 @@ async function send(
 	deps: Deps,
 	ctx: DeliveryContext,
 	{ body, timestampSec, signature }: SignedRequest,
-): Promise<{ outcome: Outcome; snippet: string | null }> {
+	timeoutMs: number,
+): Promise<{ result: SendResult; snippet: string | null }> {
 	const { delivery, event, destination } = ctx;
-	const timeoutMs = destination.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 	try {
 		const response = await deps.fetch(destination.url, {
 			method: "POST",
@@ -96,54 +103,98 @@ async function send(
 			signal: AbortSignal.timeout(timeoutMs),
 		});
 		return {
-			outcome: classifyResponse(response.status),
+			result: {
+				kind: "response",
+				status: response.status,
+				retryAfter: response.headers.get("retry-after"),
+			},
 			snippet: await readSnippet(response),
 		};
-	} catch (err) {
-		return { outcome: classifyError(err, timeoutMs), snippet: null };
+	} catch (error) {
+		return { result: { kind: "error", error }, snippet: null };
 	}
 }
 
+/** Spec §7 steps 1–10. Infra errors never count as attempts (msg.retry instead). */
 export async function processDelivery(
 	deps: Deps,
 	deliveryId: string,
 	logger: Logger,
-): Promise<"ack" | "retry"> {
+	msgAttempts = 1,
+): Promise<Disposition> {
+	const infra = (stage: string, err: unknown): Disposition => {
+		const delaySeconds = infraDelaySeconds(msgAttempts);
+		logger.error("delivery.infra_retry", {
+			delivery_id: deliveryId,
+			stage,
+			msg_attempts: msgAttempts,
+			delay_s: delaySeconds,
+			error: String(err),
+		});
+		return { action: "retry", delaySeconds };
+	};
+
+	// 1–2. Load; skip anything another worker owns or already finished.
 	let ctx: DeliveryContext | null;
 	try {
 		ctx = await loadDeliveryContext(deps, deliveryId);
 	} catch (err) {
-		logger.error("delivery.load_failed", {
-			delivery_id: deliveryId,
-			error: String(err),
-		});
-		return "retry";
+		return infra("load", err);
 	}
 	if (!ctx) {
 		logger.warn("delivery.not_found", { delivery_id: deliveryId });
-		return "ack";
+		return ACK;
 	}
-	if (ctx.delivery.status !== "pending" && ctx.delivery.status !== "queued") {
+	if (!isClaimable(ctx.delivery, deps.now())) {
 		logger.info("delivery.skipped", {
 			delivery_id: deliveryId,
 			status: ctx.delivery.status,
 		});
-		return "ack";
+		return ACK;
 	}
-
+	// A duplicate message must not cut the backoff short; the due one still arrives.
+	const { nextAttemptAt } = ctx.delivery;
+	if (
+		ctx.delivery.status === "retrying" &&
+		nextAttemptAt !== null &&
+		nextAttemptAt > deps.now()
+	) {
+		const delaySeconds = Math.ceil((nextAttemptAt - deps.now()) / 1000);
+		logger.info("delivery.not_due", {
+			delivery_id: deliveryId,
+			delay_s: delaySeconds,
+		});
+		return { action: "retry", delaySeconds };
+	}
+	const policy = resolvePolicy(ctx.destination);
 	const finish = async (lastError: string) => {
 		await finishWithoutAttempt(deps, deliveryId, lastError);
 		logger.warn("delivery.failed_without_attempt", {
 			delivery_id: deliveryId,
 			reason: lastError,
 		});
-		return "ack" as const;
+		return ACK;
 	};
 
+	// 3–6. Checks before the lease (spec M2-2): none of them counts as an attempt.
 	let request: SignedRequest;
 	try {
+		if (ctx.destination.status === "paused") {
+			await holdDelivery(deps, deliveryId);
+			logger.info("delivery.held", { delivery_id: deliveryId });
+			return ACK;
+		}
 		if (ctx.destination.status === "disabled") {
 			return await finish("destination_disabled");
+		}
+		let body: Uint8Array<ArrayBuffer> | null;
+		try {
+			body = await loadPayload(deps, ctx.event);
+		} catch (err) {
+			return infra("r2", err);
+		}
+		if (!body) {
+			return await finish("payload_missing");
 		}
 		try {
 			const check = await checkUrl(ctx.destination.url, deps);
@@ -151,13 +202,10 @@ export async function processDelivery(
 				return await finish(`ssrf_blocked: ${check.reason}`);
 			}
 		} catch (err) {
-			if (err instanceof DnsError) {
-				return await finish("dns_error");
-			}
-			throw err;
+			return infra(err instanceof DnsError ? "dns" : "ssrf", err);
 		}
 		try {
-			request = await prepare(deps, ctx);
+			request = await sign(deps, ctx, body);
 		} catch (err) {
 			logger.error("delivery.sign_failed", {
 				delivery_id: deliveryId,
@@ -165,41 +213,100 @@ export async function processDelivery(
 			});
 			return await finish("signing_failed");
 		}
-		if (!(await claimDelivery(deps, deliveryId))) {
-			logger.info("delivery.skipped", {
-				delivery_id: deliveryId,
-				status: "claimed_elsewhere",
-			});
-			return "ack";
-		}
 	} catch (err) {
-		logger.error("delivery.update_failed", {
-			delivery_id: deliveryId,
-			error: String(err),
-		});
-		return "retry";
+		return infra("d1", err);
 	}
 
-	const startedAt = deps.now();
-	const { outcome, snippet } = await send(deps, ctx, request);
-	const durationMs = Math.max(0, deps.now() - startedAt);
+	// 7. Lease.
+	const leaseUntil = deps.now() + policy.timeoutMs + LEASE_GRACE_MS;
+	let attemptCount: number | null;
 	try {
-		await recordAttempt(deps, ctx, { startedAt, durationMs, outcome, snippet });
+		attemptCount = await acquireLease(deps, deliveryId, leaseUntil);
 	} catch (err) {
-		logger.error("delivery.record_failed", {
+		return infra("lease", err);
+	}
+	if (attemptCount === null) {
+		logger.info("delivery.skipped", {
 			delivery_id: deliveryId,
-			error: String(err),
+			status: "claimed_elsewhere",
 		});
-		return "retry";
+		return ACK;
+	}
+
+	// 8. Send.
+	const attemptNo = attemptCount + 1;
+	const startedAt = deps.now();
+	const { result, snippet } = await send(deps, ctx, request, policy.timeoutMs);
+	const durationMs = Math.max(0, deps.now() - startedAt);
+	const outcome = classifyAttempt(result, {
+		attemptNo,
+		policy,
+		now: deps.now(),
+		random: Math.random,
+	});
+
+	// 9. Record, fenced by the lease.
+	let recorded: boolean;
+	try {
+		recorded = await recordLeasedAttempt(deps, deliveryId, {
+			attemptNo,
+			startedAt,
+			durationMs,
+			outcome,
+			snippet,
+			leaseUntil,
+		});
+	} catch (err) {
+		return infra("record", err);
+	}
+	if (!recorded) {
+		logger.warn("delivery.lease_lost", {
+			delivery_id: deliveryId,
+			attempt_no: attemptNo,
+		});
+		return ACK;
 	}
 	logger.info("delivery.attempted", {
 		delivery_id: deliveryId,
+		attempt_no: attemptNo,
 		status: outcome.status,
 		http_status: outcome.httpStatus,
 		error_kind: outcome.errorKind,
 		duration_ms: durationMs,
 	});
-	return "ack";
+	if (outcome.status === "dead") {
+		logger.warn("delivery.dead", {
+			delivery_id: deliveryId,
+			reason: "budget",
+			attempt_no: attemptNo,
+		});
+	}
+	if (outcome.status !== "retrying") {
+		return ACK;
+	}
+
+	// 10. Reschedule as a new message (spec M2-1).
+	const { delaySeconds } = outcome;
+	try {
+		await deps.queue.send({ deliveryId }, { delaySeconds });
+		logger.info("delivery.retry_scheduled", {
+			delivery_id: deliveryId,
+			attempt_no: attemptNo,
+			delay_s: delaySeconds,
+		});
+		return ACK;
+	} catch (err) {
+		logger.error("delivery.reschedule_failed", {
+			delivery_id: deliveryId,
+			error: String(err),
+		});
+		return { action: "retry", delaySeconds };
+	}
+}
+
+export function deliveryIdOf(body: unknown): string | null {
+	const id = (body as Partial<DeliveryMessage> | null)?.deliveryId;
+	return typeof id === "string" ? id : null;
 }
 
 export async function handleDeliveryBatch(
@@ -209,17 +316,30 @@ export async function handleDeliveryBatch(
 	const logger = createLogger(deps.env, { queue: batch.queue });
 	await Promise.all(
 		batch.messages.map(async (msg) => {
-			const deliveryId = (msg.body as Partial<DeliveryMessage> | null)
-				?.deliveryId;
-			if (typeof deliveryId !== "string") {
+			const deliveryId = deliveryIdOf(msg.body);
+			if (deliveryId === null) {
 				// Retrying cannot fix a bad payload; drop it instead of burning retries.
 				logger.error("delivery.malformed_message", { message_id: msg.id });
 				msg.ack();
 				return;
 			}
-			const result = await processDelivery(deps, deliveryId, logger);
-			if (result === "ack") msg.ack();
-			else msg.retry();
+			let d: Disposition;
+			try {
+				d = await processDelivery(deps, deliveryId, logger, msg.attempts);
+			} catch (err) {
+				// A bug in one message must not retry the rest of the batch.
+				const delaySeconds = infraDelaySeconds(msg.attempts);
+				logger.error("delivery.infra_retry", {
+					delivery_id: deliveryId,
+					stage: "unexpected",
+					msg_attempts: msg.attempts,
+					delay_s: delaySeconds,
+					error: String(err),
+				});
+				d = { action: "retry", delaySeconds };
+			}
+			if (d.action === "ack") msg.ack();
+			else msg.retry({ delaySeconds: d.delaySeconds });
 		}),
 	);
 }

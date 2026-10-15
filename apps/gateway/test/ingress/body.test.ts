@@ -12,10 +12,10 @@ function streamOf(chunks: Uint8Array[]): ReadableStream<Uint8Array> {
 }
 
 describe("bodyCap", () => {
-	it("defaults to 1 MiB but never exceeds the 64 KiB inline limit", () => {
-		expect(bodyCap(null)).toBe(65_536);
+	it("defaults to 1 MiB and no longer caps at 64 KiB", () => {
+		expect(bodyCap(null)).toBe(1_048_576);
 		expect(bodyCap(1000)).toBe(1000);
-		expect(bodyCap(200_000)).toBe(65_536);
+		expect(bodyCap(10_485_760)).toBe(10_485_760);
 	});
 });
 

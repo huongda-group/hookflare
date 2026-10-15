@@ -9,11 +9,13 @@ export type Db = DrizzleD1Database<typeof schema>;
 /**
  * Everything a handler needs from the outside world. Handlers never touch
  * env.DB / env.QUEUE / global fetch, so tests can stub network, DNS, and time
- * (and M2 can wrap db/queue for fault injection).
+ * (tests wrap db/queue/payloads for fault injection).
  */
 export type Deps = {
 	db: Db;
 	queue: Queue<DeliveryMessage>;
+	/** R2 bucket for bodies > 64 KiB. */
+	payloads: R2Bucket;
 	/** Outbound calls to backends. */
 	fetch: typeof fetch;
 	resolveDns: ResolveDns;
@@ -27,6 +29,7 @@ export function createDeps(env: AppEnv): Deps {
 	return {
 		db: drizzle(env.DB, { schema }),
 		queue: env.QUEUE as Queue<DeliveryMessage>,
+		payloads: env.PAYLOADS,
 		fetch: globalFetch,
 		resolveDns: createDohResolver(globalFetch),
 		now: () => Date.now(),

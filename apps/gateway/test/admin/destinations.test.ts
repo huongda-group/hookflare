@@ -1,16 +1,21 @@
+import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { clearAccessKeyCache } from "../../src/admin/auth/access";
+import { deliveries } from "../../src/core/db/schema";
 import { DnsError } from "../../src/core/dns";
 import { clearSsrfCache } from "../../src/core/ssrf";
 import { adminApp } from "../helpers/admin";
-import { testDeps } from "../helpers/deps";
-import { seedPipeline } from "../helpers/seed";
+import { recordingQueue, testDeps } from "../helpers/deps";
+import { seedDelivery, seedPipeline } from "../helpers/seed";
 
 type Dest = {
 	id: string;
 	url: string;
 	status: string;
 	timeout_ms: number | null;
+	max_attempts: number | null;
+	backoff_base_s: number | null;
+	backoff_max_s: number | null;
 	signing_secret?: string;
 	signing_secret_fingerprint: string;
 };
@@ -214,5 +219,143 @@ describe("admin destinations", () => {
 				})
 			).status,
 		).toBe(400);
+	});
+
+	async function create(
+		api: Awaited<ReturnType<typeof adminApp>>,
+		projectId: string,
+		extra = {},
+	) {
+		return api.request("POST", "/destinations", {
+			project_id: projectId,
+			name: "API",
+			url: "https://api.example.com/hooks",
+			...extra,
+		});
+	}
+
+	it("stores, returns, and resets the retry policy", async () => {
+		const deps = testDeps();
+		const { project } = await seedPipeline(deps);
+		const api = await adminApp(deps);
+		const created = await (
+			await create(api, project.id, {
+				max_attempts: 5,
+				backoff_base_s: 10,
+				backoff_max_s: 600,
+			})
+		).json<Dest>();
+		expect(created).toMatchObject({
+			max_attempts: 5,
+			backoff_base_s: 10,
+			backoff_max_s: 600,
+		});
+		const patched = await (
+			await api.request("PATCH", `/destinations/${created.id}`, {
+				max_attempts: null,
+			})
+		).json<Dest>();
+		expect(patched.max_attempts).toBeNull();
+		expect(patched.backoff_max_s).toBe(600);
+	});
+
+	it.each([
+		[{ max_attempts: 0 }],
+		[{ max_attempts: 51 }],
+		[{ backoff_base_s: 3601 }],
+		[{ backoff_max_s: 43_201 }],
+		[{ backoff_max_s: 10 }],
+		[{ backoff_base_s: 100, backoff_max_s: 50 }],
+	])("rejects an invalid policy %j", async (extra) => {
+		const deps = testDeps();
+		const { project } = await seedPipeline(deps);
+		const api = await adminApp(deps);
+		expect((await create(api, project.id, extra)).status).toBe(400);
+	});
+
+	it("rejects a null reset that makes base exceed max", async () => {
+		const deps = testDeps();
+		const { project } = await seedPipeline(deps);
+		const api = await adminApp(deps);
+		const d = await (
+			await create(api, project.id, { backoff_base_s: 5, backoff_max_s: 10 })
+		).json<Dest>();
+		const res = await api.request("PATCH", `/destinations/${d.id}`, {
+			backoff_base_s: null,
+		});
+		expect(res.status).toBe(400);
+		const after = await (
+			await api.request("GET", `/destinations/${d.id}`)
+		).json<Dest>();
+		expect(after.backoff_base_s).toBe(5);
+	});
+
+	it("pauses idempotently, refuses a disabled destination, and resumes", async () => {
+		const deps = testDeps({ queue: recordingQueue() });
+		const p = await seedPipeline(deps);
+		const api = await adminApp(deps);
+		const pause = () =>
+			api.request("POST", `/destinations/${p.destination.id}/pause`);
+		expect((await (await pause()).json<Dest>()).status).toBe("paused");
+		expect((await pause()).status).toBe(200);
+
+		const resumed = await api.request(
+			"POST",
+			`/destinations/${p.destination.id}/resume`,
+		);
+		expect(resumed.status).toBe(200);
+		expect(await resumed.json()).toMatchObject({
+			destination: { status: "active" },
+			resumed: 0,
+		});
+
+		await api.request("PATCH", `/destinations/${p.destination.id}`, {
+			status: "disabled",
+		});
+		expect((await pause()).status).toBe(409);
+		expect(
+			(await api.request("POST", `/destinations/${p.destination.id}/resume`))
+				.status,
+		).toBe(409);
+	});
+
+	it("resume moves at most 100 paused deliveries and enqueues them", async () => {
+		const queue = recordingQueue();
+		const deps = testDeps({ queue });
+		const p = await seedPipeline(deps, { destination: { status: "paused" } });
+		for (let i = 0; i < 101; i++)
+			await seedDelivery(deps, p, { status: "paused" });
+		const api = await adminApp(deps);
+		const res = await api.request(
+			"POST",
+			`/destinations/${p.destination.id}/resume`,
+		);
+		expect(await res.json()).toMatchObject({ resumed: 100 });
+		expect(queue.sent).toHaveLength(100);
+		const rows = await deps.db
+			.select({ status: deliveries.status })
+			.from(deliveries)
+			.where(eq(deliveries.destinationId, p.destination.id));
+		expect(rows.filter((r) => r.status === "queued")).toHaveLength(100);
+		expect(rows.filter((r) => r.status === "paused")).toHaveLength(1);
+	});
+
+	it("PATCH status active works from paused; paused is not accepted by PATCH", async () => {
+		const deps = testDeps();
+		const p = await seedPipeline(deps, { destination: { status: "paused" } });
+		const api = await adminApp(deps);
+		expect(
+			(
+				await api.request("PATCH", `/destinations/${p.destination.id}`, {
+					status: "paused",
+				})
+			).status,
+		).toBe(400);
+		const res = await api.request(
+			"PATCH",
+			`/destinations/${p.destination.id}`,
+			{ status: "active" },
+		);
+		expect((await res.json<Dest>()).status).toBe("active");
 	});
 });

@@ -14,15 +14,35 @@ export type NewEvent = {
 	delivery: typeof deliveries.$inferInsert;
 };
 
-/** Event and its initial delivery commit together or not at all. */
+/** Event and its initial delivery commit together or not at all. A duplicate
+ * provider event id makes the event insert a no-op, so the delivery insert
+ * fails its FK and the batch rolls back (spec §6.1). */
 export async function insertEventWithDelivery(
 	deps: Deps,
 	input: NewEvent,
 ): Promise<void> {
 	await deps.db.batch([
-		deps.db.insert(webhookEvents).values(input.event),
+		deps.db.insert(webhookEvents).values(input.event).onConflictDoNothing(),
 		deps.db.insert(deliveries).values(input.delivery),
 	]);
+}
+
+export async function findEventIdByProviderId(
+	db: Db,
+	sourceId: string,
+	providerEventId: string,
+): Promise<string | null> {
+	const row = await db
+		.select({ id: webhookEvents.id })
+		.from(webhookEvents)
+		.where(
+			and(
+				eq(webhookEvents.sourceId, sourceId),
+				eq(webhookEvents.providerEventId, providerEventId),
+			),
+		)
+		.get();
+	return row?.id ?? null;
 }
 
 export async function markQueued(

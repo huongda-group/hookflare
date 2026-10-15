@@ -1,11 +1,19 @@
 import { and, desc, eq, lt } from "drizzle-orm";
 import type { Db, Deps } from "../../deps";
 import { decryptSecret } from "../crypto";
-import { projects, type SourceRow, sources } from "./schema";
+import {
+	type DestinationRow,
+	destinations,
+	projects,
+	type SourceRow,
+	sources,
+} from "./schema";
 
 export type SourceBundle = {
 	source: SourceRow;
 	projectStatus: "active" | "disabled";
+	/** Cached with the bundle; the consumer re-checks it (spec §8.3). */
+	destinationStatus: DestinationRow["status"];
 	/** Decrypted source secret; null for auth_type none. */
 	secret: string | null;
 };
@@ -16,9 +24,14 @@ export async function loadSourceBundle(
 	sourceId: string,
 ): Promise<SourceBundle | null> {
 	const [row] = await deps.db
-		.select({ source: sources, projectStatus: projects.status })
+		.select({
+			source: sources,
+			projectStatus: projects.status,
+			destinationStatus: destinations.status,
+		})
 		.from(sources)
 		.innerJoin(projects, eq(projects.id, sources.projectId))
+		.innerJoin(destinations, eq(destinations.id, sources.destinationId))
 		.where(eq(sources.id, sourceId))
 		.limit(1);
 	if (!row) {
@@ -31,7 +44,12 @@ export async function loadSourceBundle(
 				`sources.secret_enc:${sourceId}`,
 			)
 		: null;
-	return { source: row.source, projectStatus: row.projectStatus, secret };
+	return {
+		source: row.source,
+		projectStatus: row.projectStatus,
+		destinationStatus: row.destinationStatus,
+		secret,
+	};
 }
 
 export async function getSource(

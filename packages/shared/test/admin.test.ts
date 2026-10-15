@@ -170,13 +170,15 @@ describe("createSourceRequest", () => {
 		).toBe(true);
 	});
 
-	it("bounds max_body_bytes to 1..65536", () => {
+	it("bounds max_body_bytes to 1..10485760", () => {
 		const s = { ...base, auth_type: "none" };
 		expect(
-			createSourceRequest.safeParse({ ...s, max_body_bytes: 65536 }).success,
+			createSourceRequest.safeParse({ ...s, max_body_bytes: 10_485_760 })
+				.success,
 		).toBe(true);
 		expect(
-			createSourceRequest.safeParse({ ...s, max_body_bytes: 65537 }).success,
+			createSourceRequest.safeParse({ ...s, max_body_bytes: 10_485_761 })
+				.success,
 		).toBe(false);
 		expect(
 			createSourceRequest.safeParse({ ...s, max_body_bytes: 0 }).success,

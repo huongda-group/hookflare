@@ -27,6 +27,7 @@ export function eventRoutes() {
 				status: d.status,
 				attempt_count: d.attemptCount,
 				enqueued_at: d.enqueuedAt,
+				next_attempt_at: d.nextAttemptAt,
 				last_http_status: d.lastHttpStatus,
 				last_error: d.lastError,
 				completed_at: d.completedAt,
