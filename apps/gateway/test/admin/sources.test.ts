@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { clearAccessKeyCache } from "../../src/admin/auth/access";
 import { adminApp } from "../helpers/admin";
 import { testDeps } from "../helpers/deps";
+import { testEnv } from "../helpers/env";
 import { seedPipeline } from "../helpers/seed";
 
 type Src = {
@@ -40,6 +41,23 @@ describe("admin sources", () => {
 		expect(src.ingress_url).toBe(`https://hookflare.example.com/in/${src.id}`);
 		expect(src.secret).toBeUndefined();
 		expect(src.secret_fingerprint).toBeNull();
+	});
+
+	it("builds ingress_url from PUBLIC_BASE_URL when it is set", async () => {
+		const deps = testDeps({
+			env: testEnv({ PUBLIC_BASE_URL: "https://hooks.example.net/" }),
+		});
+		const { project, destination } = await seedPipeline(deps);
+		const api = await adminApp(deps);
+		const res = await api.request("POST", "/sources", {
+			project_id: project.id,
+			destination_id: destination.id,
+			name: "Open",
+			auth_type: "none",
+			auth_config: {},
+		});
+		const src = await res.json<Src>();
+		expect(src.ingress_url).toBe(`https://hooks.example.net/in/${src.id}`);
 	});
 
 	it("returns a generated secret once, then only its fingerprint", async () => {

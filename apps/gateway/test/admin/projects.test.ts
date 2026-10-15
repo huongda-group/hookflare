@@ -69,6 +69,16 @@ describe("admin projects", () => {
 		expect(badSlug.status).toBe(400);
 	});
 
+	it("returns 413 for a body above 64 KiB", async () => {
+		const api = await adminApp(testDeps());
+		const res = await api.request("POST", "/projects", {
+			name: "x".repeat(65_536),
+			slug: slug(),
+		});
+		expect(res.status).toBe(413);
+		expect(await res.json()).toEqual({ error: "payload_too_large" });
+	});
+
 	it("returns 404 for an unknown project", async () => {
 		const api = await adminApp(testDeps());
 		expect(

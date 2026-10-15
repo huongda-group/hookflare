@@ -104,7 +104,7 @@ For local development, copy `apps/gateway/.dev.vars.example` to `apps/gateway/.d
 
 Create an Access application that covers the dashboard (`/`) and the admin API (`/api/admin/*`). Bypass (leave public) `/in/*` and `/healthz`, because webhook providers and uptime monitors must be able to reach them without logging in.
 
-Then set the Access values in `apps/gateway/wrangler.jsonc` → `vars`: `ACCESS_TEAM_DOMAIN` (`https://<team>.cloudflareaccess.com`), `ACCESS_AUD` (the application's AUD tag), and `BOOTSTRAP_ADMIN_EMAILS` (comma-separated). The admin API fails closed (`500`) until both Access values are set. For local development, set `ACCESS_DEV_EMAIL` in `.dev.vars`; it is honored only on `localhost`.
+Then set the Access values in `apps/gateway/wrangler.jsonc` → `vars`: `ACCESS_TEAM_DOMAIN` (`https://<team>.cloudflareaccess.com`), `ACCESS_AUD` (the application's AUD tag), and `BOOTSTRAP_ADMIN_EMAILS` (comma-separated). The admin API fails closed (`500`) until both Access values are set. For local development, set `ACCESS_DEV_EMAIL` in `.dev.vars`; it is honored only on `localhost`. If the ingress hostname differs from the admin hostname, set `PUBLIC_BASE_URL` (e.g. `https://hooks.example.com`) so `ingress_url` in admin responses points at it.
 
 ### 4. Migrate and deploy
 

@@ -47,10 +47,15 @@ async function toSource(
 		event_id_from: row.eventIdFrom,
 		event_id_selector: row.eventIdSelector,
 		max_body_bytes: row.maxBodyBytes,
-		ingress_url: `${new URL(c.req.url).origin}/in/${row.id}`,
+		ingress_url: `${ingressOrigin(c)}/in/${row.id}`,
 		created_at: row.createdAt,
 		updated_at: row.updatedAt,
 	};
+}
+
+function ingressOrigin(c: Context<AppBindings>): string {
+	const base = c.var.deps.env.PUBLIC_BASE_URL;
+	return base ? base.replace(/\/+$/, "") : new URL(c.req.url).origin;
 }
 
 function invalidReference(c: Context<AppBindings>, field: string) {

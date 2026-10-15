@@ -15,7 +15,10 @@
 		"ACCESS_TEAM_DOMAIN": "",
 		"ACCESS_AUD": "",
 		// Comma-separated emails allowed to use the admin API until RBAC (M3).
-		"BOOTSTRAP_ADMIN_EMAILS": ""
+		"BOOTSTRAP_ADMIN_EMAILS": "",
+		// Origin used for ingress_url in admin responses, e.g. https://hooks.example.com.
+		// Empty means the origin of the admin request.
+		"PUBLIC_BASE_URL": ""
 	},
 	"queues": {
 		"producers": [{ "binding": "QUEUE", "queue": "hookflare-deliveries" }],

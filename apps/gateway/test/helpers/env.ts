@@ -25,6 +25,7 @@ export function testEnv(overrides: Partial<AppEnv> = {}): AppEnv {
 		ACCESS_TEAM_DOMAIN: ACCESS_TEST.teamDomain,
 		ACCESS_AUD: ACCESS_TEST.aud,
 		BOOTSTRAP_ADMIN_EMAILS: ACCESS_TEST.admin,
+		PUBLIC_BASE_URL: "",
 		INGRESS_LIMITER: allowAllLimiter,
 		...overrides,
 	};

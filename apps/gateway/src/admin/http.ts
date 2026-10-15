@@ -20,14 +20,28 @@ function issuesOf(error: z.ZodError) {
 	}));
 }
 
+/** Admin payloads are small config objects; anything bigger is a mistake. */
+export const MAX_ADMIN_BODY_BYTES = 65_536;
+
 /** Malformed JSON and schema failures are both 400 invalid_request. */
 export async function readJson<S extends z.ZodType>(
 	c: Context<AppBindings>,
 	schema: S,
 ): Promise<Parsed<z.infer<S>>> {
+	const tooLarge = () => ({
+		ok: false as const,
+		response: c.json({ error: "payload_too_large" }, 413),
+	});
+	if (Number(c.req.header("content-length")) > MAX_ADMIN_BODY_BYTES) {
+		return tooLarge();
+	}
+	const text = await c.req.text();
+	if (new TextEncoder().encode(text).byteLength > MAX_ADMIN_BODY_BYTES) {
+		return tooLarge();
+	}
 	let raw: unknown;
 	try {
-		raw = JSON.parse(await c.req.text());
+		raw = JSON.parse(text);
 	} catch {
 		return {
 			ok: false,

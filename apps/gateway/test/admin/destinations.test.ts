@@ -162,6 +162,10 @@ describe("admin destinations", () => {
 			url: "https://evil.example.com/",
 		});
 		expect(res.status).toBe(422);
+		expect(await res.json()).toEqual({
+			error: "unsafe_url",
+			reason: "private_address",
+		});
 		const got = await (
 			await api.request("GET", `/destinations/${destination.id}`)
 		).json<Dest>();
