@@ -219,3 +219,17 @@ export async function listEventDeliveries(
 		.orderBy(asc(deliveries.createdAt), asc(deliveries.id))
 		.all();
 }
+
+/** The only reader of event bodies on the admin side (spec §8.3). */
+export async function getEventPayloadRef(db: Db, id: string) {
+	return db
+		.select({
+			id: webhookEvents.id,
+			contentType: webhookEvents.contentType,
+			r2Key: webhookEvents.r2Key,
+			bodyInline: webhookEvents.bodyInline,
+		})
+		.from(webhookEvents)
+		.where(eq(webhookEvents.id, id))
+		.get();
+}

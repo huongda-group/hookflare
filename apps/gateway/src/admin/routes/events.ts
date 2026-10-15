@@ -3,14 +3,16 @@ import { Hono } from "hono";
 import type { AppBindings } from "../../app";
 import {
 	getEventDetail,
+	getEventPayloadRef,
 	latestDeliveries,
 	listEventDeliveries,
 	searchEvents,
 } from "../../core/db/events";
+import { loadPayload } from "../../core/payloads";
 import { requirePermission } from "../auth/permission";
 import { decodeCursor, encodeCursor } from "../cursor";
 import { toAttempt, toDelivery } from "../dto";
-import { badCursor, readQuery } from "../http";
+import { auditStmt, badCursor, readQuery } from "../http";
 
 export function eventRoutes() {
 	const routes = new Hono<AppBindings>();
@@ -74,6 +76,45 @@ export function eventRoutes() {
 			return c.json({ error: "not_found" }, 404);
 		}
 		return c.json({ data: rows.map(toDelivery), next_cursor: null });
+	});
+
+	routes.get("/:id/payload", requirePermission("payload.read"), async (c) => {
+		const deps = c.var.deps;
+		const ref = await getEventPayloadRef(deps.db, c.req.param("id"));
+		if (!ref) return c.json({ error: "not_found" }, 404);
+		let body: Uint8Array | null;
+		try {
+			body = await loadPayload(deps, ref);
+		} catch (err) {
+			c.var.logger.error("admin.payload_load_failed", {
+				event_id: ref.id,
+				error: String(err),
+			});
+			return c.json({ error: "unavailable" }, 503);
+		}
+		if (body === null) return c.json({ error: "payload_missing" }, 404);
+		// Spec §8.3: no audit row, no payload.
+		try {
+			await auditStmt(c, {
+				action: "event.payload_viewed",
+				resourceType: "event",
+				resourceId: ref.id,
+			});
+		} catch (err) {
+			c.var.logger.error("admin.audit_failed", {
+				event_id: ref.id,
+				error: String(err),
+			});
+			return c.json({ error: "unavailable" }, 503);
+		}
+		return new Response(body, {
+			headers: {
+				"content-type": ref.contentType ?? "application/octet-stream",
+				"content-disposition": `attachment; filename="${ref.id}"`,
+				"x-content-type-options": "nosniff",
+				"cache-control": "no-store",
+			},
+		});
 	});
 
 	routes.get("/:id", requirePermission("events.read"), async (c) => {
