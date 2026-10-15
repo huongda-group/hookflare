@@ -1,4 +1,5 @@
-export const INLINE_BODY_LIMIT = 65_536;
+import { INLINE_BODY_LIMIT } from "../core/payloads";
+
 export const DEFAULT_MAX_BODY_BYTES = 1_048_576;
 
 /** M1 stores bodies inline only, so the effective cap is at most 64 KiB (§6 step 3). */

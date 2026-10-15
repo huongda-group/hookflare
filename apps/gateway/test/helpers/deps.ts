@@ -8,6 +8,8 @@ export const PUBLIC_IP = "93.184.216.34";
 
 export type RecordingQueue = Queue<DeliveryMessage> & {
 	sent: DeliveryMessage[];
+	/** delaySeconds of each send, parallel to `sent`. */
+	delays: (number | undefined)[];
 };
 
 /** Stands in for env.QUEUE: a real send would run the consumer inside tests. */
@@ -15,17 +17,20 @@ export function recordingQueue(
 	options: { fail?: boolean } = {},
 ): RecordingQueue {
 	const sent: DeliveryMessage[] = [];
+	const delays: (number | undefined)[] = [];
 	const queue = {
 		sent,
-		async send(body: DeliveryMessage) {
+		delays,
+		async send(body: DeliveryMessage, opts?: QueueSendOptions) {
 			if (options.fail) {
 				throw new Error("queue unavailable");
 			}
 			sent.push(body);
+			delays.push(opts?.delaySeconds);
 		},
-		async sendBatch(messages: Iterable<{ body: DeliveryMessage }>) {
+		async sendBatch(messages: Iterable<MessageSendRequest<DeliveryMessage>>) {
 			for (const m of messages) {
-				await queue.send(m.body);
+				await queue.send(m.body, { delaySeconds: m.delaySeconds });
 			}
 		},
 	};
@@ -37,6 +42,7 @@ export function testDeps(overrides: Partial<Deps> = {}): Deps {
 	return {
 		db: drizzle(env.DB, { schema }),
 		queue: recordingQueue(),
+		payloads: env.PAYLOADS,
 		fetch: vi.fn(
 			async () => new Response("ok", { status: 200 }),
 		) as unknown as typeof fetch,
