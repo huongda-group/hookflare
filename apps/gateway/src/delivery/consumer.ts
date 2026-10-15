@@ -152,6 +152,20 @@ export async function processDelivery(
 		});
 		return ACK;
 	}
+	// A duplicate message must not cut the backoff short; the due one still arrives.
+	const { nextAttemptAt } = ctx.delivery;
+	if (
+		ctx.delivery.status === "retrying" &&
+		nextAttemptAt !== null &&
+		nextAttemptAt > deps.now()
+	) {
+		const delaySeconds = Math.ceil((nextAttemptAt - deps.now()) / 1000);
+		logger.info("delivery.not_due", {
+			delivery_id: deliveryId,
+			delay_s: delaySeconds,
+		});
+		return { action: "retry", delaySeconds };
+	}
 	const policy = resolvePolicy(ctx.destination);
 	const finish = async (lastError: string) => {
 		await finishWithoutAttempt(deps, deliveryId, lastError);
@@ -188,8 +202,7 @@ export async function processDelivery(
 				return await finish(`ssrf_blocked: ${check.reason}`);
 			}
 		} catch (err) {
-			if (err instanceof DnsError) return infra("dns", err);
-			throw err;
+			return infra(err instanceof DnsError ? "dns" : "ssrf", err);
 		}
 		try {
 			request = await sign(deps, ctx, body);
@@ -310,7 +323,21 @@ export async function handleDeliveryBatch(
 				msg.ack();
 				return;
 			}
-			const d = await processDelivery(deps, deliveryId, logger, msg.attempts);
+			let d: Disposition;
+			try {
+				d = await processDelivery(deps, deliveryId, logger, msg.attempts);
+			} catch (err) {
+				// A bug in one message must not retry the rest of the batch.
+				const delaySeconds = infraDelaySeconds(msg.attempts);
+				logger.error("delivery.infra_retry", {
+					delivery_id: deliveryId,
+					stage: "unexpected",
+					msg_attempts: msg.attempts,
+					delay_s: delaySeconds,
+					error: String(err),
+				});
+				d = { action: "retry", delaySeconds };
+			}
 			if (d.action === "ack") msg.ack();
 			else msg.retry({ delaySeconds: d.delaySeconds });
 		}),

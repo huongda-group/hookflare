@@ -15,7 +15,7 @@ describe("DLQ consumer", () => {
 		vi.spyOn(console, "error").mockImplementation(() => {});
 	});
 
-	it("marks non-terminal deliveries dead and leaves paused and terminal ones", async () => {
+	it("marks claimable deliveries dead and leaves live leases, paused, and terminal ones", async () => {
 		const deps = testDeps({ now: () => T0 });
 		const p = await seedPipeline(deps);
 		const seeded = await Promise.all(
@@ -24,14 +24,19 @@ describe("DLQ consumer", () => {
 					"queued",
 					"retrying",
 					"in_flight",
+					"in_flight",
 					"paused",
 					"delivered",
 					"failed_final",
 				] as const
-			).map((status) =>
+			).map((status, i) =>
 				seedDelivery(deps, p, {
 					status,
-					delivery: { leaseUntil: status === "in_flight" ? T0 + 1 : null },
+					// [2] lease expired, [3] lease still live.
+					delivery: {
+						leaseUntil:
+							status === "in_flight" ? (i === 2 ? T0 - 1 : T0 + 1) : null,
+					},
 				}),
 			),
 		);
@@ -50,6 +55,7 @@ describe("DLQ consumer", () => {
 			"dead",
 			"dead",
 			"dead",
+			"in_flight",
 			"paused",
 			"delivered",
 			"failed_final",

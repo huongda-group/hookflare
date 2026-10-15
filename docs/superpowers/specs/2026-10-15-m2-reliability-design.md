@@ -168,7 +168,7 @@ Messages in a batch are processed concurrently. `index.ts` routes a batch to the
 | Step | Behavior | Message outcome |
 |---|---|---|
 | 1. Load | Delivery + event + destination. Not found → log `delivery.not_found` | not found: `ack`. D1 error: infra retry |
-| 2. Claimable? | Not claimable → log `delivery.skipped` | `ack` |
+| 2. Claimable? | Not claimable → log `delivery.skipped`. `retrying` with `next_attempt_at > now` (a duplicate message) → log `delivery.not_due`, no attempt | skipped: `ack`. Not due: `retry` with the remaining delay |
 | 3. Destination | `paused` → conditional update to `paused` (`lease_until`/`next_attempt_at` NULL). `disabled` → `failed_final (destination_disabled)`. No attempt | `ack` |
 | 4. Payload | `r2_key` NULL → `body_inline`; else `payloads.get(r2_key)`. Object missing → `failed_final (payload_missing)`, no attempt | `ack`. R2 error: infra retry |
 | 5. SSRF | `checkUrl` (M1 §8). Blocked → `failed_final (ssrf_blocked: <reason>)`, no attempt | blocked: `ack`. `DnsError`: **infra retry** |
@@ -197,7 +197,7 @@ The classifier stays a pure function: `(response | error, n, policy, now, random
 
 ### 7.2 Lease as fencing token
 
-The record update matches `lease_until = :L`. If a reconciler (§8.1 rule b) or another consumer took over after this lease expired, or the DLQ consumer marked the delivery `dead`, the update affects 0 rows. Because a D1 batch is atomic, the record function runs the update first and makes the attempt insert conditional on it (`INSERT … SELECT … WHERE changes() = 1` or an equivalent the plan verifies), so a stale worker writes neither row. The request was still sent, so the backend may see it twice with the same `webhook-id`: **at-least-once by design**.
+The record update matches `lease_until = :L`. If a reconciler (§8.1 rule b), another consumer, or the DLQ consumer (§8.2) took over after this lease expired, the update affects 0 rows. Because a D1 batch is atomic, the record function runs the update first and makes the attempt insert conditional on it (`INSERT … SELECT … WHERE changes() = 1` or an equivalent the plan verifies), so a stale worker writes neither row. The request was still sent, so the backend may see it twice with the same `webhook-id`: **at-least-once by design**.
 
 ### 7.3 Backoff — `delivery/backoff.ts`
 
@@ -239,7 +239,7 @@ function resolvePolicy(d: DestinationRow): Policy; // NULL column → default
 
 ### 8.2 DLQ consumer — `delivery/dlq.ts`
 
-For each message: `UPDATE deliveries SET status='dead', last_error='dlq: infra retries exhausted', lease_until=NULL, next_attempt_at=NULL, completed_at=:now WHERE id=:id AND status IN ('pending','queued','retrying','in_flight')`, log `delivery.dead`, `ack`. `paused` and terminal deliveries are left alone. Malformed message → log + `ack`. D1 error → `msg.retry()`.
+For each message: `UPDATE deliveries SET status='dead', last_error='dlq: infra retries exhausted', lease_until=NULL, next_attempt_at=NULL, completed_at=:now WHERE id=:id AND <claimable>`, log `delivery.dead`, `ack`. `paused`, terminal, and live-lease `in_flight` deliveries are left alone, so a worker mid-request still records its result. Malformed message → log + `ack`. D1 error → `msg.retry()`.
 
 ### 8.3 Pause / Resume — admin API
 
@@ -261,7 +261,7 @@ For each message: `UPDATE deliveries SET status='dead', last_error='dlq: infra r
 
 ## 9. Logging
 
-New events: `delivery.retry_scheduled` (`attempt_no`, `delay_s`), `delivery.dead` (`reason`: `budget` or `dlq`), `delivery.infra_retry` (`stage`, `msg_attempts`), `delivery.reschedule_failed`, `delivery.lease_lost`, `reconcile.run`, `reconcile.failed`, plus the ingress events in §6. No payload, secret, or signature is logged.
+New events: `delivery.retry_scheduled` (`attempt_no`, `delay_s`), `delivery.dead` (`reason`: `budget` or `dlq`), `delivery.infra_retry` (`stage`, `msg_attempts`), `delivery.reschedule_failed`, `delivery.lease_lost`, `delivery.not_due` (`delay_s`), `reconcile.run`, `reconcile.failed`, plus the ingress events in §6. No payload, secret, or signature is logged.
 
 ## 10. Testing
 

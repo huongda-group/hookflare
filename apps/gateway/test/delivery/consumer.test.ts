@@ -497,6 +497,33 @@ describe("processDelivery retries (M2)", () => {
 		});
 	});
 
+	it("defers a retrying delivery that is not due yet, without a request", async () => {
+		const fetchMock = fetchReturning(() => new Response("ok"));
+		const { deps, advance } = clocked({ fetch: fetchMock });
+		const p = await seedPipeline(deps);
+		const { deliveryId } = await seedDelivery(deps, p, {
+			delivery: {
+				status: "retrying",
+				attemptCount: 1,
+				nextAttemptAt: T0 + 29_500,
+			},
+		});
+		expect(await processDelivery(deps, deliveryId, logger)).toEqual({
+			action: "retry",
+			delaySeconds: 30,
+		});
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect((await state(deps, deliveryId)).delivery).toMatchObject({
+			status: "retrying",
+			attemptCount: 1,
+		});
+		advance(29_500);
+		expect(await processDelivery(deps, deliveryId, logger)).toEqual({
+			action: "ack",
+		});
+		expect((await state(deps, deliveryId)).delivery.status).toBe("delivered");
+	});
+
 	it("parks a delivery of a paused destination without a request", async () => {
 		const fetchMock = fetchReturning(() => new Response("ok"));
 		const { deps } = clocked({ fetch: fetchMock });
@@ -612,6 +639,28 @@ describe("handleDeliveryBatch", () => {
 		);
 		expect(good.ack).toHaveBeenCalled();
 		expect(infra.retry).toHaveBeenCalledWith({ delaySeconds: 120 });
+		expect(bad.ack).toHaveBeenCalled();
+	});
+
+	it("retries only the message whose processing throws unexpectedly", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		const { deps: base } = clocked();
+		const p = await seedPipeline(base);
+		const { deliveryId } = await seedDelivery(base, p);
+		const deps: Deps = {
+			...base,
+			now: () => {
+				throw new Error("boom");
+			},
+		};
+		const broken = fakeMessage({ deliveryId }, 3);
+		const bad = fakeMessage({ nope: 1 });
+		await handleDeliveryBatch(
+			fakeBatch("hookflare-deliveries", [broken, bad]),
+			deps,
+		);
+		expect(broken.retry).toHaveBeenCalledWith({ delaySeconds: 240 });
 		expect(bad.ack).toHaveBeenCalled();
 	});
 });

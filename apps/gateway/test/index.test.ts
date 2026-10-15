@@ -14,7 +14,7 @@ describe("worker entry", () => {
 		const p = await seedPipeline(deps);
 		const { deliveryId } = await seedDelivery(deps, p, { status: "retrying" });
 		const msg = fakeMessage({ deliveryId });
-		await worker.queue!(
+		await worker.queue?.(
 			fakeBatch("hookflare-deliveries-dlq", [msg]),
 			testEnv(),
 		);

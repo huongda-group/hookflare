@@ -153,7 +153,7 @@ export async function recordLeasedAttempt(
 	);
 }
 
-/** Spec §8.2: only non-terminal, non-paused deliveries become dead. */
+/** Spec §8.2: only claimable deliveries become dead; a live lease is left to its worker. */
 export async function markDeadFromDlq(
 	deps: Deps,
 	deliveryId: string,
@@ -167,17 +167,7 @@ export async function markDeadFromDlq(
 			nextAttemptAt: null,
 			completedAt: deps.now(),
 		})
-		.where(
-			and(
-				eq(deliveries.id, deliveryId),
-				inArray(deliveries.status, [
-					"pending",
-					"queued",
-					"retrying",
-					"in_flight",
-				]),
-			),
-		);
+		.where(and(eq(deliveries.id, deliveryId), claimable(deps.now())));
 	return result.meta.changes === 1;
 }
 
