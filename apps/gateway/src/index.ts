@@ -3,6 +3,7 @@ import { handleDeliveryBatch } from "./delivery/consumer";
 import { DLQ_QUEUE, handleDlqBatch } from "./delivery/dlq";
 import { createDeps, type DeliveryMessage } from "./deps";
 import type { AppEnv } from "./env";
+import { runScheduled } from "./jobs/scheduled";
 
 const app = createApp();
 
@@ -13,5 +14,8 @@ export default {
 		await (batch.queue === DLQ_QUEUE
 			? handleDlqBatch(batch, deps)
 			: handleDeliveryBatch(batch, deps));
+	},
+	async scheduled(controller, env) {
+		await runScheduled(controller.cron, createDeps(env));
 	},
 } satisfies ExportedHandler<AppEnv, DeliveryMessage>;
