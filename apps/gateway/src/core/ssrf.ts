@@ -28,18 +28,26 @@ const V4_BLOCKED: Array<[string, number]> = [
 	["169.254.0.0", 16],
 	["172.16.0.0", 12],
 	["192.0.0.0", 24],
+	["192.0.2.0", 24],
 	["192.168.0.0", 16],
 	["198.18.0.0", 15],
+	["198.51.100.0", 24],
+	["203.0.113.0", 24],
 	["224.0.0.0", 4],
 	["240.0.0.0", 4],
 ];
 const V6_BLOCKED: Array<[string, number]> = [
-	["::", 128],
-	["::1", 128],
+	["::", 96], // unspecified, loopback, and deprecated IPv4-compatible
+	["64:ff9b:1::", 48], // local-use NAT64
+	["100::", 64], // discard
+	["2001::", 32], // Teredo: the client IPv4 is obfuscated, so block it all
+	["2001:db8::", 32], // documentation
 	["fc00::", 7],
 	["fe80::", 10],
 	["ff00::", 8],
 ];
+/** 6to4 embeds its IPv4 address in bits 16..47, checked instead. */
+const V6_6TO4: [string, number] = ["2002::", 16];
 /** Prefixes whose last 32 bits embed an IPv4 address that is checked instead. */
 const V6_EMBEDDED_V4: Array<[string, number]> = [
 	["::ffff:0:0", 96],
@@ -144,6 +152,9 @@ export function isBlockedAddress(address: string): boolean {
 	const v6 = parseIPv6(address);
 	if (v6 === null) {
 		return true;
+	}
+	if (inV6(v6, ...V6_6TO4)) {
+		return isBlockedV4((v6[1] as number) * 0x10000 + (v6[2] as number));
 	}
 	for (const [base, bits] of V6_EMBEDDED_V4) {
 		if (inV6(v6, base, bits)) {
