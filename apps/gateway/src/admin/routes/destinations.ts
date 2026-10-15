@@ -140,6 +140,8 @@ export function destinationRoutes() {
 			url: body.value.url,
 			status: "active",
 			signingSecretEnc: await encryptSecret(env, signingSecret, aad(id)),
+			signingSecretPrevEnc: null,
+			signingSecretPrevExpiresAt: null,
 			timeoutMs: body.value.timeout_ms ?? null,
 			maxAttempts: body.value.max_attempts ?? null,
 			backoffBaseS: body.value.backoff_base_s ?? null,

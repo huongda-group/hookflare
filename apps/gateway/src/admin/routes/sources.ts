@@ -101,6 +101,8 @@ export function sourceRoutes() {
 			authConfig: req.auth_config,
 			secretEnc:
 				secret === undefined ? null : await encryptSecret(env, secret, aad(id)),
+			secretPrevEnc: null,
+			secretPrevExpiresAt: null,
 			eventIdFrom: req.event_id_from,
 			eventIdSelector:
 				req.event_id_from === "none" ? null : (req.event_id_selector ?? null),
