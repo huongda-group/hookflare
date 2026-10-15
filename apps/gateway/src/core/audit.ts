@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import type { Db } from "../deps";
 import { auditLogs } from "./db/schema";
 import { newId } from "./ids";
@@ -71,4 +72,28 @@ export function auditInsert(db: Db, e: AuditEntry) {
 				: (redactDiff(e.diff) as Record<string, unknown>),
 		at: e.at,
 	});
+}
+
+/**
+ * For a conditional UPDATE in the same db.batch: the audit row is written
+ * only if the statement right before it changed a row. D1 runs a batch on
+ * one connection in order, so changes() refers to that statement.
+ */
+export function auditInsertIfChanged(db: Db, e: AuditEntry) {
+	const diff = e.diff === undefined ? null : JSON.stringify(redactDiff(e.diff));
+	return db.insert(auditLogs).select(
+		db
+			.select({
+				id: sql<string>`${newId("aud", e.at)}`.as("id"),
+				actorEmail: sql<string>`${e.actor}`.as("actor_email"),
+				action: sql<string>`${e.action}`.as("action"),
+				resourceType: sql<string>`${e.resourceType}`.as("resource_type"),
+				resourceId: sql<string | null>`${e.resourceId}`.as("resource_id"),
+				reason: sql<string | null>`${e.reason ?? null}`.as("reason"),
+				diffJson: sql<string | null>`${diff}`.as("diff_json"),
+				at: sql<number>`${e.at}`.as("at"),
+			})
+			.from(sql`(SELECT 1)`)
+			.where(sql`changes() > 0`),
+	);
 }

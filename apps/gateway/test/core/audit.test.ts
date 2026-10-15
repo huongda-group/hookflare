@@ -1,7 +1,12 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
-import { auditInsert, redactDiff } from "../../src/core/audit";
-import { auditLogs } from "../../src/core/db/schema";
+import {
+	auditInsert,
+	auditInsertIfChanged,
+	redactDiff,
+} from "../../src/core/audit";
+import { auditLogs, users } from "../../src/core/db/schema";
+import { auditRows, uniqueEmail } from "../helpers/admin";
 import { testDeps } from "../helpers/deps";
 
 describe("redactDiff", () => {
@@ -49,5 +54,37 @@ describe("auditInsert", () => {
 		expect(row.diffJson).toEqual({ name: "n" });
 		expect(row.reason).toBeNull();
 		expect(row.at).toBe(at);
+	});
+
+	it("auditInsertIfChanged writes only after a changing statement", async () => {
+		const deps = testDeps();
+		const email = uniqueEmail("chg");
+		const now = deps.now();
+		const entry = (resourceId: string) => ({
+			actor: "t@example.com",
+			action: "user.disabled" as const,
+			resourceType: "user",
+			resourceId,
+			at: now,
+		});
+		await deps.db.batch([
+			deps.db
+				.update(users)
+				.set({ updatedAt: now })
+				.where(eq(users.email, email)),
+			auditInsertIfChanged(deps.db, entry(email)),
+		]);
+		expect(await auditRows(deps, email)).toEqual([]);
+		await deps.db
+			.insert(users)
+			.values({ email, role: "viewer", createdAt: now, updatedAt: now });
+		await deps.db.batch([
+			deps.db
+				.update(users)
+				.set({ updatedAt: now + 1 })
+				.where(eq(users.email, email)),
+			auditInsertIfChanged(deps.db, entry(email)),
+		]);
+		expect(await auditRows(deps, email)).toHaveLength(1);
 	});
 });
