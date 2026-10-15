@@ -29,6 +29,7 @@ import { type DestinationRow, destinations } from "../../core/db/schema";
 import { enqueueThenMark } from "../../core/enqueue";
 import { newId } from "../../core/ids";
 import { resolvePolicy } from "../../core/policy";
+import { aad } from "../../core/secrets";
 import type { AppEnv } from "../../env";
 import { requirePermission } from "../auth/permission";
 import {
@@ -39,8 +40,6 @@ import {
 	readOptionalJson,
 	readQuery,
 } from "../http";
-
-const aad = (id: string) => `destinations.signing_secret_enc:${id}`;
 
 /** Standard Webhooks secret: whsec_ + base64(32 random bytes). */
 function generateSigningSecret(): string {
@@ -63,7 +62,7 @@ export async function toDestination(
 		backoff_base_s: row.backoffBaseS,
 		backoff_max_s: row.backoffMaxS,
 		signing_secret_fingerprint: await secretFingerprint(
-			await decryptSecret(env, row.signingSecretEnc, aad(row.id)),
+			await decryptSecret(env, row.signingSecretEnc, aad.destination(row.id)),
 		),
 		previous_secret_fingerprint: null,
 		previous_secret_expires_at: null,
@@ -144,7 +143,11 @@ export function destinationRoutes() {
 			name: fields.name,
 			url: fields.url,
 			status: "active",
-			signingSecretEnc: await encryptSecret(env, signingSecret, aad(id)),
+			signingSecretEnc: await encryptSecret(
+				env,
+				signingSecret,
+				aad.destination(id),
+			),
 			signingSecretPrevEnc: null,
 			signingSecretPrevExpiresAt: null,
 			timeoutMs: fields.timeout_ms ?? null,

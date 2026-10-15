@@ -1,10 +1,9 @@
 import type { ErrorKind } from "../core/db/schema";
+import { failureOf, type SendResult } from "../core/outbound";
 import type { Policy } from "../core/policy";
 import { retryAfterDelaySeconds, retryDelaySeconds } from "./backoff";
 
-export type SendResult =
-	| { kind: "response"; status: number; retryAfter: string | null }
-	| { kind: "error"; error: unknown };
+export type { SendResult };
 
 export type AttemptContext = {
 	/** attempt_count + 1 for this attempt. */
@@ -31,19 +30,14 @@ export function classifyAttempt(
 	result: SendResult,
 	ctx: AttemptContext,
 ): AttemptOutcome {
+	const failure = failureOf(result, ctx.policy.timeoutMs);
 	if (result.kind === "error") {
-		const timeout =
-			(result.error as { name?: unknown } | null)?.name === "TimeoutError";
-		const message = timeout
-			? `timeout after ${ctx.policy.timeoutMs} ms`
-			: (result.error instanceof Error
-					? `${result.error.name}: ${result.error.message}`
-					: String(result.error)
-				).slice(0, 500);
-		return retryable(timeout ? "timeout" : "network", null, message, ctx, null);
+		// failure is non-null for every error result
+		const f = failure as NonNullable<typeof failure>;
+		return retryable(f.errorKind, null, f.message, ctx, null);
 	}
 	const { status } = result;
-	if (status >= 200 && status < 300) {
+	if (!failure) {
 		return {
 			status: "delivered",
 			errorKind: null,
@@ -52,9 +46,7 @@ export function classifyAttempt(
 			delaySeconds: null,
 		};
 	}
-	const errorKind: ErrorKind =
-		status < 400 ? "http_3xx" : status < 500 ? "http_4xx" : "http_5xx";
-	const error = `HTTP ${status}`;
+	const { errorKind, message: error } = failure;
 	if (status >= 500 || RETRYABLE_4XX.has(status)) {
 		return retryable(
 			errorKind,

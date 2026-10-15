@@ -1,6 +1,7 @@
 import { and, desc, eq, lt } from "drizzle-orm";
 import type { Db, Deps } from "../../deps";
 import { decryptSecret } from "../crypto";
+import { aad, activeSecrets } from "../secrets";
 import {
 	type DestinationRow,
 	destinations,
@@ -16,6 +17,9 @@ export type SourceBundle = {
 	destinationStatus: DestinationRow["status"];
 	/** Decrypted source secret; null for auth_type none. */
 	secret: string | null;
+	/** Decrypted previous secret while its grace window is open at load time. */
+	previousSecret: string | null;
+	previousSecretExpiresAt: number | null;
 };
 
 /** null when the source does not exist. D1 and decrypt errors propagate. */
@@ -38,17 +42,28 @@ export async function loadSourceBundle(
 		return null;
 	}
 	const secret = row.source.secretEnc
-		? await decryptSecret(
-				deps.env,
-				row.source.secretEnc,
-				`sources.secret_enc:${sourceId}`,
-			)
+		? await decryptSecret(deps.env, row.source.secretEnc, aad.source(sourceId))
+		: null;
+	const { prevEnc } = activeSecrets(
+		{
+			enc: row.source.secretEnc ?? "",
+			prevEnc: row.source.secretPrevEnc,
+			prevExpiresAt: row.source.secretPrevExpiresAt,
+		},
+		deps.now(),
+	);
+	const previousSecret = prevEnc
+		? await decryptSecret(deps.env, prevEnc, aad.sourcePrev(sourceId))
 		: null;
 	return {
 		source: row.source,
 		projectStatus: row.projectStatus,
 		destinationStatus: row.destinationStatus,
 		secret,
+		previousSecret,
+		previousSecretExpiresAt: previousSecret
+			? row.source.secretPrevExpiresAt
+			: null,
 	};
 }
 

@@ -22,10 +22,9 @@ import { getProject } from "../../core/db/projects";
 import { type SourceRow, sources } from "../../core/db/schema";
 import { getSource, listSources } from "../../core/db/sources";
 import { newId } from "../../core/ids";
+import { aad } from "../../core/secrets";
 import { requirePermission } from "../auth/permission";
 import { auditStmt, paginate, readJson, readQuery } from "../http";
-
-const aad = (id: string) => `sources.secret_enc:${id}`;
 
 async function toSource(
 	c: Context<AppBindings>,
@@ -42,7 +41,7 @@ async function toSource(
 		auth_config: row.authConfig as Source["auth_config"],
 		secret_fingerprint: row.secretEnc
 			? await secretFingerprint(
-					await decryptSecret(env, row.secretEnc, aad(row.id)),
+					await decryptSecret(env, row.secretEnc, aad.source(row.id)),
 				)
 			: null,
 		previous_secret_fingerprint: null,
@@ -103,7 +102,9 @@ export function sourceRoutes() {
 			authType: req.auth_type,
 			authConfig: req.auth_config,
 			secretEnc:
-				secret === undefined ? null : await encryptSecret(env, secret, aad(id)),
+				secret === undefined
+					? null
+					: await encryptSecret(env, secret, aad.source(id)),
 			secretPrevEnc: null,
 			secretPrevExpiresAt: null,
 			eventIdFrom: req.event_id_from,

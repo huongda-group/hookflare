@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildOutboundHeaders, signWebhook } from "../../src/delivery/sign";
+import {
+	buildOutboundHeaders,
+	signWebhook,
+	signWebhookAll,
+} from "../../src/core/sign";
 
 const enc = (s: string) =>
 	new TextEncoder().encode(s) as Uint8Array<ArrayBuffer>;
@@ -78,4 +82,27 @@ describe("buildOutboundHeaders", () => {
 		});
 		expect(h.has("content-type")).toBe(false);
 	});
+});
+
+it("signs with every secret, current first, space-separated", async () => {
+	const body = new TextEncoder().encode("{}");
+	const a = "whsec_YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=";
+	const b = "whsec_YmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmI=";
+	const one = (secret: string) =>
+		signWebhook({ id: "x", timestampSec: 1, body, secret });
+	expect(
+		await signWebhookAll({ id: "x", timestampSec: 1, body, secrets: [a, b] }),
+	).toBe(`${await one(a)} ${await one(b)}`);
+});
+
+it("omits x-webhook-event-id when there is no event", () => {
+	const h = buildOutboundHeaders({
+		storedHeaders: {},
+		contentType: "application/json",
+		deliveryId: "tst_1",
+		timestampSec: 1,
+		signature: "v1,x",
+	});
+	expect(h.has("x-webhook-event-id")).toBe(false);
+	expect(h.get("webhook-id")).toBe("tst_1");
 });

@@ -94,15 +94,32 @@ export function ingressRoutes() {
 			return reject(413, "payload_too_large", "too_large");
 		}
 
-		// 4. Verify against the raw bytes.
+		// 4. Verify against the raw bytes: current secret, then the previous one in grace (spec §11.1).
 		const url = new URL(c.req.url);
-		const verdict = await verifiers[source.authType].verify({
-			headers: c.req.raw.headers,
-			url,
-			body,
-			config: source.authConfig,
-			secret,
-		});
+		const verify = (s: string | null) =>
+			verifiers[source.authType].verify({
+				headers: c.req.raw.headers,
+				url,
+				body,
+				config: source.authConfig,
+				secret: s,
+			});
+		let verdict = await verify(secret);
+		const { previousSecret, previousSecretExpiresAt } = bundle;
+		if (
+			!verdict.ok &&
+			previousSecret &&
+			previousSecretExpiresAt !== null &&
+			previousSecretExpiresAt > deps.now()
+		) {
+			const prev = await verify(previousSecret);
+			if (prev.ok) {
+				verdict = prev;
+				logger.info("ingress.verified_with_prev_secret", {
+					source_id: source.id,
+				});
+			}
+		}
 		if (!verdict.ok) {
 			return reject(401, "unauthorized", "unauthorized", {
 				verify_failure: verdict.reason,
