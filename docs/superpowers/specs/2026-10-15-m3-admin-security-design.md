@@ -271,7 +271,7 @@ Tests never touch `deliveries`, the queue, the retry budget, or the limiter. **`
 - **`grace_hours = 0`:** clears the prev columns instead of storing an already-expired secret.
 - **Expiry:** `core/secrets.ts` `activeSecrets(row, now)` ignores an expired prev. Expired columns are cleared lazily on the next rotate or update of that row; no job is needed.
 - **DTOs** gain `previous_secret_fingerprint` and `previous_secret_expires_at` (null when no prev is active).
-- **Audit:** `source.secret_rotated` / `destination.secret_rotated` with `{grace_hours, previous_secret_expires_at, new_fingerprint}`.
+- **Audit:** `source.secret_rotated` / `destination.secret_rotated` with `{grace_hours, prev_expires_at, new_fingerprint}`. (`previous_secret_expires_at` would be dropped by the redactor, whose key pattern matches `secret`.)
 
 ## 12. Users and `/me`
 
