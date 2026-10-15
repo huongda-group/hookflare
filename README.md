@@ -100,8 +100,6 @@ pnpm exec wrangler secret put SECRETS_KEY --config apps/gateway/wrangler.jsonc
 
 For local development, copy `apps/gateway/.dev.vars.example` to `apps/gateway/.dev.vars` and fill in a key.
 
-(The Access-related settings, `BOOTSTRAP_ADMIN_EMAILS`, `ACCESS_TEAM_DOMAIN`, and `ACCESS_AUD`, arrive with the admin API in M3.)
-
 ### 3. Protect the dashboard with Cloudflare Access
 
 Create an Access application that covers the dashboard (`/`) and the admin API (`/api/admin/*`). Bypass (leave public) `/in/*` and `/healthz`, because webhook providers and uptime monitors must be able to reach them without logging in.
