@@ -43,28 +43,44 @@ export async function readSnippet(
 	return len === 0 ? null : new TextDecoder().decode(buf.subarray(0, len));
 }
 
+type SignedRequest = {
+	body: Uint8Array<ArrayBuffer>;
+	timestampSec: number;
+	signature: string;
+};
+
+/** Gateway-side work: a failure here is our fault and never counts as an attempt. */
+async function prepare(
+	deps: Deps,
+	ctx: DeliveryContext,
+): Promise<SignedRequest> {
+	const { delivery, event, destination } = ctx;
+	const secret = await decryptSecret(
+		deps.env,
+		destination.signingSecretEnc,
+		`destinations.signing_secret_enc:${destination.id}`,
+	);
+	const body = new Uint8Array(
+		event.bodyInline ?? new Uint8Array(),
+	) as Uint8Array<ArrayBuffer>;
+	const timestampSec = Math.floor(deps.now() / 1000);
+	const signature = await signWebhook({
+		id: delivery.id,
+		timestampSec,
+		body,
+		secret,
+	});
+	return { body, timestampSec, signature };
+}
+
 async function send(
 	deps: Deps,
 	ctx: DeliveryContext,
+	{ body, timestampSec, signature }: SignedRequest,
 ): Promise<{ outcome: Outcome; snippet: string | null }> {
 	const { delivery, event, destination } = ctx;
 	const timeoutMs = destination.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 	try {
-		const secret = await decryptSecret(
-			deps.env,
-			destination.signingSecretEnc,
-			`destinations.signing_secret_enc:${destination.id}`,
-		);
-		const body = new Uint8Array(
-			event.bodyInline ?? new Uint8Array(),
-		) as Uint8Array<ArrayBuffer>;
-		const timestampSec = Math.floor(deps.now() / 1000);
-		const signature = await signWebhook({
-			id: delivery.id,
-			timestampSec,
-			body,
-			secret,
-		});
 		const response = await deps.fetch(destination.url, {
 			method: "POST",
 			headers: buildOutboundHeaders({
@@ -124,6 +140,7 @@ export async function processDelivery(
 		return "ack" as const;
 	};
 
+	let request: SignedRequest;
 	try {
 		if (ctx.destination.status === "disabled") {
 			return await finish("destination_disabled");
@@ -138,6 +155,15 @@ export async function processDelivery(
 				return await finish("dns_error");
 			}
 			throw err;
+		}
+		try {
+			request = await prepare(deps, ctx);
+		} catch (err) {
+			logger.error("delivery.sign_failed", {
+				delivery_id: deliveryId,
+				error: String(err),
+			});
+			return await finish("signing_failed");
 		}
 		if (!(await claimDelivery(deps, deliveryId))) {
 			logger.info("delivery.skipped", {
@@ -155,7 +181,7 @@ export async function processDelivery(
 	}
 
 	const startedAt = deps.now();
-	const { outcome, snippet } = await send(deps, ctx);
+	const { outcome, snippet } = await send(deps, ctx, request);
 	const durationMs = Math.max(0, deps.now() - startedAt);
 	try {
 		await recordAttempt(deps, ctx, { startedAt, durationMs, outcome, snippet });
@@ -183,7 +209,15 @@ export async function handleDeliveryBatch(
 	const logger = createLogger(deps.env, { queue: batch.queue });
 	await Promise.all(
 		batch.messages.map(async (msg) => {
-			const result = await processDelivery(deps, msg.body.deliveryId, logger);
+			const deliveryId = (msg.body as Partial<DeliveryMessage> | null)
+				?.deliveryId;
+			if (typeof deliveryId !== "string") {
+				// Retrying cannot fix a bad payload; drop it instead of burning retries.
+				logger.error("delivery.malformed_message", { message_id: msg.id });
+				msg.ack();
+				return;
+			}
+			const result = await processDelivery(deps, deliveryId, logger);
 			if (result === "ack") msg.ack();
 			else msg.retry();
 		}),

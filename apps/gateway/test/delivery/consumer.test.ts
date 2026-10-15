@@ -38,9 +38,10 @@ async function state(deps: Deps, deliveryId: string) {
 	return { delivery, attempts };
 }
 
-function endlessBody(): ReadableStream<Uint8Array> {
+function endlessBody(onCancel = () => {}): ReadableStream<Uint8Array> {
 	return new ReadableStream({
 		pull: (c) => c.enqueue(new Uint8Array(1024).fill(0x61)),
+		cancel: onCancel,
 	});
 }
 
@@ -108,8 +109,16 @@ describe("processDelivery", () => {
 		await processDelivery(deps, deliveryId, logger);
 		const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
 		expect(new Uint8Array(init.body as ArrayBuffer)).toEqual(bytes);
-		expect(new Headers(init.headers).get("content-type")).toBe(
-			"application/gzip",
+		const headers = new Headers(init.headers);
+		expect(headers.get("content-type")).toBe("application/gzip");
+		// The signature covers the exact bytes, not a text re-encoding.
+		expect(headers.get("webhook-signature")).toBe(
+			await signWebhook({
+				id: deliveryId,
+				timestampSec: Number(headers.get("webhook-timestamp")),
+				body: bytes,
+				secret: TEST_SIGNING_SECRET,
+			}),
 		);
 	});
 
@@ -223,6 +232,24 @@ describe("processDelivery", () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
+	it("fails without an attempt or a request when the signing secret cannot be decrypted", async () => {
+		const fetchMock = fetchReturning(() => new Response("ok"));
+		const deps = testDeps({ fetch: fetchMock });
+		const p = await seedPipeline(deps, {
+			destination: { signingSecretEnc: "v1.corrupt.ciphertext" },
+		});
+		const { deliveryId } = await seedDelivery(deps, p);
+		expect(await processDelivery(deps, deliveryId, logger)).toBe("ack");
+		const { delivery, attempts } = await state(deps, deliveryId);
+		expect(delivery).toMatchObject({
+			status: "failed_final",
+			attemptCount: 0,
+			lastError: "signing_failed",
+		});
+		expect(attempts).toHaveLength(0);
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
 	it("fails with dns_error when the resolver errors", async () => {
 		const deps = testDeps({
 			resolveDns: vi.fn(async () => Promise.reject(new DnsError("SERVFAIL"))),
@@ -324,8 +351,11 @@ describe("processDelivery", () => {
 
 describe("readSnippet", () => {
 	it("caps the response snippet at 2 KB", async () => {
-		const snippet = await readSnippet(new Response(endlessBody()));
+		const onCancel = vi.fn();
+		const snippet = await readSnippet(new Response(endlessBody(onCancel)));
 		expect(snippet).toHaveLength(2048);
+		// Stop pulling from the backend once the cap is reached.
+		await vi.waitFor(() => expect(onCancel).toHaveBeenCalled());
 	});
 
 	it("returns null for an empty body and decodes invalid UTF-8 lossily", async () => {
@@ -351,9 +381,10 @@ describe("handleDeliveryBatch", () => {
 		});
 		const ok = make(deliveryId);
 		const unknown = make("dlv_01JAAAAAAAAAAAAAAAAAAAAAAA");
+		const malformed = { ...make("msg_bad"), body: {} };
 		const batch = {
 			queue: "hookflare-deliveries",
-			messages: [ok, unknown],
+			messages: [ok, unknown, malformed],
 			ackAll: vi.fn(),
 			retryAll: vi.fn(),
 		};
@@ -364,5 +395,8 @@ describe("handleDeliveryBatch", () => {
 		expect(ok.ack).toHaveBeenCalledOnce();
 		expect(unknown.ack).toHaveBeenCalledOnce();
 		expect(ok.retry).not.toHaveBeenCalled();
+		// A message without a deliveryId can never succeed: ack, don't retry.
+		expect(malformed.ack).toHaveBeenCalledOnce();
+		expect(malformed.retry).not.toHaveBeenCalled();
 	});
 });
