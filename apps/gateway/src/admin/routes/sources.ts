@@ -44,6 +44,8 @@ async function toSource(
 					await decryptSecret(env, row.secretEnc, aad(row.id)),
 				)
 			: null,
+		previous_secret_fingerprint: null,
+		previous_secret_expires_at: null,
 		event_id_from: row.eventIdFrom,
 		event_id_selector: row.eventIdSelector,
 		max_body_bytes: row.maxBodyBytes,

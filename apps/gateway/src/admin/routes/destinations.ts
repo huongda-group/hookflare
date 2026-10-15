@@ -63,6 +63,8 @@ export async function toDestination(
 		signing_secret_fingerprint: await secretFingerprint(
 			await decryptSecret(env, row.signingSecretEnc, aad(row.id)),
 		),
+		previous_secret_fingerprint: null,
+		previous_secret_expires_at: null,
 		created_at: row.createdAt,
 		updated_at: row.updatedAt,
 	};

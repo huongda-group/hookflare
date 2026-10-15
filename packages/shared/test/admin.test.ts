@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+	bulkReplayRequest,
 	createDestinationRequest,
 	createProjectRequest,
 	createSourceRequest,
+	createUserRequest,
 	eventIdConfigError,
 	listQuery,
 	patchDestinationRequest,
 	patchSourceRequest,
+	reasonSchema,
+	rotateDestinationSecretRequest,
+	rotateSourceSecretRequest,
 } from "../src/admin";
 
 const base = { project_id: "prj_1", destination_id: "dst_1", name: "Stripe" };
@@ -222,5 +227,44 @@ describe("listQuery", () => {
 		expect(listQuery.parse({ limit: "10" })).toMatchObject({ limit: 10 });
 		expect(listQuery.safeParse({ limit: "201" }).success).toBe(false);
 		expect(listQuery.safeParse({ limit: "0" }).success).toBe(false);
+	});
+});
+
+describe("M3 schemas", () => {
+	it("trims reasons and rejects blank ones", () => {
+		expect(reasonSchema.parse("  ok  ")).toBe("ok");
+		expect(reasonSchema.safeParse("   ").success).toBe(false);
+		expect(reasonSchema.safeParse("x".repeat(501)).success).toBe(false);
+	});
+
+	it("bounds and defaults grace_hours", () => {
+		expect(rotateDestinationSecretRequest.parse({}).grace_hours).toBe(24);
+		expect(
+			rotateDestinationSecretRequest.safeParse({ grace_hours: 169 }).success,
+		).toBe(false);
+		expect(
+			rotateSourceSecretRequest.parse({ grace_hours: 0 }).grace_hours,
+		).toBe(0);
+	});
+
+	it("dedupes bulk replay ids and caps them at 100", () => {
+		const id = "dlv_01J0000000000000000000000A";
+		expect(
+			bulkReplayRequest.parse({ delivery_ids: [id, id], reason: "r" })
+				.delivery_ids,
+		).toEqual([id]);
+		expect(
+			bulkReplayRequest.safeParse({
+				delivery_ids: Array.from({ length: 101 }, (_, i) => `dlv_${i}`),
+				reason: "r",
+			}).success,
+		).toBe(false);
+	});
+
+	it("lowercases user emails", () => {
+		expect(
+			createUserRequest.parse({ email: "Ops@Example.COM", role: "operator" })
+				.email,
+		).toBe("ops@example.com");
 	});
 });
