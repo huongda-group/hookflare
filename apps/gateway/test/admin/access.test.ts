@@ -1,8 +1,10 @@
+import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { clearAccessKeyCache } from "../../src/admin/auth/access";
 import { createApp } from "../../src/app";
+import { auditLogs, users } from "../../src/core/db/schema";
 import type { Deps } from "../../src/deps";
-import { accessKeys } from "../helpers/admin";
+import { accessKeys, adminApp, uniqueEmail } from "../helpers/admin";
 import { testDeps } from "../helpers/deps";
 import { ACCESS_TEST, testEnv } from "../helpers/env";
 
@@ -130,5 +132,69 @@ describe("Access middleware", () => {
 		expect(
 			(await call(deps, jwksFetch, {}, "http://localhost:8787")).status,
 		).toBe(403);
+	});
+
+	it("bootstraps a listed email once and audits it", async () => {
+		const email = uniqueEmail("boot");
+		const deps = testDeps({ env: testEnv({ BOOTSTRAP_ADMIN_EMAILS: email }) });
+		const api = await adminApp(deps, { email });
+		expect((await api.request("GET", "/me")).status).toBe(200);
+		expect((await api.request("GET", "/me")).status).toBe(200);
+		const [row] = await deps.db
+			.select()
+			.from(users)
+			.where(eq(users.email, email));
+		expect(row.role).toBe("admin");
+		const audits = await deps.db
+			.select()
+			.from(auditLogs)
+			.where(eq(auditLogs.resourceId, email));
+		expect(audits.map((a) => [a.action, a.actorEmail])).toEqual([
+			["user.bootstrapped", email],
+		]);
+	});
+
+	it("does not re-bootstrap a disabled bootstrap admin", async () => {
+		const email = uniqueEmail("boot");
+		const deps = testDeps({ env: testEnv({ BOOTSTRAP_ADMIN_EMAILS: email }) });
+		await deps.db.insert(users).values({
+			email,
+			role: "admin",
+			createdAt: 1,
+			updatedAt: 1,
+			disabledAt: 1,
+		});
+		const api = await adminApp(deps, { email });
+		const res = await api.request("GET", "/me");
+		expect(res.status).toBe(403);
+		const [row] = await deps.db
+			.select()
+			.from(users)
+			.where(eq(users.email, email));
+		expect(row.disabledAt).toBe(1);
+	});
+
+	it("lets a stored user in without the bootstrap list", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps, { role: "viewer" });
+		const res = await api.request("GET", "/me");
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({
+			email: api.email,
+			role: "viewer",
+			permissions: ["events.read"],
+		});
+	});
+
+	it("rejects a disabled user immediately", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps, { role: "operator" });
+		await deps.db
+			.update(users)
+			.set({ disabledAt: deps.now() })
+			.where(eq(users.email, api.email));
+		const res = await api.request("GET", "/me");
+		expect(res.status).toBe(403);
+		expect(await res.json()).toEqual({ error: "forbidden" });
 	});
 });
