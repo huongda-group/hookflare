@@ -1,6 +1,12 @@
-import { type EventSummary, eventSearchQuery } from "@hookflare/shared";
+import {
+	type EventSummary,
+	eventSearchQuery,
+	type ReplayResult,
+	replayRequest,
+} from "@hookflare/shared";
 import { Hono } from "hono";
 import type { AppBindings } from "../../app";
+import { getInitialDelivery } from "../../core/db/deliveries";
 import {
 	getEventDetail,
 	getEventPayloadRef,
@@ -12,7 +18,8 @@ import { loadPayload } from "../../core/payloads";
 import { requirePermission } from "../auth/permission";
 import { decodeCursor, encodeCursor } from "../cursor";
 import { toAttempt, toDelivery } from "../dto";
-import { auditStmt, badCursor, readQuery } from "../http";
+import { auditStmt, badCursor, readJson, readQuery } from "../http";
+import { precheck, writeReplays } from "../replay";
 
 export function eventRoutes() {
 	const routes = new Hono<AppBindings>();
@@ -116,6 +123,51 @@ export function eventRoutes() {
 			},
 		});
 	});
+
+	routes.post(
+		"/:id/replay",
+		requirePermission("deliveries.replay"),
+		async (c) => {
+			const body = await readJson(c, replayRequest);
+			if (!body.ok) return body.response;
+			const deps = c.var.deps;
+			const eventId = c.req.param("id");
+			const initial = await getInitialDelivery(deps.db, eventId);
+			if (!initial) return c.json({ error: "not_found" }, 404);
+			let checked: Awaited<ReturnType<typeof precheck>>;
+			try {
+				checked = await precheck(deps, [
+					{
+						sourceDeliveryId: initial.id,
+						eventId,
+						destinationId: initial.destinationId,
+						projectId: initial.projectId,
+					},
+				]);
+			} catch (err) {
+				c.var.logger.error("admin.replay_precheck_failed", {
+					error: String(err),
+				});
+				return c.json({ error: "unavailable" }, 503);
+			}
+			const [skip] = checked.skipped;
+			if (skip) return c.json({ error: skip.reason }, 409);
+			const [r] = await writeReplays(c, {
+				...checked,
+				reason: body.value.reason,
+				resourceType: "event",
+				resourceId: eventId,
+			});
+			return c.json(
+				{
+					delivery_id: r.new_delivery_id,
+					status: r.status,
+					enqueued: r.enqueued,
+				} satisfies ReplayResult,
+				201,
+			);
+		},
+	);
 
 	routes.get("/:id", requirePermission("events.read"), async (c) => {
 		const detail = await getEventDetail(c.var.deps.db, c.req.param("id"));

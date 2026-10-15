@@ -17,6 +17,7 @@ describe("enqueueThenMark", () => {
 		expect(await enqueueThenMark(deps, ids, mark)).toEqual({
 			sent: 60,
 			sendFailed: 0,
+			unsent: [],
 		});
 		expect((deps.queue as RecordingQueue).sent).toHaveLength(60);
 		expect(mark.mock.calls.map((c) => c[0].length)).toEqual([50, 10]);
@@ -31,6 +32,7 @@ describe("enqueueThenMark", () => {
 		expect(await enqueueThenMark(deps, ids, mark)).toEqual({
 			sent: 10,
 			sendFailed: 1,
+			unsent: ids.slice(0, 50),
 		});
 		expect(mark).toHaveBeenCalledTimes(1);
 	});

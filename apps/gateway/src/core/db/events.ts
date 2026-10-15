@@ -233,3 +233,19 @@ export async function getEventPayloadRef(db: Db, id: string) {
 		.where(eq(webhookEvents.id, id))
 		.get();
 }
+
+export async function getEventR2Keys(
+	db: Db,
+	eventIds: string[],
+): Promise<Map<string, string | null>> {
+	const out = new Map<string, string | null>();
+	for (const chunk of chunks(eventIds)) {
+		const rows = await db
+			.select({ id: webhookEvents.id, r2Key: webhookEvents.r2Key })
+			.from(webhookEvents)
+			.where(inArray(webhookEvents.id, chunk))
+			.all();
+		for (const r of rows) out.set(r.id, r.r2Key);
+	}
+	return out;
+}

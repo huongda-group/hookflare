@@ -13,6 +13,7 @@ import {
 	lte,
 	ne,
 	notExists,
+	notInArray,
 	or,
 	sql,
 } from "drizzle-orm";
@@ -23,6 +24,7 @@ import { chunks } from "../enqueue";
 import { newId } from "../ids";
 import {
 	type DeliveryRow,
+	type DeliveryStatus,
 	type DestinationRow,
 	deliveries,
 	deliveryAttempts,
@@ -315,6 +317,62 @@ export async function latestReplays(
 			.orderBy(asc(deliveries.id))
 			.all();
 		for (const r of rows) out.set(`${r.eventId}|${r.destinationId}`, r);
+	}
+	return out;
+}
+
+export async function getDeliveriesByIds(
+	db: Db,
+	ids: string[],
+): Promise<DeliveryRow[]> {
+	const out: DeliveryRow[] = [];
+	for (const chunk of chunks(ids)) {
+		out.push(
+			...(await db
+				.select()
+				.from(deliveries)
+				.where(inArray(deliveries.id, chunk))
+				.all()),
+		);
+	}
+	return out;
+}
+
+export async function getInitialDelivery(
+	db: Db,
+	eventId: string,
+): Promise<DeliveryRow | undefined> {
+	return db
+		.select()
+		.from(deliveries)
+		.where(and(eq(deliveries.eventId, eventId), eq(deliveries.kind, "initial")))
+		.get();
+}
+
+const TERMINAL: DeliveryStatus[] = ["delivered", "failed_final", "dead"];
+
+/** "<eventId>|<destinationId>" of replays still in the pipeline (spec §9.2). */
+export async function activeReplays(
+	db: Db,
+	eventIds: string[],
+): Promise<Set<string>> {
+	const out = new Set<string>();
+	for (const chunk of chunks(eventIds)) {
+		const rows = await db
+			.select({
+				eventId: deliveries.eventId,
+				destinationId: deliveries.destinationId,
+			})
+			.from(deliveries)
+			.where(
+				and(
+					inArray(deliveries.eventId, chunk),
+					eq(deliveries.kind, "replay"),
+					notInArray(deliveries.status, TERMINAL),
+				),
+			)
+			.all();
+		for (const r of rows) out.add(`${r.eventId}|${r.destinationId}`);
 	}
 	return out;
 }
