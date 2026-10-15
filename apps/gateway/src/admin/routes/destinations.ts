@@ -4,8 +4,11 @@ import {
 	listQuery,
 	operateRequest,
 	type Page,
+	pageQuery,
 	patchDestinationRequest,
 	rotateDestinationSecretRequest,
+	type TestDelivery,
+	testDeliveryRequest,
 } from "@hookflare/shared";
 import { and, eq } from "drizzle-orm";
 import type { Context } from "hono";
@@ -26,15 +29,36 @@ import {
 	transitionDestinationStmt,
 } from "../../core/db/destinations";
 import { getProject } from "../../core/db/projects";
-import { type DestinationRow, destinations } from "../../core/db/schema";
+import {
+	type DestinationRow,
+	destinations,
+	type TestDeliveryRow,
+	type TestErrorKind,
+	testDeliveries,
+} from "../../core/db/schema";
+import {
+	listTestDeliveries,
+	toTestDelivery,
+} from "../../core/db/test-deliveries";
+import { DnsError } from "../../core/dns";
 import { enqueueThenMark } from "../../core/enqueue";
 import { newId } from "../../core/ids";
+import { failureOf, sendSigned } from "../../core/outbound";
 import { resolvePolicy } from "../../core/policy";
-import { aad, expiredPrevCleared, rotationColumns } from "../../core/secrets";
+import {
+	aad,
+	destinationSigningSecrets,
+	expiredPrevCleared,
+	rotationColumns,
+} from "../../core/secrets";
+import { buildOutboundHeaders, signWebhookAll } from "../../core/sign";
+import { checkUrl } from "../../core/ssrf";
 import type { AppEnv } from "../../env";
 import { requirePermission } from "../auth/permission";
+import { decodeCursor, encodeCursor } from "../cursor";
 import {
 	auditStmt,
+	badCursor,
 	guardUrl,
 	paginate,
 	readJson,
@@ -401,6 +425,155 @@ export function destinationRoutes() {
 			});
 		},
 	);
+
+	routes.post(
+		"/:id/test",
+		requirePermission("destinations.operate"),
+		async (c) => {
+			const body = await readOptionalJson(c, testDeliveryRequest);
+			if (!body.ok) return body.response;
+			const deps = c.var.deps;
+			const id = c.req.param("id");
+			const destination = await getDestination(deps.db, id);
+			if (!destination) return c.json({ error: "not_found" }, 404);
+			if (destination.status === "disabled") {
+				return c.json({ error: "destination_disabled" }, 409);
+			}
+			const startedAt = deps.now();
+			const testId = newId("tst", startedAt);
+			const payload = new Uint8Array(
+				new TextEncoder().encode(
+					JSON.stringify(
+						body.value.payload ?? {
+							type: "hookflare.test",
+							destination_id: id,
+							timestamp: startedAt,
+						},
+					),
+				),
+			);
+
+			let outcome: {
+				durationMs: number;
+				httpStatus: number | null;
+				errorKind: TestErrorKind | null;
+				errorMessage: string | null;
+				snippet: string | null;
+			};
+			let ssrf: Awaited<ReturnType<typeof checkUrl>>;
+			try {
+				ssrf = await checkUrl(destination.url, deps);
+			} catch (err) {
+				if (err instanceof DnsError)
+					return c.json({ error: "unavailable" }, 503);
+				throw err;
+			}
+			if (!ssrf.ok) {
+				outcome = {
+					durationMs: 0,
+					httpStatus: null,
+					errorKind: "ssrf_blocked",
+					errorMessage: ssrf.reason,
+					snippet: null,
+				};
+			} else {
+				const timeoutMs = resolvePolicy(destination).timeoutMs;
+				const timestampSec = Math.floor(startedAt / 1000);
+				const secrets = await destinationSigningSecrets(
+					deps.env,
+					destination,
+					startedAt,
+				);
+				const signature = await signWebhookAll({
+					id: testId,
+					timestampSec,
+					body: payload,
+					secrets,
+				});
+				const sent = await sendSigned(deps, {
+					url: destination.url,
+					headers: buildOutboundHeaders({
+						storedHeaders: {},
+						contentType: "application/json",
+						deliveryId: testId,
+						timestampSec,
+						signature,
+					}),
+					body: payload,
+					timeoutMs,
+				});
+				const failure = failureOf(sent.result, timeoutMs);
+				outcome = {
+					durationMs: sent.durationMs,
+					httpStatus:
+						sent.result.kind === "response" ? sent.result.status : null,
+					errorKind: failure?.errorKind ?? null,
+					errorMessage: failure?.message ?? null,
+					snippet: sent.snippet,
+				};
+			}
+
+			const row: TestDeliveryRow = {
+				id: testId,
+				destinationId: id,
+				projectId: destination.projectId,
+				actorEmail: c.var.actor?.email ?? "",
+				startedAt,
+				durationMs: outcome.durationMs,
+				httpStatus: outcome.httpStatus,
+				errorKind: outcome.errorKind,
+				errorMessage: outcome.errorMessage,
+				responseSnippet: outcome.snippet,
+			};
+			await deps.db.batch([
+				deps.db.insert(testDeliveries).values(row),
+				auditStmt(c, {
+					action: "destination.tested",
+					resourceType: "destination",
+					resourceId: id,
+					reason: body.value.reason,
+					diff: {
+						test_delivery_id: testId,
+						http_status: outcome.httpStatus,
+						error_kind: outcome.errorKind,
+					},
+				}),
+			]);
+			const dto = toTestDelivery(row);
+			return c.json({
+				id: dto.id,
+				http_status: dto.http_status,
+				duration_ms: dto.duration_ms,
+				error_kind: dto.error_kind,
+				error_message: dto.error_message,
+				response_snippet: dto.response_snippet,
+			});
+		},
+	);
+
+	routes.get("/:id/tests", requirePermission("events.read"), async (c) => {
+		const q = readQuery(c, pageQuery);
+		if (!q.ok) return q.response;
+		const after = decodeCursor(q.value.cursor);
+		if (after === "invalid") return badCursor(c);
+		const { db } = c.var.deps;
+		const id = c.req.param("id");
+		if (!(await getDestination(db, id)))
+			return c.json({ error: "not_found" }, 404);
+		const rows = await listTestDeliveries(db, id, {
+			after: after ?? undefined,
+			limit: q.value.limit,
+		});
+		const page = rows.slice(0, q.value.limit);
+		const last = page.at(-1);
+		return c.json({
+			data: page.map(toTestDelivery),
+			next_cursor:
+				rows.length > q.value.limit && last
+					? encodeCursor(last.startedAt, last.id)
+					: null,
+		} satisfies Page<TestDelivery>);
+	});
 
 	return routes;
 }
