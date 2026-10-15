@@ -1,16 +1,26 @@
 import { Hono } from "hono";
 import { createLogger, type Logger } from "./core/log";
+import { createDeps, type Deps } from "./deps";
+import type { AppEnv } from "./env";
 
 export const DEFAULT_HEALTH_TIMEOUT_MS = 2000;
 
 export type AppBindings = {
-	Bindings: Env;
-	Variables: { requestId: string; logger: Logger };
+	Bindings: AppEnv;
+	Variables: {
+		requestId: string;
+		logger: Logger;
+		deps: Deps;
+		/** Set by the Access middleware on /api/admin/v1. */
+		actor?: { email: string };
+	};
 };
 
 export type AppOptions = {
 	/** Timeout for the `/healthz` D1 probe. Injectable for tests. */
 	healthTimeoutMs?: number;
+	/** Builds the per-request Deps. Injectable for tests. */
+	createDeps?: (env: AppEnv) => Deps;
 };
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -31,6 +41,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 
 export function createApp(options: AppOptions = {}) {
 	const healthTimeoutMs = options.healthTimeoutMs ?? DEFAULT_HEALTH_TIMEOUT_MS;
+	const buildDeps = options.createDeps ?? createDeps;
 	const app = new Hono<AppBindings>();
 
 	// Every request gets a request_id (cf-ray when present) and a bound logger,
@@ -39,6 +50,7 @@ export function createApp(options: AppOptions = {}) {
 		const requestId = c.req.header("cf-ray") ?? crypto.randomUUID();
 		c.set("requestId", requestId);
 		c.set("logger", createLogger(c.env, { request_id: requestId }));
+		c.set("deps", buildDeps(c.env));
 		await next();
 	});
 
