@@ -21,8 +21,17 @@ export function ingressRoutes() {
 	routes.post("/:sourceId", async (c) => {
 		const { deps, logger } = c.var;
 		const sourceId = c.req.param("sourceId");
-		const reject = (status: 401 | 404 | 413 | 429, error: string) => {
-			logger.info("ingress.rejected", { source_id: sourceId, reason: error });
+		const reject = (
+			status: 400 | 401 | 404 | 413 | 429,
+			error: string,
+			reason: string = error,
+			extra: Record<string, unknown> = {},
+		) => {
+			logger.info("ingress.rejected", {
+				source_id: sourceId,
+				reason,
+				...extra,
+			});
 			return c.json({ error }, status);
 		};
 
@@ -47,8 +56,7 @@ export function ingressRoutes() {
 			setCachedSource(sourceId, bundle, deps.now());
 		}
 		if (
-			!bundle ||
-			bundle.source.status !== "active" ||
+			bundle?.source.status !== "active" ||
 			bundle.projectStatus !== "active"
 		) {
 			return reject(404, "not_found");
@@ -62,22 +70,32 @@ export function ingressRoutes() {
 		}
 
 		// 3. Raw body, capped.
-		const body = await readCappedBody(c.req.raw, bodyCap(source.maxBodyBytes));
+		let body: Uint8Array<ArrayBuffer> | null;
+		try {
+			body = await readCappedBody(c.req.raw, bodyCap(source.maxBodyBytes));
+		} catch (err) {
+			// The client went away mid-upload: their fault, not ours.
+			return reject(400, "invalid_request", "body_read_failed", {
+				error: String(err),
+			});
+		}
 		if (!body) {
-			return reject(413, "payload_too_large");
+			return reject(413, "payload_too_large", "too_large");
 		}
 
 		// 4. Verify against the raw bytes.
 		const url = new URL(c.req.url);
-		const verified = await verifiers[source.authType].verify({
+		const verdict = await verifiers[source.authType].verify({
 			headers: c.req.raw.headers,
 			url,
 			body,
 			config: source.authConfig,
 			secret,
 		});
-		if (!verified) {
-			return reject(401, "unauthorized");
+		if (!verdict.ok) {
+			return reject(401, "unauthorized", "unauthorized", {
+				verify_failure: verdict.reason,
+			});
 		}
 
 		// 5–6. Parse only after verification; redact credentials before storage.

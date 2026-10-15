@@ -1,5 +1,12 @@
 import { eq } from "drizzle-orm";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	beforeEach,
+	describe,
+	expect,
+	it,
+	type MockInstance,
+	vi,
+} from "vitest";
 import { createApp } from "../../src/app";
 import { deliveries, webhookEvents } from "../../src/core/db/schema";
 import { clearSourceCache } from "../../src/core/source-cache";
@@ -46,6 +53,16 @@ async function hmacHex(data: Uint8Array): Promise<string> {
 		.join("");
 }
 
+let logSpy: MockInstance<typeof console.log>;
+
+function loggedLines(): Record<string, unknown>[] {
+	return logSpy.mock.calls.map((call) => JSON.parse(call[0] as string));
+}
+
+function rejection(): Record<string, unknown> | undefined {
+	return loggedLines().find((l) => l.msg === "ingress.rejected");
+}
+
 const hmacSource = {
 	authType: "hmac" as const,
 	authConfig: { header: "x-sig", algorithm: "sha256", encoding: "hex" },
@@ -54,7 +71,7 @@ const hmacSource = {
 describe("POST /in/:sourceId", () => {
 	beforeEach(() => {
 		clearSourceCache();
-		vi.spyOn(console, "log").mockImplementation(() => {});
+		logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		vi.spyOn(console, "error").mockImplementation(() => {});
 	});
 
@@ -197,6 +214,7 @@ describe("POST /in/:sourceId", () => {
 		const res = await post(deps, `/in/${p.source.id}`, "x".repeat(11));
 		expect(res.status).toBe(413);
 		expect(await res.json()).toEqual({ error: "payload_too_large" });
+		expect(rejection()).toMatchObject({ reason: "too_large" });
 		expect(await eventsOf(deps, p.source.id)).toHaveLength(0);
 	});
 
@@ -208,6 +226,25 @@ describe("POST /in/:sourceId", () => {
 		});
 		expect(res.status).toBe(401);
 		expect(await res.json()).toEqual({ error: "unauthorized" });
+		expect(rejection()).toMatchObject({
+			reason: "unauthorized",
+			verify_failure: "mismatch",
+		});
+		expect(await eventsOf(deps, p.source.id)).toHaveLength(0);
+	});
+
+	it("returns 400 when the client aborts mid-upload and stores nothing", async () => {
+		const deps = testDeps();
+		const p = await seedPipeline(deps);
+		const body = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				controller.error(new Error("client disconnected"));
+			},
+		});
+		const res = await post(deps, `/in/${p.source.id}`, body);
+		expect(res.status).toBe(400);
+		expect(await res.json()).toEqual({ error: "invalid_request" });
+		expect(rejection()).toMatchObject({ reason: "body_read_failed" });
 		expect(await eventsOf(deps, p.source.id)).toHaveLength(0);
 	});
 

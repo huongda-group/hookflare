@@ -20,6 +20,8 @@ async function hmac(
 const hex = (b: Uint8Array) =>
 	[...b].map((x) => x.toString(16).padStart(2, "0")).join("");
 const b64 = (b: Uint8Array) => btoa(String.fromCharCode(...b));
+const OK = { ok: true };
+const fail = (reason: string) => ({ ok: false, reason });
 
 function input(
 	headers: Record<string, string>,
@@ -39,7 +41,7 @@ describe("none verifier", () => {
 	it("always passes", async () => {
 		expect(
 			await verifiers.none.verify({ ...input({}, {}), secret: null }),
-		).toBe(true);
+		).toEqual(OK);
 	});
 });
 
@@ -48,14 +50,14 @@ describe("hmac verifier", () => {
 
 	it("accepts a valid hex signature, case-insensitively", async () => {
 		const sig = hex(await hmac("SHA-256", body));
-		expect(await verifiers.hmac.verify(input({ "x-sig": sig }, config))).toBe(
-			true,
-		);
+		expect(
+			await verifiers.hmac.verify(input({ "x-sig": sig }, config)),
+		).toEqual(OK);
 		expect(
 			await verifiers.hmac.verify(
 				input({ "x-sig": sig.toUpperCase() }, config),
 			),
-		).toBe(true);
+		).toEqual(OK);
 	});
 
 	it("supports sha1/sha512, base64, and a prefix", async () => {
@@ -68,16 +70,16 @@ describe("hmac verifier", () => {
 		};
 		expect(
 			await verifiers.hmac.verify(input({ "x-sig": `sha512=${sig}` }, cfg)),
-		).toBe(true);
-		expect(await verifiers.hmac.verify(input({ "x-sig": sig }, cfg))).toBe(
-			false,
+		).toEqual(OK);
+		expect(await verifiers.hmac.verify(input({ "x-sig": sig }, cfg))).toEqual(
+			fail("bad_prefix"),
 		);
 		const sha1 = hex(await hmac("SHA-1", body));
 		expect(
 			await verifiers.hmac.verify(
 				input({ "x-sig": sha1 }, { ...config, algorithm: "sha1" }),
 			),
-		).toBe(true);
+		).toEqual(OK);
 	});
 
 	it("verifies an empty body", async () => {
@@ -88,26 +90,28 @@ describe("hmac verifier", () => {
 				...input({ "x-sig": sig }, config),
 				body: empty,
 			}),
-		).toBe(true);
+		).toEqual(OK);
 	});
 
-	it("rejects a missing header, a wrong signature, garbage, and a missing secret", async () => {
+	it("rejects a missing header, a wrong signature, garbage, and a missing secret, with a reason", async () => {
 		const sig = hex(await hmac("SHA-256", body));
-		expect(await verifiers.hmac.verify(input({}, config))).toBe(false);
+		expect(await verifiers.hmac.verify(input({}, config))).toEqual(
+			fail("missing_header"),
+		);
 		expect(
 			await verifiers.hmac.verify(
 				input({ "x-sig": `${sig.slice(0, -2)}00` }, config),
 			),
-		).toBe(false);
+		).toEqual(fail("mismatch"));
 		expect(
 			await verifiers.hmac.verify(input({ "x-sig": "not-hex!" }, config)),
-		).toBe(false);
+		).toEqual(fail("bad_encoding"));
 		expect(
 			await verifiers.hmac.verify({
 				...input({ "x-sig": sig }, config),
 				secret: null,
 			}),
-		).toBe(false);
+		).toEqual(fail("missing_secret"));
 	});
 });
 
@@ -116,11 +120,13 @@ describe("token verifier", () => {
 		const cfg = { in: "header", name: "x-token" };
 		expect(
 			await verifiers.token.verify(input({ "x-token": secret }, cfg)),
-		).toBe(true);
+		).toEqual(OK);
 		expect(
 			await verifiers.token.verify(input({ "x-token": `${secret}x` }, cfg)),
-		).toBe(false);
-		expect(await verifiers.token.verify(input({}, cfg))).toBe(false);
+		).toEqual(fail("mismatch"));
+		expect(await verifiers.token.verify(input({}, cfg))).toEqual(
+			fail("missing_header"),
+		);
 	});
 
 	it("checks a query token", async () => {
@@ -129,12 +135,12 @@ describe("token verifier", () => {
 			await verifiers.token.verify(
 				input({}, cfg, `https://gw/in/src_1?token=${secret}`),
 			),
-		).toBe(true);
+		).toEqual(OK);
 		expect(
 			await verifiers.token.verify(
 				input({}, cfg, "https://gw/in/src_1?token=nope"),
 			),
-		).toBe(false);
+		).toEqual(fail("mismatch"));
 	});
 });
 

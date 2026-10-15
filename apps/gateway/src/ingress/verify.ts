@@ -10,7 +10,20 @@ export type VerifyInput = {
 	secret: string | null;
 };
 
-export type Verifier = { verify(input: VerifyInput): Promise<boolean> };
+/** Why verification failed: logged only, the caller always answers a bare 401 (spec §6.1). */
+export type VerifyFailure =
+	| "missing_secret"
+	| "missing_header"
+	| "bad_prefix"
+	| "bad_encoding"
+	| "mismatch";
+
+export type VerifyResult = { ok: true } | { ok: false; reason: VerifyFailure };
+
+export type Verifier = { verify(input: VerifyInput): Promise<VerifyResult> };
+
+const OK: VerifyResult = { ok: true };
+const fail = (reason: VerifyFailure): VerifyResult => ({ ok: false, reason });
 
 const HASH = { sha1: "SHA-1", sha256: "SHA-256", sha512: "SHA-512" } as const;
 const encoder = new TextEncoder();
@@ -48,18 +61,21 @@ function equalBytes(
 const hmacVerifier: Verifier = {
 	async verify({ headers, body, config, secret }) {
 		const cfg = config as HmacAuthConfig;
+		if (!secret) {
+			return fail("missing_secret");
+		}
 		const raw = headers.get(cfg.header)?.trim();
-		if (!secret || !raw) {
-			return false;
+		if (!raw) {
+			return fail("missing_header");
 		}
 		if (cfg.prefix && !raw.startsWith(cfg.prefix)) {
-			return false;
+			return fail("bad_prefix");
 		}
 		const value = cfg.prefix ? raw.slice(cfg.prefix.length) : raw;
 		const given =
 			cfg.encoding === "hex" ? decodeHex(value) : decodeBase64(value);
 		if (!given) {
-			return false;
+			return fail("bad_encoding");
 		}
 		const key = await crypto.subtle.importKey(
 			"raw",
@@ -71,26 +87,31 @@ const hmacVerifier: Verifier = {
 		const expected = new Uint8Array(
 			await crypto.subtle.sign("HMAC", key, body),
 		);
-		return equalBytes(given, expected);
+		return equalBytes(given, expected) ? OK : fail("mismatch");
 	},
 };
 
 const tokenVerifier: Verifier = {
 	async verify({ headers, url, config, secret }) {
 		const cfg = config as TokenAuthConfig;
+		if (!secret) {
+			return fail("missing_secret");
+		}
 		const given =
 			cfg.in === "header"
 				? headers.get(cfg.name)
 				: url.searchParams.get(cfg.name);
-		if (!secret || given === null) {
-			return false;
+		if (given === null) {
+			return fail("missing_header");
 		}
-		return equalBytes(encoder.encode(given), encoder.encode(secret));
+		return equalBytes(encoder.encode(given), encoder.encode(secret))
+			? OK
+			: fail("mismatch");
 	},
 };
 
 export const verifiers: Record<AuthType, Verifier> = {
-	none: { verify: async () => true },
+	none: { verify: async () => OK },
 	hmac: hmacVerifier,
 	token: tokenVerifier,
 };
