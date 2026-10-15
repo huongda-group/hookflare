@@ -111,6 +111,20 @@ describe("createSourceRequest", () => {
 		).toBe(false);
 	});
 
+	it("requires a valid header name for header tokens only", () => {
+		const token = (auth_config: Record<string, unknown>) =>
+			createSourceRequest.safeParse({
+				...base,
+				auth_type: "token",
+				auth_config,
+			}).success;
+		expect(token({ in: "header", name: "X-Token" })).toBe(true);
+		expect(token({ in: "header", name: "x token" })).toBe(false);
+		expect(token({ in: "header", name: "x:token" })).toBe(false);
+		// Query parameter names are not header names.
+		expect(token({ in: "query", name: "api key" })).toBe(true);
+	});
+
 	it("bounds the secret to 16..512 characters", () => {
 		const s = { ...base, auth_type: "hmac", auth_config: hmac };
 		expect(

@@ -24,10 +24,16 @@ export const hmacAuthConfig = z.strictObject({
 	encoding: z.enum(["hex", "base64"]),
 	prefix: z.string().min(1).max(50).optional(),
 });
-export const tokenAuthConfig = z.strictObject({
-	in: z.enum(["header", "query"]),
-	name: z.string().min(1).max(100),
-});
+export const tokenAuthConfig = z
+	.strictObject({
+		in: z.enum(["header", "query"]),
+		name: z.string().min(1).max(100),
+	})
+	// An invalid header name would make Headers.get() throw on every request.
+	.refine((cfg) => cfg.in !== "header" || HEADER_NAME.test(cfg.name), {
+		path: ["name"],
+		message: "name must be a valid header name when in is header",
+	});
 export const noneAuthConfig = z.strictObject({});
 
 export type HmacAuthConfig = z.infer<typeof hmacAuthConfig>;
