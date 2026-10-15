@@ -1,11 +1,12 @@
 import { Hono } from "hono";
 import type { AppBindings } from "../app";
+import { readCappedBody } from "../core/body";
 import { insertEventWithDelivery, markQueued } from "../core/db/events";
 import { loadSourceBundle, type SourceBundle } from "../core/db/sources";
+import { storableHeaders } from "../core/headers";
 import { isId, newId } from "../core/ids";
-import { redactHeaders } from "../core/log";
 import { getCachedSource, setCachedSource } from "../core/source-cache";
-import { bodyCap, readCappedBody } from "./body";
+import { bodyCap } from "./body";
 import { extractEventId } from "./event-id";
 import { authHeaderName, verifiers } from "./verify";
 
@@ -103,10 +104,7 @@ export function ingressRoutes() {
 		const eventId = newId("evt", now);
 		const deliveryId = newId("dlv", now);
 		const authHeader = authHeaderName(source.authType, source.authConfig);
-		const headers = redactHeaders(
-			c.req.raw.headers,
-			authHeader ? [authHeader] : [],
-		);
+		const headers = storableHeaders(c.req.raw.headers, authHeader);
 
 		// 7. Store event + delivery atomically.
 		try {

@@ -83,6 +83,8 @@ describe("POST /in/:sourceId", () => {
 			"content-type": "application/json",
 			"x-sig": await hmacHex(body),
 			authorization: "Bearer leak",
+			"cf-connecting-ip": "1.2.3.4",
+			"proxy-authorization": "p",
 		});
 		expect(res.status).toBe(202);
 		const { event_id } = (await res.json()) as { event_id: string };
@@ -95,6 +97,8 @@ describe("POST /in/:sourceId", () => {
 		expect(event.contentType).toBe("application/json");
 		expect(event.headersJson["x-sig"]).toBe("[REDACTED]");
 		expect(event.headersJson.authorization).toBe("[REDACTED]");
+		expect(event.headersJson["cf-connecting-ip"]).toBeUndefined();
+		expect(event.headersJson["proxy-authorization"]).toBeUndefined();
 		const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", body));
 		expect(event.payloadSha256).toBe(
 			[...digest].map((b) => b.toString(16).padStart(2, "0")).join(""),

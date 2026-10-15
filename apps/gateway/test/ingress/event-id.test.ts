@@ -35,6 +35,17 @@ describe("extractEventId", () => {
 		).toBe("42");
 	});
 
+	it("uses JSON strings as is", () => {
+		expect(
+			extractEventId(
+				"json_path",
+				"$.id",
+				new Headers(),
+				enc({ id: " evt_1 " }),
+			),
+		).toBe(" evt_1 ");
+	});
+
 	it.each([
 		["missing key", enc({ other: 1 })],
 		["non-JSON body", enc("not json")],

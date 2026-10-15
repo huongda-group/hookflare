@@ -74,6 +74,30 @@ describe("admin destinations", () => {
 		);
 	});
 
+	it("logs only the url origin in audit lines", async () => {
+		const log = vi.spyOn(console, "log").mockImplementation(() => {});
+		const deps = testDeps();
+		const { project, destination } = await seedPipeline(deps);
+		const api = await adminApp(deps);
+		await api.request("POST", "/destinations", {
+			project_id: project.id,
+			name: "Slack",
+			url: "https://hooks.example.com/services/created-secret?token=q1",
+		});
+		await api.request("PATCH", `/destinations/${destination.id}`, {
+			url: "https://hooks.example.com/services/patched-secret?token=q2",
+		});
+		const audits = log.mock.calls
+			.map((c) => JSON.parse(String(c[0])))
+			.filter((l) => String(l.msg).startsWith("admin.destination."));
+		expect(audits.map((l) => l.diff.url)).toEqual([
+			"https://hooks.example.com",
+			"https://hooks.example.com",
+		]);
+		const all = log.mock.calls.map((c) => String(c[0])).join("\n");
+		expect(all).not.toMatch(/secret\?token|q1|q2/);
+	});
+
 	it("rejects unsafe urls with 422 and resolver failures with 503", async () => {
 		const deps = testDeps({ resolveDns: async () => ["10.0.0.5"] });
 		const { project } = await seedPipeline(deps);

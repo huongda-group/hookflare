@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { bodyCap, readCappedBody } from "../../src/ingress/body";
+import { readCappedBody } from "../../src/core/body";
+import { bodyCap } from "../../src/ingress/body";
 
 function streamOf(chunks: Uint8Array[]): ReadableStream<Uint8Array> {
 	return new ReadableStream({

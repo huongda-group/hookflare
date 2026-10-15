@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import type { z } from "zod";
 import type { AppBindings } from "../app";
+import { readCappedBody } from "../core/body";
 import { DnsError } from "../core/dns";
 import { checkUrl } from "../core/ssrf";
 
@@ -32,16 +33,13 @@ export async function readJson<S extends z.ZodType>(
 		ok: false as const,
 		response: c.json({ error: "payload_too_large" }, 413),
 	});
-	if (Number(c.req.header("content-length")) > MAX_ADMIN_BODY_BYTES) {
-		return tooLarge();
-	}
-	const text = await c.req.text();
-	if (new TextEncoder().encode(text).byteLength > MAX_ADMIN_BODY_BYTES) {
+	const bytes = await readCappedBody(c.req.raw, MAX_ADMIN_BODY_BYTES);
+	if (!bytes) {
 		return tooLarge();
 	}
 	let raw: unknown;
 	try {
-		raw = JSON.parse(text);
+		raw = JSON.parse(new TextDecoder().decode(bytes));
 	} catch {
 		return {
 			ok: false,
@@ -76,6 +74,11 @@ export function paginate<R extends { id: string }>(
 		rows: page,
 		nextCursor: rows.length > limit ? (page.at(-1)?.id ?? null) : null,
 	};
+}
+
+/** Destination URLs may carry credentials in the path or query, so audit diffs keep only the origin. */
+export function auditUrl(url: string): string {
+	return new URL(url).origin;
 }
 
 /** Interim audit until audit_logs lands in M3. diff must never contain secrets. */

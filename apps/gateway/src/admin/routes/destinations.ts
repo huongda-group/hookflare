@@ -18,7 +18,14 @@ import { getProject } from "../../core/db/projects";
 import { type DestinationRow, destinations } from "../../core/db/schema";
 import { newId } from "../../core/ids";
 import type { AppEnv } from "../../env";
-import { audit, guardUrl, paginate, readJson, readQuery } from "../http";
+import {
+	audit,
+	auditUrl,
+	guardUrl,
+	paginate,
+	readJson,
+	readQuery,
+} from "../http";
 
 const aad = (id: string) => `destinations.signing_secret_enc:${id}`;
 
@@ -75,7 +82,10 @@ export function destinationRoutes() {
 			updatedAt: ts,
 		};
 		await db.insert(destinations).values(row);
-		audit(c, "destination", "created", id, body.value);
+		audit(c, "destination", "created", id, {
+			...body.value,
+			url: auditUrl(body.value.url),
+		});
 		return c.json(
 			{ ...(await toDestination(env, row)), signing_secret: signingSecret },
 			201,
@@ -130,7 +140,15 @@ export function destinationRoutes() {
 			.where(eq(destinations.id, id))
 			.returning();
 		if (!row) return c.json({ error: "not_found" }, 404);
-		audit(c, "destination", "updated", id, body.value);
+		audit(
+			c,
+			"destination",
+			"updated",
+			id,
+			body.value.url === undefined
+				? body.value
+				: { ...body.value, url: auditUrl(body.value.url) },
+		);
 		return c.json(await toDestination(env, row));
 	});
 

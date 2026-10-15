@@ -1,15 +1,5 @@
-const HOP_BY_HOP = new Set([
-	"connection",
-	"keep-alive",
-	"te",
-	"trailer",
-	"transfer-encoding",
-	"upgrade",
-	"host",
-	"content-length",
-]);
-const DENYLIST = new Set(["authorization", "cookie", "x-api-key"]);
-const DENY_PREFIXES = ["proxy-", "cf-", "webhook-"];
+import { CREDENTIAL_HEADERS, isDroppedHeader } from "../core/headers";
+
 const REDACTED = "[REDACTED]";
 
 function base64(bytes: Uint8Array): string {
@@ -52,9 +42,9 @@ export async function signWebhook(input: {
 
 function isDenied(name: string, value: string): boolean {
 	return (
-		HOP_BY_HOP.has(name) ||
-		DENYLIST.has(name) ||
-		DENY_PREFIXES.some((p) => name.startsWith(p)) ||
+		isDroppedHeader(name) ||
+		CREDENTIAL_HEADERS.includes(name) ||
+		name.startsWith("webhook-") ||
 		value === REDACTED ||
 		name === "content-type"
 	);

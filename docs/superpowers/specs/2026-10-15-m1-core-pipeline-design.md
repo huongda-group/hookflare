@@ -148,7 +148,7 @@ Bindings added in `wrangler.jsonc`: queue producer `QUEUE` → `hookflare-delive
 | 3. Body cap | Cap = `min(max_body_bytes ?? 1_048_576, 65_536)`. Reject early if `Content-Length` exceeds the cap; otherwise read the stream and abort as soon as the cap is exceeded. | `413 {"error":"payload_too_large"}` |
 | 4. Verify | On the raw bytes (§6.1). | `401 {"error":"unauthorized"}` |
 | 5. Event ID | §6.2. Never rejects. | — |
-| 6. Prepare | `payload_sha256` = hex SHA-256 of the body. `headers_json` = `redactHeaders(headers, [source auth header])`. `content_type` from the request. | — |
+| 6. Prepare | `payload_sha256` = hex SHA-256 of the body. `headers_json` = `storableHeaders(headers, source auth header)` (`core/headers.ts`): the roadmap §7.1 denylist drops hop-by-hop, `proxy-*` and `cf-*` headers and redacts `authorization`, `cookie`, `x-api-key`, the source auth header, and other credential-like names. `content_type` from the request. | — |
 | 7. D1 batch | `db.batch([insert webhook_events, insert deliveries(status='pending', kind='initial')])`. | `503 {"error":"unavailable"}` |
 | 8. Enqueue | `deps.queue.send({ deliveryId })`. | `503 {"error":"unavailable"}` |
 | 9. Mark queued | Best effort: `UPDATE deliveries SET status='queued', enqueued_at=:now WHERE id=:id AND status='pending'`. A failure is logged and ignored. | — |
@@ -192,16 +192,17 @@ Consumer config for `hookflare-deliveries`: `max_batch_size: 10`, `max_retries: 
 | 2. Already handled | Status not in `{pending, queued}` → skip (duplicate message or terminal delivery). | `ack` |
 | 3. Destination `disabled` | Conditional update to `failed_final`, `last_error='destination_disabled'`, `completed_at`. No attempt row. | `ack` |
 | 4. SSRF | `checkUrl(destination.url, deps)` (§8). Blocked → `failed_final`, `last_error='ssrf_blocked: <reason>'`; resolver error → `failed_final`, `last_error='dns_error'`. No attempt row. | `ack` |
-| 5. Claim | `UPDATE deliveries SET status='in_flight' WHERE id=:id AND status IN ('pending','queued')`. 0 rows → skip. | 0 rows: `ack` |
-| 6. Send | Decrypt the signing secret, sign (§7.1), `deps.fetch(url, { method: "POST", headers, body, redirect: "manual", signal: AbortSignal.timeout(timeout_ms) })`. Read at most 2 KB of the response body (UTF-8, lossy) as `response_snippet`, then cancel the stream. | — |
-| 7. Record | `db.batch([insert delivery_attempts(attempt_no = attempt_count + 1, …), update deliveries(attempt_count + 1, status, last_http_status, last_error, completed_at)])`. | success: `ack`. D1 error: `retry()` |
+| 5. Prepare | Decrypt the signing secret and sign (§7.1) before claiming, so a failure never leaves the delivery `in_flight`. Failure → `failed_final`, `last_error='signing_failed'`. No attempt row. | `ack` |
+| 6. Claim | `UPDATE deliveries SET status='in_flight' WHERE id=:id AND status IN ('pending','queued')`. 0 rows → skip. | 0 rows: `ack` |
+| 7. Send | `deps.fetch(url, { method: "POST", headers, body, redirect: "manual", signal: AbortSignal.timeout(timeout_ms) })`. Read at most 2 KB of the response body (UTF-8, lossy) as `response_snippet`, then cancel the stream. | — |
+| 8. Record | `db.batch([insert delivery_attempts(attempt_no = attempt_count + 1, …), update deliveries(attempt_count + 1, status, last_http_status, last_error, completed_at)])`. | success: `ack`. D1 error: `retry()` |
 
-Steps 3–4 also use a conditional update (`WHERE status IN ('pending','queued')`) so they never overwrite a delivery another consumer already handled.
+Steps 3–5 also use a conditional update (`WHERE status IN ('pending','queued')`) so they never overwrite a delivery another consumer already handled.
 
 ### 7.1 Outbound request — `delivery/sign.ts`
 
 - Body: the stored raw bytes, unchanged.
-- Headers: the stored (already redacted) headers minus hop-by-hop headers (`connection`, `keep-alive`, `te`, `trailer`, `transfer-encoding`, `upgrade`, `host`, `content-length`), with the stored `content-type`, plus:
+- Headers: the stored headers minus the shared denylist (`core/headers.ts`: hop-by-hop, `proxy-*`, `cf-*`, credential headers), redacted values, and inbound `webhook-*` headers, with the stored `content-type`, plus:
   - `webhook-id`: the delivery ID (`dlv_…`). It stays the same for every attempt of one delivery; a replay (M3) is a new delivery and therefore gets a new `webhook-id`, so backends that deduplicate on it still process replays.
   - `webhook-timestamp`: current time in seconds.
   - `webhook-signature`: `v1,` + base64(HMAC-SHA256(key, `${webhook-id}.${webhook-timestamp}.` ‖ body)), where `key` is the base64-decoded part after `whsec_`.
@@ -221,7 +222,7 @@ Steps 3–4 also use a conditional update (`WHERE status IN ('pending','queued')
 
 `last_error` / `error_message` hold a short, non-sensitive description (`HTTP 503`, `timeout after 10000 ms`, the exception name and message). `duration_ms` covers fetch start to the end of the snippet read. The classifier is a pure function so M2 can extend it with retryable outcomes.
 
-**Known M1 limitation.** If the Worker crashes after step 5, or step 7 fails, the delivery stays `in_flight`: the retried message finds no claimable row and is acked. M2's `lease_until` and reconciler (b) recover such deliveries.
+**Known M1 limitation.** If the Worker crashes after step 6, or step 8 fails, the delivery stays `in_flight`: the retried message finds no claimable row and is acked. M2's `lease_until` and reconciler (b) recover such deliveries.
 
 ## 8. SSRF guard — `core/ssrf.ts`
 

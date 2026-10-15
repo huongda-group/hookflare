@@ -6,7 +6,7 @@ export const MAX_EVENT_ID_LENGTH = 256;
 function normalize(value: unknown): string | null {
 	const s =
 		typeof value === "string"
-			? value.trim()
+			? value
 			: typeof value === "number" && Number.isFinite(value)
 				? String(value)
 				: null;
