@@ -152,3 +152,31 @@ export async function recordLeasedAttempt(
 		(update as unknown as { meta: { changes: number } }).meta.changes === 1
 	);
 }
+
+/** Spec §8.2: only non-terminal, non-paused deliveries become dead. */
+export async function markDeadFromDlq(
+	deps: Deps,
+	deliveryId: string,
+): Promise<boolean> {
+	const result = await deps.db
+		.update(deliveries)
+		.set({
+			status: "dead",
+			lastError: "dlq: infra retries exhausted",
+			leaseUntil: null,
+			nextAttemptAt: null,
+			completedAt: deps.now(),
+		})
+		.where(
+			and(
+				eq(deliveries.id, deliveryId),
+				inArray(deliveries.status, [
+					"pending",
+					"queued",
+					"retrying",
+					"in_flight",
+				]),
+			),
+		);
+	return result.meta.changes === 1;
+}
