@@ -15,7 +15,7 @@ const projectId = z.string().startsWith("prj_").max(64);
 const destinationId = z.string().startsWith("dst_").max(64);
 const url = z.url().max(2048);
 const timeoutMs = z.number().int().min(1000).max(30000);
-const maxBodyBytes = z.number().int().min(1).max(65536);
+const maxBodyBytes = z.number().int().min(1).max(10_485_760);
 const secret = z.string().min(16).max(512);
 
 export const hmacAuthConfig = z.strictObject({

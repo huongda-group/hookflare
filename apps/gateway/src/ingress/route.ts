@@ -1,10 +1,20 @@
 import { Hono } from "hono";
 import type { AppBindings } from "../app";
 import { readCappedBody } from "../core/body";
-import { insertEventWithDelivery, markQueued } from "../core/db/events";
+import {
+	findEventIdByProviderId,
+	insertEventWithDelivery,
+	markQueued,
+} from "../core/db/events";
 import { loadSourceBundle, type SourceBundle } from "../core/db/sources";
 import { storableHeaders } from "../core/headers";
 import { isId, newId } from "../core/ids";
+import {
+	deletePayload,
+	INLINE_BODY_LIMIT,
+	payloadKey,
+	putPayload,
+} from "../core/payloads";
 import { getCachedSource, setCachedSource } from "../core/source-cache";
 import { bodyCap } from "./body";
 import { extractEventId } from "./event-id";
@@ -99,32 +109,91 @@ export function ingressRoutes() {
 			});
 		}
 
-		// 5–6. Parse only after verification; redact credentials before storage.
+		// 5. Parse only after verification; a known provider event id is a duplicate.
+		const providerEventId = extractEventId(
+			source.eventIdFrom,
+			source.eventIdSelector,
+			c.req.raw.headers,
+			body,
+		);
+		const findDuplicate = () =>
+			providerEventId === null
+				? Promise.resolve(null)
+				: findEventIdByProviderId(deps.db, sourceId, providerEventId);
+		const duplicate = (existing: string) => {
+			logger.info("ingress.duplicate", {
+				source_id: sourceId,
+				event_id: existing,
+			});
+			return c.json({ duplicate: true, event_id: existing }, 200);
+		};
+		try {
+			const existing = await findDuplicate();
+			if (existing) return duplicate(existing);
+		} catch (err) {
+			logger.error("ingress.lookup_failed", {
+				source_id: sourceId,
+				error: String(err),
+			});
+			return c.json({ error: "unavailable" }, 503);
+		}
+
+		// 6. Prepare; redact credentials before storage.
 		const now = deps.now();
 		const eventId = newId("evt", now);
 		const deliveryId = newId("dlv", now);
 		const authHeader = authHeaderName(source.authType, source.authConfig);
 		const headers = storableHeaders(c.req.raw.headers, authHeader);
+		const contentType = c.req.header("content-type") ?? null;
+		const payloadSha256 = await sha256Hex(body);
 
-		// 7. Store event + delivery atomically.
+		// 6b. Large bodies go to R2 before D1 references them.
+		const r2Key =
+			body.byteLength > INLINE_BODY_LIMIT ? payloadKey(eventId, now) : null;
+		if (r2Key) {
+			try {
+				await putPayload(deps, r2Key, body, {
+					sha256: payloadSha256,
+					contentType,
+				});
+			} catch (err) {
+				logger.error("ingress.r2_put_failed", {
+					source_id: sourceId,
+					event_id: eventId,
+					error: String(err),
+				});
+				return c.json({ error: "unavailable" }, 503);
+			}
+		}
+		// Best effort: an orphan object is harmless (spec §6.2).
+		const dropPayload = async () => {
+			if (!r2Key) return;
+			try {
+				await deletePayload(deps, r2Key);
+			} catch (err) {
+				logger.warn("ingress.r2_cleanup_failed", {
+					event_id: eventId,
+					error: String(err),
+				});
+			}
+		};
+
+		// 7. Store event + delivery atomically; a paused destination holds the delivery.
+		const paused = bundle.destinationStatus === "paused";
 		try {
 			await insertEventWithDelivery(deps, {
 				event: {
 					id: eventId,
 					projectId: source.projectId,
 					sourceId,
-					providerEventId: extractEventId(
-						source.eventIdFrom,
-						source.eventIdSelector,
-						c.req.raw.headers,
-						body,
-					),
+					providerEventId,
 					receivedAt: now,
 					headersJson: headers,
-					contentType: c.req.header("content-type") ?? null,
+					contentType,
 					sizeBytes: body.byteLength,
-					payloadSha256: await sha256Hex(body),
-					bodyInline: body,
+					payloadSha256,
+					bodyInline: r2Key ? new Uint8Array() : body,
+					r2Key,
 				},
 				delivery: {
 					id: deliveryId,
@@ -132,12 +201,20 @@ export function ingressRoutes() {
 					destinationId: source.destinationId,
 					projectId: source.projectId,
 					kind: "initial",
-					status: "pending",
+					status: paused ? "paused" : "pending",
 					attemptCount: 0,
 					createdAt: now,
 				},
 			});
 		} catch (err) {
+			await dropPayload();
+			// A concurrent request with the same provider event id won (spec §6.1).
+			try {
+				const existing = await findDuplicate();
+				if (existing) return duplicate(existing);
+			} catch {
+				// Fall through to 503 with the original error.
+			}
 			logger.error("ingress.store_failed", {
 				source_id: sourceId,
 				error: String(err),
@@ -145,7 +222,20 @@ export function ingressRoutes() {
 			return c.json({ error: "unavailable" }, 503);
 		}
 
-		// 8. Enqueue. On failure the delivery stays pending (the M2 reconciler picks it up).
+		const accepted = () => {
+			logger.info("ingress.accepted", {
+				source_id: sourceId,
+				event_id: eventId,
+				delivery_id: deliveryId,
+				size_bytes: body.byteLength,
+				paused,
+			});
+			return c.json({ event_id: eventId }, 202);
+		};
+		// Resume or reconcile rule (e) enqueues it later.
+		if (paused) return accepted();
+
+		// 8. Enqueue. On failure the delivery stays pending (reconcile rule a).
 		try {
 			await deps.queue.send({ deliveryId });
 		} catch (err) {
@@ -168,13 +258,7 @@ export function ingressRoutes() {
 			});
 		}
 
-		logger.info("ingress.accepted", {
-			source_id: sourceId,
-			event_id: eventId,
-			delivery_id: deliveryId,
-			size_bytes: body.byteLength,
-		});
-		return c.json({ event_id: eventId }, 202);
+		return accepted();
 	});
 
 	return routes;

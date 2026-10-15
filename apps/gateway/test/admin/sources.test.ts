@@ -127,8 +127,8 @@ describe("admin sources", () => {
 			},
 		],
 		[
-			"max_body_bytes above 64 KB",
-			{ auth_type: "none", auth_config: {}, max_body_bytes: 65_537 },
+			"max_body_bytes above 10 MiB",
+			{ auth_type: "none", auth_config: {}, max_body_bytes: 10_485_761 },
 		],
 	])("returns 400 for %s", async (_label, fields) => {
 		const deps = testDeps();
