@@ -1,8 +1,24 @@
-import { and, asc, eq, getTableColumns, inArray } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import {
+	and,
+	asc,
+	desc,
+	eq,
+	exists,
+	getTableColumns,
+	gte,
+	inArray,
+	lt,
+	lte,
+	or,
+	sql,
+} from "drizzle-orm";
 import type { Db, Deps } from "../../deps";
+import { chunks } from "../enqueue";
 import {
 	type DeliveryAttemptRow,
 	type DeliveryRow,
+	type DeliveryStatus,
 	deliveries,
 	deliveryAttempts,
 	type WebhookEventRow,
@@ -102,4 +118,104 @@ export async function getEventDetail(
 			attempts: attempts.filter((a) => a.deliveryId === d.id),
 		})),
 	};
+}
+
+export type EventFilter = {
+	projectId?: string;
+	sourceId?: string;
+	destinationId?: string;
+	statuses?: DeliveryStatus[];
+	providerEventId?: string;
+	from?: number;
+	to?: number;
+	after?: { at: number; id: string };
+	limit: number;
+};
+
+/**
+ * Spec §8.2. Event columns only; delivery filters are EXISTS subqueries so
+ * an event with several matching deliveries appears once. Returns limit + 1
+ * rows so the caller can tell whether a next page exists.
+ */
+export async function searchEvents(db: Db, f: EventFilter) {
+	const where: (SQL | undefined)[] = [
+		f.projectId ? eq(webhookEvents.projectId, f.projectId) : undefined,
+		f.sourceId ? eq(webhookEvents.sourceId, f.sourceId) : undefined,
+		f.providerEventId
+			? eq(webhookEvents.providerEventId, f.providerEventId)
+			: undefined,
+		f.from !== undefined ? gte(webhookEvents.receivedAt, f.from) : undefined,
+		f.to !== undefined ? lte(webhookEvents.receivedAt, f.to) : undefined,
+		f.after
+			? or(
+					lt(webhookEvents.receivedAt, f.after.at),
+					and(
+						eq(webhookEvents.receivedAt, f.after.at),
+						lt(webhookEvents.id, f.after.id),
+					),
+				)
+			: undefined,
+	];
+	if (f.destinationId || f.statuses?.length) {
+		where.push(
+			exists(
+				db
+					.select({ one: sql`1` })
+					.from(deliveries)
+					.where(
+						and(
+							eq(deliveries.eventId, webhookEvents.id),
+							f.destinationId
+								? eq(deliveries.destinationId, f.destinationId)
+								: undefined,
+							f.statuses?.length
+								? inArray(deliveries.status, f.statuses)
+								: undefined,
+						),
+					),
+			),
+		);
+	}
+	const {
+		bodyInline: _body,
+		headersJson: _headers,
+		...columns
+	} = getTableColumns(webhookEvents);
+	return db
+		.select(columns)
+		.from(webhookEvents)
+		.where(and(...where))
+		.orderBy(desc(webhookEvents.receivedAt), desc(webhookEvents.id))
+		.limit(f.limit + 1)
+		.all();
+}
+
+/** The highest-id (newest) delivery of each event (spec §8.2). */
+export async function latestDeliveries(
+	db: Db,
+	eventIds: string[],
+): Promise<Map<string, DeliveryRow>> {
+	const out = new Map<string, DeliveryRow>();
+	for (const chunk of chunks(eventIds)) {
+		const rows = await db
+			.select()
+			.from(deliveries)
+			.where(inArray(deliveries.eventId, chunk))
+			.orderBy(asc(deliveries.id))
+			.all();
+		for (const row of rows) out.set(row.eventId, row); // ascending: last wins
+	}
+	return out;
+}
+
+export async function listEventDeliveries(
+	db: Db,
+	eventId: string,
+): Promise<DeliveryRow[]> {
+	return db
+		.select()
+		.from(deliveries)
+		.where(eq(deliveries.eventId, eventId))
+		.orderBy(asc(deliveries.createdAt), asc(deliveries.id))
+		.all();
 }

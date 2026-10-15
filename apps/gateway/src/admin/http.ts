@@ -22,6 +22,12 @@ function issuesOf(error: z.ZodError) {
 	}));
 }
 
+export function badCursor(c: Context<AppBindings>): Response {
+	return invalid(c, [
+		{ path: "cursor", code: "invalid_cursor", message: "Cursor is not valid" },
+	]);
+}
+
 /** Admin payloads are small config objects; anything bigger is a mistake. */
 export const MAX_ADMIN_BODY_BYTES = 65_536;
 
