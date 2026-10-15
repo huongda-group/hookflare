@@ -5,8 +5,9 @@ import {
 	operateRequest,
 	type Page,
 	patchDestinationRequest,
+	rotateDestinationSecretRequest,
 } from "@hookflare/shared";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import type { AppBindings } from "../../app";
@@ -29,7 +30,7 @@ import { type DestinationRow, destinations } from "../../core/db/schema";
 import { enqueueThenMark } from "../../core/enqueue";
 import { newId } from "../../core/ids";
 import { resolvePolicy } from "../../core/policy";
-import { aad } from "../../core/secrets";
+import { aad, expiredPrevCleared, rotationColumns } from "../../core/secrets";
 import type { AppEnv } from "../../env";
 import { requirePermission } from "../auth/permission";
 import {
@@ -50,7 +51,12 @@ function generateSigningSecret(): string {
 export async function toDestination(
 	env: AppEnv,
 	row: DestinationRow,
+	now: number = Date.now(),
 ): Promise<Destination> {
+	const live =
+		row.signingSecretPrevEnc &&
+		row.signingSecretPrevExpiresAt !== null &&
+		row.signingSecretPrevExpiresAt > now;
 	return {
 		id: row.id,
 		project_id: row.projectId,
@@ -64,8 +70,16 @@ export async function toDestination(
 		signing_secret_fingerprint: await secretFingerprint(
 			await decryptSecret(env, row.signingSecretEnc, aad.destination(row.id)),
 		),
-		previous_secret_fingerprint: null,
-		previous_secret_expires_at: null,
+		previous_secret_fingerprint: live
+			? await secretFingerprint(
+					await decryptSecret(
+						env,
+						row.signingSecretPrevEnc as string,
+						aad.destinationPrev(row.id),
+					),
+				)
+			: null,
+		previous_secret_expires_at: live ? row.signingSecretPrevExpiresAt : null,
 		created_at: row.createdAt,
 		updated_at: row.updatedAt,
 	};
@@ -170,7 +184,7 @@ export function destinationRoutes() {
 			}),
 		]);
 		return c.json(
-			{ ...(await toDestination(env, row)), signing_secret: signingSecret },
+			{ ...(await toDestination(env, row, ts)), signing_secret: signingSecret },
 			201,
 		);
 	});
@@ -178,7 +192,7 @@ export function destinationRoutes() {
 	routes.get("/", requirePermission("events.read"), async (c) => {
 		const q = readQuery(c, listQuery);
 		if (!q.ok) return q.response;
-		const { db, env } = c.var.deps;
+		const { db, env, now } = c.var.deps;
 		const { rows, nextCursor } = paginate(
 			await listDestinations(db, {
 				limit: q.value.limit,
@@ -187,7 +201,8 @@ export function destinationRoutes() {
 			}),
 			q.value.limit,
 		);
-		const data = await Promise.all(rows.map((r) => toDestination(env, r)));
+		const ts = now();
+		const data = await Promise.all(rows.map((r) => toDestination(env, r, ts)));
 		return c.json({
 			data,
 			next_cursor: nextCursor,
@@ -197,7 +212,7 @@ export function destinationRoutes() {
 	routes.get("/:id", requirePermission("events.read"), async (c) => {
 		const row = await getDestination(c.var.deps.db, c.req.param("id"));
 		return row
-			? c.json(await toDestination(c.var.deps.env, row))
+			? c.json(await toDestination(c.var.deps.env, row, c.var.deps.now()))
 			: c.json({ error: "not_found" }, 404);
 	});
 
@@ -228,10 +243,15 @@ export function destinationRoutes() {
 		};
 		const conflict = backoffConflict(c, { ...existing, ...set });
 		if (conflict) return conflict;
+		const ts = now();
+		if (expiredPrevCleared(existing.signingSecretPrevExpiresAt, ts)) {
+			set.signingSecretPrevEnc = null;
+			set.signingSecretPrevExpiresAt = null;
+		}
 		const [[row]] = await db.batch([
 			db
 				.update(destinations)
-				.set({ ...set, updatedAt: now() })
+				.set({ ...set, updatedAt: ts })
 				.where(eq(destinations.id, id))
 				.returning(),
 			auditStmt(c, {
@@ -242,8 +262,68 @@ export function destinationRoutes() {
 				reason,
 			}),
 		]);
-		return c.json(await toDestination(env, row));
+		return c.json(await toDestination(env, row, ts));
 	});
+
+	routes.post(
+		"/:id/rotate-secret",
+		requirePermission("config.write"),
+		async (c) => {
+			const body = await readOptionalJson(c, rotateDestinationSecretRequest);
+			if (!body.ok) return body.response;
+			const { db, now, env } = c.var.deps;
+			const id = c.req.param("id");
+			const existing = await getDestination(db, id);
+			if (!existing) return c.json({ error: "not_found" }, 404);
+			const ts = now();
+			const secret = generateSigningSecret();
+			const cols = await rotationColumns({
+				env,
+				currentEnc: existing.signingSecretEnc,
+				currentAad: aad.destination(id),
+				prevAad: aad.destinationPrev(id),
+				newSecret: secret,
+				newAad: aad.destination(id),
+				graceHours: body.value.grace_hours,
+				now: ts,
+			});
+			const fingerprint = await secretFingerprint(secret);
+			// Fenced on the ciphertext we read: a concurrent rotation makes this a no-op.
+			const [[row]] = await db.batch([
+				db
+					.update(destinations)
+					.set({
+						signingSecretEnc: cols.enc,
+						signingSecretPrevEnc: cols.prevEnc,
+						signingSecretPrevExpiresAt: cols.prevExpiresAt,
+						updatedAt: ts,
+					})
+					.where(
+						and(
+							eq(destinations.id, id),
+							eq(destinations.signingSecretEnc, existing.signingSecretEnc),
+						),
+					)
+					.returning(),
+				auditStmt(c, {
+					action: "destination.secret_rotated",
+					resourceType: "destination",
+					resourceId: id,
+					reason: body.value.reason,
+					diff: {
+						grace_hours: body.value.grace_hours,
+						prev_expires_at: cols.prevExpiresAt,
+						new_fingerprint: fingerprint,
+					},
+				}),
+			]);
+			if (!row) return c.json({ error: "conflict" }, 409);
+			return c.json({
+				...(await toDestination(env, row, ts)),
+				signing_secret: secret,
+			});
+		},
+	);
 
 	routes.post(
 		"/:id/pause",
@@ -257,8 +337,9 @@ export function destinationRoutes() {
 			if (!existing) return c.json({ error: "not_found" }, 404);
 			// Only an actual transition is audited; a repeat Pause is a no-op.
 			if (existing.status === "active") {
+				const ts = now();
 				const [[row]] = await db.batch([
-					transitionDestinationStmt(db, id, "active", "paused", now()),
+					transitionDestinationStmt(db, id, "active", "paused", ts),
 					auditStmt(c, {
 						action: "destination.paused",
 						resourceType: "destination",
@@ -266,11 +347,11 @@ export function destinationRoutes() {
 						reason: body.value.reason,
 					}),
 				]);
-				if (row) return c.json(await toDestination(env, row));
+				if (row) return c.json(await toDestination(env, row, ts));
 			}
 			const s = await settled(c, id, "paused");
 			if (s.response) return s.response;
-			return c.json(await toDestination(env, s.row));
+			return c.json(await toDestination(env, s.row, now()));
 		},
 	);
 
@@ -315,7 +396,7 @@ export function destinationRoutes() {
 				markQueuedMany(deps, chunk),
 			);
 			return c.json({
-				destination: await toDestination(deps.env, row),
+				destination: await toDestination(deps.env, row, deps.now()),
 				resumed: moved.length,
 			});
 		},

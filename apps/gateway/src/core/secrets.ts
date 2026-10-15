@@ -1,5 +1,6 @@
+import type { AppEnv } from "../env";
 import type { SecretsEnv } from "./crypto";
-import { decryptSecret } from "./crypto";
+import { decryptSecret, encryptSecret } from "./crypto";
 import type { DestinationRow } from "./db/schema";
 
 /** AAD binds each ciphertext to its column (spec §11.3). */
@@ -40,4 +41,47 @@ export async function destinationSigningSecrets(
 	if (prevEnc)
 		out.push(await decryptSecret(env, prevEnc, aad.destinationPrev(d.id)));
 	return out;
+}
+
+const HOUR_MS = 3_600_000;
+
+/**
+ * Spec §11.3: the current secret moves to the prev column under the prev
+ * AAD; any older prev is dropped. grace 0 keeps no prev at all.
+ */
+export async function rotationColumns(input: {
+	env: AppEnv;
+	currentEnc: string;
+	currentAad: string;
+	prevAad: string;
+	newSecret: string;
+	newAad: string;
+	graceHours: number;
+	now: number;
+}): Promise<{
+	enc: string;
+	prevEnc: string | null;
+	prevExpiresAt: number | null;
+}> {
+	const enc = await encryptSecret(input.env, input.newSecret, input.newAad);
+	if (input.graceHours === 0)
+		return { enc, prevEnc: null, prevExpiresAt: null };
+	const current = await decryptSecret(
+		input.env,
+		input.currentEnc,
+		input.currentAad,
+	);
+	return {
+		enc,
+		prevEnc: await encryptSecret(input.env, current, input.prevAad),
+		prevExpiresAt: input.now + input.graceHours * HOUR_MS,
+	};
+}
+
+/** True when the prev columns hold an expired secret that a write should clear. */
+export function expiredPrevCleared(
+	prevExpiresAt: number | null,
+	now: number,
+): boolean {
+	return prevExpiresAt !== null && prevExpiresAt <= now;
 }

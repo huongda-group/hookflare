@@ -5,9 +5,10 @@ import {
 	listQuery,
 	type Page,
 	patchSourceRequest,
+	rotateSourceSecretRequest,
 	type Source,
 } from "@hookflare/shared";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import type { AppBindings } from "../../app";
@@ -22,15 +23,26 @@ import { getProject } from "../../core/db/projects";
 import { type SourceRow, sources } from "../../core/db/schema";
 import { getSource, listSources } from "../../core/db/sources";
 import { newId } from "../../core/ids";
-import { aad } from "../../core/secrets";
+import { aad, expiredPrevCleared, rotationColumns } from "../../core/secrets";
 import { requirePermission } from "../auth/permission";
-import { auditStmt, paginate, readJson, readQuery } from "../http";
+import {
+	auditStmt,
+	paginate,
+	readJson,
+	readOptionalJson,
+	readQuery,
+} from "../http";
 
 async function toSource(
 	c: Context<AppBindings>,
 	row: SourceRow,
 ): Promise<Source> {
 	const env = c.var.deps.env;
+	const now = c.var.deps.now();
+	const live =
+		row.secretPrevEnc &&
+		row.secretPrevExpiresAt !== null &&
+		row.secretPrevExpiresAt > now;
 	return {
 		id: row.id,
 		project_id: row.projectId,
@@ -44,8 +56,16 @@ async function toSource(
 					await decryptSecret(env, row.secretEnc, aad.source(row.id)),
 				)
 			: null,
-		previous_secret_fingerprint: null,
-		previous_secret_expires_at: null,
+		previous_secret_fingerprint: live
+			? await secretFingerprint(
+					await decryptSecret(
+						env,
+						row.secretPrevEnc as string,
+						aad.sourcePrev(row.id),
+					),
+				)
+			: null,
+		previous_secret_expires_at: live ? row.secretPrevExpiresAt : null,
 		event_id_from: row.eventIdFrom,
 		event_id_selector: row.eventIdSelector,
 		max_body_bytes: row.maxBodyBytes,
@@ -165,7 +185,12 @@ export function sourceRoutes() {
 		const existing = await getSource(db, c.req.param("id"));
 		if (!existing) return c.json({ error: "not_found" }, 404);
 
-		const set: Partial<SourceRow> = { updatedAt: now() };
+		const ts = now();
+		const set: Partial<SourceRow> = { updatedAt: ts };
+		if (expiredPrevCleared(existing.secretPrevExpiresAt, ts)) {
+			set.secretPrevEnc = null;
+			set.secretPrevExpiresAt = null;
+		}
 		if (patch.name !== undefined) set.name = patch.name;
 		if (patch.status !== undefined) set.status = patch.status;
 		if (patch.max_body_bytes !== undefined)
@@ -224,6 +249,67 @@ export function sourceRoutes() {
 		]);
 		return c.json(await toSource(c, row));
 	});
+
+	routes.post(
+		"/:id/rotate-secret",
+		requirePermission("config.write"),
+		async (c) => {
+			const body = await readOptionalJson(c, rotateSourceSecretRequest);
+			if (!body.ok) return body.response;
+			const { db, now, env } = c.var.deps;
+			const id = c.req.param("id");
+			const existing = await getSource(db, id);
+			if (!existing) return c.json({ error: "not_found" }, 404);
+			if (existing.authType === "none" || !existing.secretEnc)
+				return c.json({ error: "no_secret" }, 409);
+			const ts = now();
+			const secret =
+				body.value.secret ??
+				bytesToB64url(crypto.getRandomValues(new Uint8Array(32)));
+			const cols = await rotationColumns({
+				env,
+				currentEnc: existing.secretEnc,
+				currentAad: aad.source(id),
+				prevAad: aad.sourcePrev(id),
+				newSecret: secret,
+				newAad: aad.source(id),
+				graceHours: body.value.grace_hours,
+				now: ts,
+			});
+			const fingerprint = await secretFingerprint(secret);
+			// Fenced on the ciphertext we read: a concurrent rotation makes this a no-op.
+			const [[row]] = await db.batch([
+				db
+					.update(sources)
+					.set({
+						secretEnc: cols.enc,
+						secretPrevEnc: cols.prevEnc,
+						secretPrevExpiresAt: cols.prevExpiresAt,
+						updatedAt: ts,
+					})
+					.where(
+						and(eq(sources.id, id), eq(sources.secretEnc, existing.secretEnc)),
+					)
+					.returning(),
+				auditStmt(c, {
+					action: "source.secret_rotated",
+					resourceType: "source",
+					resourceId: id,
+					reason: body.value.reason,
+					diff: {
+						grace_hours: body.value.grace_hours,
+						prev_expires_at: cols.prevExpiresAt,
+						new_fingerprint: fingerprint,
+					},
+				}),
+			]);
+			if (!row) return c.json({ error: "conflict" }, 409);
+			return c.json({
+				...(await toSource(c, row)),
+				...(body.value.secret ? {} : { secret }),
+			});
+		},
+	);
 
 	return routes;
 }
