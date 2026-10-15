@@ -5,7 +5,7 @@ export const PROJECT_STATUSES = ["active", "disabled"] as const;
 export const SOURCE_STATUSES = ["active", "disabled"] as const;
 export const AUTH_TYPES = ["none", "hmac", "token"] as const;
 export const EVENT_ID_FROM = ["none", "header", "json_path"] as const;
-/** `paused` exists in the data model but is set by Pause/Resume (M2), never by PATCH. */
+/** `paused` is set only by `POST /destinations/:id/pause`. */
 const DESTINATION_PATCH_STATUSES = ["active", "disabled"] as const;
 
 const HEADER_NAME = /^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,100}$/;
@@ -15,6 +15,10 @@ const projectId = z.string().startsWith("prj_").max(64);
 const destinationId = z.string().startsWith("dst_").max(64);
 const url = z.url().max(2048);
 const timeoutMs = z.number().int().min(1000).max(30000);
+const maxAttempts = z.number().int().min(1).max(50);
+const backoffBaseS = z.number().int().min(1).max(3600);
+/** Queues cap delaySeconds at 12 h. ≥ backoff_base_s is checked by the route after defaults. */
+const backoffMaxS = z.number().int().min(1).max(43_200);
 const maxBodyBytes = z.number().int().min(1).max(10_485_760);
 const secret = z.string().min(16).max(512);
 
@@ -114,12 +118,18 @@ export const createDestinationRequest = z.strictObject({
 	name,
 	url,
 	timeout_ms: timeoutMs.optional(),
+	max_attempts: maxAttempts.optional(),
+	backoff_base_s: backoffBaseS.optional(),
+	backoff_max_s: backoffMaxS.optional(),
 });
 export const patchDestinationRequest = z.strictObject({
 	name: name.optional(),
 	url: url.optional(),
 	status: z.enum(DESTINATION_PATCH_STATUSES).optional(),
 	timeout_ms: timeoutMs.nullable().optional(),
+	max_attempts: maxAttempts.nullable().optional(),
+	backoff_base_s: backoffBaseS.nullable().optional(),
+	backoff_max_s: backoffMaxS.nullable().optional(),
 });
 
 const sourceFields = {
@@ -187,6 +197,9 @@ export type Destination = {
 	url: string;
 	status: "active" | "paused" | "disabled";
 	timeout_ms: number | null;
+	max_attempts: number | null;
+	backoff_base_s: number | null;
+	backoff_max_s: number | null;
 	signing_secret_fingerprint: string;
 	created_at: number;
 	updated_at: number;
@@ -224,6 +237,7 @@ export type Delivery = {
 	status: string;
 	attempt_count: number;
 	enqueued_at: number | null;
+	next_attempt_at: number | null;
 	last_http_status: number | null;
 	last_error: string | null;
 	completed_at: number | null;

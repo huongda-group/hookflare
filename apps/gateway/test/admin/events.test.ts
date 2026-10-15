@@ -59,4 +59,21 @@ describe("admin events", () => {
 				.status,
 		).toBe(404);
 	});
+
+	it("exposes next_attempt_at on deliveries", async () => {
+		const deps = testDeps();
+		const p = await seedPipeline(deps);
+		const { eventId } = await seedDelivery(deps, p, {
+			status: "retrying",
+			delivery: { status: "retrying", nextAttemptAt: 123 },
+		});
+		const api = await adminApp(deps);
+		const res = await api.request("GET", `/events/${eventId}`);
+		expect(res.status).toBe(200);
+		const event = await res.json<{
+			deliveries: { next_attempt_at: number | null }[];
+		}>();
+		expect(event.deliveries).toHaveLength(1);
+		expect(event.deliveries[0].next_attempt_at).toBe(123);
+	});
 });

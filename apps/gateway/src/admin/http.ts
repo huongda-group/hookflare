@@ -85,7 +85,7 @@ export function auditUrl(url: string): string {
 export function audit(
 	c: Context<AppBindings>,
 	resource: string,
-	action: "created" | "updated",
+	action: "created" | "updated" | "paused" | "resumed",
 	resourceId: string,
 	diff: Record<string, unknown>,
 ): void {

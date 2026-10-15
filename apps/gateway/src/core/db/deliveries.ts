@@ -1,5 +1,5 @@
 import type { SQL } from "drizzle-orm";
-import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import type { AttemptOutcome } from "../../delivery/classify";
 import type { Deps } from "../../deps";
 import { newId } from "../ids";
@@ -179,4 +179,37 @@ export async function markDeadFromDlq(
 			),
 		);
 	return result.meta.changes === 1;
+}
+
+/** Moves up to `limit` paused deliveries back to pending (oldest first). */
+export async function releasePausedDeliveries(
+	deps: Deps,
+	destinationId: string,
+	limit: number,
+): Promise<string[]> {
+	const oldest = deps.db
+		.select({ id: deliveries.id })
+		.from(deliveries)
+		.where(
+			and(
+				eq(deliveries.destinationId, destinationId),
+				eq(deliveries.status, "paused"),
+			),
+		)
+		.orderBy(asc(deliveries.createdAt))
+		.limit(limit);
+	const rows = await deps.db
+		.update(deliveries)
+		.set({ status: "pending", enqueuedAt: null })
+		.where(and(eq(deliveries.status, "paused"), inArray(deliveries.id, oldest)))
+		.returning({ id: deliveries.id });
+	return rows.map((r) => r.id);
+}
+
+/** ids must fit one D1 query (≤ ENQUEUE_CHUNK). */
+export async function markQueuedMany(deps: Deps, ids: string[]): Promise<void> {
+	await deps.db
+		.update(deliveries)
+		.set({ status: "queued", enqueuedAt: deps.now() })
+		.where(and(inArray(deliveries.id, ids), eq(deliveries.status, "pending")));
 }
