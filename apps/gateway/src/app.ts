@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { createLogger, type Logger } from "./core/log";
 import { createDeps, type Deps } from "./deps";
 import type { AppEnv } from "./env";
+import { ingressRoutes } from "./ingress/route";
 
 export const DEFAULT_HEALTH_TIMEOUT_MS = 2000;
 
@@ -68,6 +69,8 @@ export function createApp(options: AppOptions = {}) {
 			return c.json({ status: "degraded" }, 503);
 		}
 	});
+
+	app.route("/in", ingressRoutes());
 
 	app.notFound((c) => c.json({ error: "not_found" }, 404));
 
