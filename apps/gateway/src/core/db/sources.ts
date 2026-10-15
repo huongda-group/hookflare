@@ -1,5 +1,5 @@
-import { eq } from "drizzle-orm";
-import type { Deps } from "../../deps";
+import { and, desc, eq, lt } from "drizzle-orm";
+import type { Db, Deps } from "../../deps";
 import { decryptSecret } from "../crypto";
 import { projects, type SourceRow, sources } from "./schema";
 
@@ -32,4 +32,30 @@ export async function loadSourceBundle(
 			)
 		: null;
 	return { source: row.source, projectStatus: row.projectStatus, secret };
+}
+
+export async function getSource(
+	db: Db,
+	id: string,
+): Promise<SourceRow | undefined> {
+	return db.select().from(sources).where(eq(sources.id, id)).get();
+}
+
+/** Returns up to limit + 1 rows, id descending. */
+export async function listSources(
+	db: Db,
+	q: { limit: number; cursor?: string; projectId?: string },
+): Promise<SourceRow[]> {
+	return db
+		.select()
+		.from(sources)
+		.where(
+			and(
+				q.cursor ? lt(sources.id, q.cursor) : undefined,
+				q.projectId ? eq(sources.projectId, q.projectId) : undefined,
+			),
+		)
+		.orderBy(desc(sources.id))
+		.limit(q.limit + 1)
+		.all();
 }
