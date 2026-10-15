@@ -53,6 +53,9 @@ export async function seedPipeline(
 			`destinations.signing_secret_enc:${destinationId}`,
 		),
 		timeoutMs: null,
+		maxAttempts: null,
+		backoffBaseS: null,
+		backoffMaxS: null,
 		createdAt: now,
 		updatedAt: now,
 		...opts.destination,
@@ -103,6 +106,8 @@ export async function seedDelivery(
 		body?: Uint8Array;
 		headers?: Record<string, string>;
 		contentType?: string | null;
+		delivery?: Partial<typeof deliveries.$inferInsert>;
+		event?: Partial<typeof webhookEvents.$inferInsert>;
 	} = {},
 ): Promise<{ eventId: string; deliveryId: string }> {
 	const now = deps.now();
@@ -121,6 +126,7 @@ export async function seedDelivery(
 		sizeBytes: body.byteLength,
 		payloadSha256: "0".repeat(64),
 		bodyInline: body,
+		...opts.event,
 	});
 	await deps.db.insert(deliveries).values({
 		id: deliveryId,
@@ -132,6 +138,7 @@ export async function seedDelivery(
 		attemptCount: 0,
 		enqueuedAt: now,
 		createdAt: now,
+		...opts.delivery,
 	});
 	return { eventId, deliveryId };
 }

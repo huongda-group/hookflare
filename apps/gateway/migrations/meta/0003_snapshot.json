@@ -1,0 +1,686 @@
+{
+	"id": "9fcc97e9-76d4-45f2-b3ba-3769e099bb54",
+	"prevId": "7b62ba8c-d897-4b7b-8ebf-0b339d93adb9",
+	"version": "6",
+	"dialect": "sqlite",
+	"tables": {
+		"deliveries": {
+			"name": "deliveries",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "text",
+					"primaryKey": true,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"event_id": {
+					"name": "event_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"destination_id": {
+					"name": "destination_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"project_id": {
+					"name": "project_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"kind": {
+					"name": "kind",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"status": {
+					"name": "status",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"attempt_count": {
+					"name": "attempt_count",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false,
+					"default": 0
+				},
+				"enqueued_at": {
+					"name": "enqueued_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"last_http_status": {
+					"name": "last_http_status",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"last_error": {
+					"name": "last_error",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"completed_at": {
+					"name": "completed_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"created_by": {
+					"name": "created_by",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"created_at": {
+					"name": "created_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				}
+			},
+			"indexes": {
+				"deliveries_event_idx": {
+					"name": "deliveries_event_idx",
+					"columns": ["event_id"],
+					"isUnique": false
+				},
+				"deliveries_destination_created_idx": {
+					"name": "deliveries_destination_created_idx",
+					"columns": ["destination_id", "created_at"],
+					"isUnique": false
+				}
+			},
+			"foreignKeys": {
+				"deliveries_event_id_webhook_events_id_fk": {
+					"name": "deliveries_event_id_webhook_events_id_fk",
+					"tableFrom": "deliveries",
+					"columnsFrom": ["event_id"],
+					"tableTo": "webhook_events",
+					"columnsTo": ["id"],
+					"onUpdate": "no action",
+					"onDelete": "no action"
+				},
+				"deliveries_destination_id_destinations_id_fk": {
+					"name": "deliveries_destination_id_destinations_id_fk",
+					"tableFrom": "deliveries",
+					"columnsFrom": ["destination_id"],
+					"tableTo": "destinations",
+					"columnsTo": ["id"],
+					"onUpdate": "no action",
+					"onDelete": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"checkConstraints": {
+				"deliveries_kind_check": {
+					"name": "deliveries_kind_check",
+					"value": "\"kind\" IN ('initial', 'replay', 'test')"
+				},
+				"deliveries_status_check": {
+					"name": "deliveries_status_check",
+					"value": "\"status\" IN ('pending', 'queued', 'in_flight', 'retrying', 'paused', 'delivered', 'failed_final', 'dead')"
+				}
+			}
+		},
+		"delivery_attempts": {
+			"name": "delivery_attempts",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "text",
+					"primaryKey": true,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"delivery_id": {
+					"name": "delivery_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"attempt_no": {
+					"name": "attempt_no",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"started_at": {
+					"name": "started_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"duration_ms": {
+					"name": "duration_ms",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"http_status": {
+					"name": "http_status",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"error_kind": {
+					"name": "error_kind",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"error_message": {
+					"name": "error_message",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"response_snippet": {
+					"name": "response_snippet",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				}
+			},
+			"indexes": {
+				"delivery_attempts_delivery_attempt_uq": {
+					"name": "delivery_attempts_delivery_attempt_uq",
+					"columns": ["delivery_id", "attempt_no"],
+					"isUnique": true
+				}
+			},
+			"foreignKeys": {
+				"delivery_attempts_delivery_id_deliveries_id_fk": {
+					"name": "delivery_attempts_delivery_id_deliveries_id_fk",
+					"tableFrom": "delivery_attempts",
+					"columnsFrom": ["delivery_id"],
+					"tableTo": "deliveries",
+					"columnsTo": ["id"],
+					"onUpdate": "no action",
+					"onDelete": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"checkConstraints": {
+				"delivery_attempts_error_kind_check": {
+					"name": "delivery_attempts_error_kind_check",
+					"value": "\"error_kind\" IS NULL OR \"error_kind\" IN ('http_3xx', 'http_4xx', 'http_5xx', 'timeout', 'network')"
+				}
+			}
+		},
+		"destinations": {
+			"name": "destinations",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "text",
+					"primaryKey": true,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"project_id": {
+					"name": "project_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"name": {
+					"name": "name",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"url": {
+					"name": "url",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"status": {
+					"name": "status",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false,
+					"default": "'active'"
+				},
+				"signing_secret_enc": {
+					"name": "signing_secret_enc",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"timeout_ms": {
+					"name": "timeout_ms",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"created_at": {
+					"name": "created_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"updated_at": {
+					"name": "updated_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				}
+			},
+			"indexes": {},
+			"foreignKeys": {
+				"destinations_project_id_projects_id_fk": {
+					"name": "destinations_project_id_projects_id_fk",
+					"tableFrom": "destinations",
+					"columnsFrom": ["project_id"],
+					"tableTo": "projects",
+					"columnsTo": ["id"],
+					"onUpdate": "no action",
+					"onDelete": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"checkConstraints": {
+				"destinations_status_check": {
+					"name": "destinations_status_check",
+					"value": "\"status\" IN ('active', 'paused', 'disabled')"
+				}
+			}
+		},
+		"projects": {
+			"name": "projects",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "text",
+					"primaryKey": true,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"name": {
+					"name": "name",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"slug": {
+					"name": "slug",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"status": {
+					"name": "status",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false,
+					"default": "'active'"
+				},
+				"created_at": {
+					"name": "created_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"updated_at": {
+					"name": "updated_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				}
+			},
+			"indexes": {
+				"projects_slug_unique": {
+					"name": "projects_slug_unique",
+					"columns": ["slug"],
+					"isUnique": true
+				}
+			},
+			"foreignKeys": {},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"checkConstraints": {
+				"projects_status_check": {
+					"name": "projects_status_check",
+					"value": "\"status\" IN ('active', 'disabled')"
+				}
+			}
+		},
+		"settings": {
+			"name": "settings",
+			"columns": {
+				"key": {
+					"name": "key",
+					"type": "text",
+					"primaryKey": true,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"value_json": {
+					"name": "value_json",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"updated_at": {
+					"name": "updated_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				}
+			},
+			"indexes": {},
+			"foreignKeys": {},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"checkConstraints": {}
+		},
+		"sources": {
+			"name": "sources",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "text",
+					"primaryKey": true,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"project_id": {
+					"name": "project_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"destination_id": {
+					"name": "destination_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"name": {
+					"name": "name",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"status": {
+					"name": "status",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false,
+					"default": "'active'"
+				},
+				"auth_type": {
+					"name": "auth_type",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"auth_config": {
+					"name": "auth_config",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"secret_enc": {
+					"name": "secret_enc",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"event_id_from": {
+					"name": "event_id_from",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false,
+					"default": "'none'"
+				},
+				"event_id_selector": {
+					"name": "event_id_selector",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"max_body_bytes": {
+					"name": "max_body_bytes",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"created_at": {
+					"name": "created_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"updated_at": {
+					"name": "updated_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				}
+			},
+			"indexes": {},
+			"foreignKeys": {
+				"sources_project_id_projects_id_fk": {
+					"name": "sources_project_id_projects_id_fk",
+					"tableFrom": "sources",
+					"columnsFrom": ["project_id"],
+					"tableTo": "projects",
+					"columnsTo": ["id"],
+					"onUpdate": "no action",
+					"onDelete": "no action"
+				},
+				"sources_destination_id_destinations_id_fk": {
+					"name": "sources_destination_id_destinations_id_fk",
+					"tableFrom": "sources",
+					"columnsFrom": ["destination_id"],
+					"tableTo": "destinations",
+					"columnsTo": ["id"],
+					"onUpdate": "no action",
+					"onDelete": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"checkConstraints": {
+				"sources_status_check": {
+					"name": "sources_status_check",
+					"value": "\"status\" IN ('active', 'disabled')"
+				},
+				"sources_auth_type_check": {
+					"name": "sources_auth_type_check",
+					"value": "\"auth_type\" IN ('none', 'hmac', 'token')"
+				},
+				"sources_event_id_from_check": {
+					"name": "sources_event_id_from_check",
+					"value": "\"event_id_from\" IN ('none', 'header', 'json_path')"
+				},
+				"sources_secret_check": {
+					"name": "sources_secret_check",
+					"value": "(\"auth_type\" = 'none') = (\"secret_enc\" IS NULL)"
+				},
+				"sources_event_id_check": {
+					"name": "sources_event_id_check",
+					"value": "(\"event_id_from\" = 'none') = (\"event_id_selector\" IS NULL)"
+				}
+			}
+		},
+		"webhook_events": {
+			"name": "webhook_events",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "text",
+					"primaryKey": true,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"project_id": {
+					"name": "project_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"source_id": {
+					"name": "source_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"provider_event_id": {
+					"name": "provider_event_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"received_at": {
+					"name": "received_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"headers_json": {
+					"name": "headers_json",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"content_type": {
+					"name": "content_type",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"size_bytes": {
+					"name": "size_bytes",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"payload_sha256": {
+					"name": "payload_sha256",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"body_inline": {
+					"name": "body_inline",
+					"type": "blob",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				}
+			},
+			"indexes": {
+				"webhook_events_source_received_idx": {
+					"name": "webhook_events_source_received_idx",
+					"columns": ["source_id", "received_at"],
+					"isUnique": false
+				},
+				"webhook_events_project_received_idx": {
+					"name": "webhook_events_project_received_idx",
+					"columns": ["project_id", "received_at"],
+					"isUnique": false
+				},
+				"webhook_events_source_provider_idx": {
+					"name": "webhook_events_source_provider_idx",
+					"columns": ["source_id", "provider_event_id"],
+					"isUnique": false
+				}
+			},
+			"foreignKeys": {
+				"webhook_events_source_id_sources_id_fk": {
+					"name": "webhook_events_source_id_sources_id_fk",
+					"tableFrom": "webhook_events",
+					"columnsFrom": ["source_id"],
+					"tableTo": "sources",
+					"columnsTo": ["id"],
+					"onUpdate": "no action",
+					"onDelete": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"checkConstraints": {}
+		}
+	},
+	"views": {},
+	"enums": {},
+	"_meta": {
+		"columns": {},
+		"schemas": {},
+		"tables": {}
+	},
+	"internal": {
+		"indexes": {}
+	}
+}

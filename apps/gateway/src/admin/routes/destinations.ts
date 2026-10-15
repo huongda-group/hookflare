@@ -78,6 +78,9 @@ export function destinationRoutes() {
 			status: "active",
 			signingSecretEnc: await encryptSecret(env, signingSecret, aad(id)),
 			timeoutMs: body.value.timeout_ms ?? null,
+			maxAttempts: null,
+			backoffBaseS: null,
+			backoffMaxS: null,
 			createdAt: ts,
 			updatedAt: ts,
 		};

@@ -98,6 +98,10 @@ export const destinations = sqliteTable(
 			.default("active"),
 		signingSecretEnc: text("signing_secret_enc").notNull(),
 		timeoutMs: integer("timeout_ms"),
+		// NULL means the global default (core/policy.ts).
+		maxAttempts: integer("max_attempts"),
+		backoffBaseS: integer("backoff_base_s"),
+		backoffMaxS: integer("backoff_max_s"),
 		createdAt: integer("created_at").notNull(),
 		updatedAt: integer("updated_at").notNull(),
 	},
@@ -168,15 +172,15 @@ export const webhookEvents = sqliteTable(
 		sizeBytes: integer("size_bytes").notNull(),
 		payloadSha256: text("payload_sha256").notNull(),
 		bodyInline: bytes("body_inline").notNull(),
+		/** Set when the body is in R2 (> 64 KiB); body_inline is then empty. */
+		r2Key: text("r2_key"),
 	},
 	(t) => [
 		index("webhook_events_source_received_idx").on(t.sourceId, t.receivedAt),
 		index("webhook_events_project_received_idx").on(t.projectId, t.receivedAt),
-		// Non-unique in M1; M2 replaces it with a partial UNIQUE index (§5).
-		index("webhook_events_source_provider_idx").on(
-			t.sourceId,
-			t.providerEventId,
-		),
+		uniqueIndex("webhook_events_source_provider_uq")
+			.on(t.sourceId, t.providerEventId)
+			.where(sql`provider_event_id IS NOT NULL`),
 	],
 );
 
@@ -195,6 +199,10 @@ export const deliveries = sqliteTable(
 		status: text("status", { enum: DELIVERY_STATUSES }).notNull(),
 		attemptCount: integer("attempt_count").notNull().default(0),
 		enqueuedAt: integer("enqueued_at"),
+		/** Only while status = 'retrying'. */
+		nextAttemptAt: integer("next_attempt_at"),
+		/** Only while status = 'in_flight'; also the fencing token (spec §7.2). */
+		leaseUntil: integer("lease_until"),
 		lastHttpStatus: integer("last_http_status"),
 		lastError: text("last_error"),
 		completedAt: integer("completed_at"),
@@ -209,6 +217,8 @@ export const deliveries = sqliteTable(
 			t.destinationId,
 			t.createdAt,
 		),
+		index("deliveries_status_next_attempt_idx").on(t.status, t.nextAttemptAt),
+		index("deliveries_status_enqueued_idx").on(t.status, t.enqueuedAt),
 	],
 );
 
