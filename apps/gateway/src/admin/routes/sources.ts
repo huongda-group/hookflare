@@ -22,7 +22,8 @@ import { getProject } from "../../core/db/projects";
 import { type SourceRow, sources } from "../../core/db/schema";
 import { getSource, listSources } from "../../core/db/sources";
 import { newId } from "../../core/ids";
-import { audit, paginate, readJson, readQuery } from "../http";
+import { requirePermission } from "../auth/permission";
+import { auditStmt, paginate, readJson, readQuery } from "../http";
 
 const aad = (id: string) => `sources.secret_enc:${id}`;
 
@@ -74,7 +75,7 @@ function invalidField(c: Context<AppBindings>, path: string, message: string) {
 export function sourceRoutes() {
 	const routes = new Hono<AppBindings>();
 
-	routes.post("/", async (c) => {
+	routes.post("/", requirePermission("config.write"), async (c) => {
 		const body = await readJson(c, createSourceRequest);
 		if (!body.ok) return body.response;
 		const req = body.value;
@@ -112,16 +113,28 @@ export function sourceRoutes() {
 			createdAt: ts,
 			updatedAt: ts,
 		};
-		await db.insert(sources).values(row);
-		const { secret: _secret, ...diff } = req as typeof req & {
+		const {
+			secret: _secret,
+			reason,
+			...diff
+		} = req as typeof req & {
 			secret?: string;
 		};
-		audit(c, "source", "created", id, diff);
+		await db.batch([
+			db.insert(sources).values(row),
+			auditStmt(c, {
+				action: "source.created",
+				resourceType: "source",
+				resourceId: id,
+				diff,
+				reason,
+			}),
+		]);
 		const dto = await toSource(c, row);
 		return c.json(generated ? { ...dto, secret: generated } : dto, 201);
 	});
 
-	routes.get("/", async (c) => {
+	routes.get("/", requirePermission("events.read"), async (c) => {
 		const q = readQuery(c, listQuery);
 		if (!q.ok) return q.response;
 		const { rows, nextCursor } = paginate(
@@ -136,17 +149,17 @@ export function sourceRoutes() {
 		return c.json({ data, next_cursor: nextCursor } satisfies Page<Source>);
 	});
 
-	routes.get("/:id", async (c) => {
+	routes.get("/:id", requirePermission("events.read"), async (c) => {
 		const row = await getSource(c.var.deps.db, c.req.param("id"));
 		return row
 			? c.json(await toSource(c, row))
 			: c.json({ error: "not_found" }, 404);
 	});
 
-	routes.patch("/:id", async (c) => {
+	routes.patch("/:id", requirePermission("config.write"), async (c) => {
 		const body = await readJson(c, patchSourceRequest);
 		if (!body.ok) return body.response;
-		const patch = body.value;
+		const { reason, ...patch } = body.value;
 		const { db, now } = c.var.deps;
 		const existing = await getSource(db, c.req.param("id"));
 		if (!existing) return c.json({ error: "not_found" }, 404);
@@ -194,13 +207,20 @@ export function sourceRoutes() {
 			set.eventIdSelector = selector;
 		}
 
-		const [row] = await db
-			.update(sources)
-			.set(set)
-			.where(eq(sources.id, existing.id))
-			.returning();
-		if (!row) return c.json({ error: "not_found" }, 404);
-		audit(c, "source", "updated", row.id, patch);
+		const [[row]] = await db.batch([
+			db
+				.update(sources)
+				.set(set)
+				.where(eq(sources.id, existing.id))
+				.returning(),
+			auditStmt(c, {
+				action: "source.updated",
+				resourceType: "source",
+				resourceId: existing.id,
+				diff: patch,
+				reason,
+			}),
+		]);
 		return c.json(await toSource(c, row));
 	});
 

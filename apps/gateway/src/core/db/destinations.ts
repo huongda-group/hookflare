@@ -27,6 +27,21 @@ export async function listDestinations(
 		.all();
 }
 
+/** Unexecuted conditional status change; returns no row when not in `from`. */
+export function transitionDestinationStmt(
+	db: Db,
+	id: string,
+	from: DestinationRow["status"],
+	to: DestinationRow["status"],
+	now: number,
+) {
+	return db
+		.update(destinations)
+		.set({ status: to, updatedAt: now })
+		.where(and(eq(destinations.id, id), eq(destinations.status, from)))
+		.returning();
+}
+
 /** Conditional status change; undefined when the row is not in `from`. */
 export async function transitionDestination(
 	db: Db,
@@ -35,10 +50,6 @@ export async function transitionDestination(
 	to: DestinationRow["status"],
 	now: number,
 ): Promise<DestinationRow | undefined> {
-	const [row] = await db
-		.update(destinations)
-		.set({ status: to, updatedAt: now })
-		.where(and(eq(destinations.id, id), eq(destinations.status, from)))
-		.returning();
+	const [row] = await transitionDestinationStmt(db, id, from, to, now);
 	return row;
 }

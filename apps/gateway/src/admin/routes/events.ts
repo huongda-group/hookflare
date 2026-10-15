@@ -2,11 +2,12 @@ import type { WebhookEvent } from "@hookflare/shared";
 import { Hono } from "hono";
 import type { AppBindings } from "../../app";
 import { getEventDetail } from "../../core/db/events";
+import { requirePermission } from "../auth/permission";
 
 export function eventRoutes() {
 	const routes = new Hono<AppBindings>();
 
-	routes.get("/:id", async (c) => {
+	routes.get("/:id", requirePermission("events.read"), async (c) => {
 		const detail = await getEventDetail(c.var.deps.db, c.req.param("id"));
 		if (!detail) return c.json({ error: "not_found" }, 404);
 		const { event, deliveries } = detail;

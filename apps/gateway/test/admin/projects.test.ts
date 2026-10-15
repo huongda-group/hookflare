@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { clearAccessKeyCache } from "../../src/admin/auth/access";
-import { adminApp } from "../helpers/admin";
+import { adminApp, auditRows } from "../helpers/admin";
 import { testDeps } from "../helpers/deps";
 
 const slug = () => `p-${crypto.randomUUID().slice(0, 8)}`;
@@ -123,19 +123,38 @@ describe("admin projects", () => {
 		expect((await api.request("GET", "/projects?limit=500")).status).toBe(400);
 	});
 
-	it("logs an interim audit line with the actor", async () => {
-		const log = vi.spyOn(console, "log").mockImplementation(() => {});
-		const api = await adminApp(testDeps());
+	it("writes an audit row with the actor and reason", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps);
 		const res = await api.request("POST", "/projects", {
 			name: "Audited",
 			slug: slug(),
+			reason: "  new team  ",
 		});
 		const { id } = await res.json<{ id: string }>();
-		const line = log.mock.calls
-			.map((c) => String(c[0]))
-			.find((l) => l.includes("admin.project.created"));
-		expect(line).toBeDefined();
-		expect(line).toContain("admin@example.com");
-		expect(line).toContain(id);
+		const rows = await auditRows(deps, id);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]).toMatchObject({
+			actorEmail: "admin@example.com",
+			action: "project.created",
+			resourceType: "project",
+			reason: "new team",
+		});
+		expect(rows[0].diffJson).not.toHaveProperty("reason");
+	});
+
+	it("rejects a viewer with 403 and writes nothing", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps, { role: "viewer" });
+		const res = await api.request("POST", "/projects", {
+			name: "Nope",
+			slug: slug(),
+		});
+		expect(res.status).toBe(403);
+		expect(await res.json()).toEqual({
+			error: "forbidden",
+			required: "config.write",
+		});
+		expect((await api.request("GET", "/projects")).status).toBe(200);
 	});
 });

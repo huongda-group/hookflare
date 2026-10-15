@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import type { z } from "zod";
 import type { AppBindings } from "../app";
+import { type AuditEntry, auditInsert } from "../core/audit";
 import { readCappedBody } from "../core/body";
 import { DnsError } from "../core/dns";
 import { checkUrl } from "../core/ssrf";
@@ -28,6 +29,7 @@ export const MAX_ADMIN_BODY_BYTES = 65_536;
 export async function readJson<S extends z.ZodType>(
 	c: Context<AppBindings>,
 	schema: S,
+	opts: { emptyAsObject?: boolean } = {},
 ): Promise<Parsed<z.infer<S>>> {
 	const tooLarge = () => ({
 		ok: false as const,
@@ -38,15 +40,19 @@ export async function readJson<S extends z.ZodType>(
 		return tooLarge();
 	}
 	let raw: unknown;
-	try {
-		raw = JSON.parse(new TextDecoder().decode(bytes));
-	} catch {
-		return {
-			ok: false,
-			response: invalid(c, [
-				{ path: "", code: "invalid_json", message: "Body is not valid JSON" },
-			]),
-		};
+	if (bytes.byteLength === 0 && opts.emptyAsObject) {
+		raw = {};
+	} else {
+		try {
+			raw = JSON.parse(new TextDecoder().decode(bytes));
+		} catch {
+			return {
+				ok: false,
+				response: invalid(c, [
+					{ path: "", code: "invalid_json", message: "Body is not valid JSON" },
+				]),
+			};
+		}
 	}
 	const result = schema.safeParse(raw);
 	return result.success
@@ -54,11 +60,26 @@ export async function readJson<S extends z.ZodType>(
 		: { ok: false, response: invalid(c, issuesOf(result.error)) };
 }
 
+/** For endpoints whose whole body is optional (e.g. `{reason?}`). */
+export function readOptionalJson<S extends z.ZodType>(
+	c: Context<AppBindings>,
+	schema: S,
+) {
+	return readJson(c, schema, { emptyAsObject: true });
+}
+
 export function readQuery<S extends z.ZodType>(
 	c: Context<AppBindings>,
 	schema: S,
+	arrays: string[] = [],
 ): Parsed<z.infer<S>> {
-	const result = schema.safeParse(c.req.query());
+	/** Keys in `arrays` may repeat (`?status=a&status=b`) and are passed as string[]. */
+	const raw: Record<string, unknown> = { ...c.req.query() };
+	for (const key of arrays) {
+		const values = c.req.queries(key);
+		if (values) raw[key] = values;
+	}
+	const result = schema.safeParse(raw);
 	return result.success
 		? { ok: true, value: result.data }
 		: { ok: false, response: invalid(c, issuesOf(result.error)) };
@@ -81,18 +102,17 @@ export function auditUrl(url: string): string {
 	return new URL(url).origin;
 }
 
-/** Interim audit until audit_logs lands in M3. diff must never contain secrets. */
-export function audit(
+/** Unexecuted audit insert for the request's actor; batch it with the mutation (M3-7). */
+export function auditStmt(
 	c: Context<AppBindings>,
-	resource: string,
-	action: "created" | "updated" | "paused" | "resumed",
-	resourceId: string,
-	diff: Record<string, unknown>,
-): void {
-	c.var.logger.info(`admin.${resource}.${action}`, {
-		actor_email: c.var.actor?.email,
-		resource_id: resourceId,
-		diff,
+	e: Omit<AuditEntry, "actor" | "at">,
+) {
+	const actor = c.var.actor;
+	if (!actor) throw new Error("auditStmt called without an actor");
+	return auditInsert(c.var.deps.db, {
+		...e,
+		actor: actor.email,
+		at: c.var.deps.now(),
 	});
 }
 

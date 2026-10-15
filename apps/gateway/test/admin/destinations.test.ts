@@ -4,7 +4,7 @@ import { clearAccessKeyCache } from "../../src/admin/auth/access";
 import { deliveries } from "../../src/core/db/schema";
 import { DnsError } from "../../src/core/dns";
 import { clearSsrfCache } from "../../src/core/ssrf";
-import { adminApp } from "../helpers/admin";
+import { adminApp, auditRows } from "../helpers/admin";
 import { recordingQueue, testDeps } from "../helpers/deps";
 import { seedDelivery, seedPipeline } from "../helpers/seed";
 
@@ -58,49 +58,70 @@ describe("admin destinations", () => {
 		expect(list.data.every((d) => d.signing_secret === undefined)).toBe(true);
 	});
 
-	it("does not log the signing secret", async () => {
-		const spies = (["log", "warn", "error"] as const).map((m) =>
-			vi.spyOn(console, m).mockImplementation(() => {}),
-		);
+	it("never stores the signing secret or a full url in audit rows", async () => {
 		const deps = testDeps();
-		const { project } = await seedPipeline(deps);
+		const { project, destination } = await seedPipeline(deps);
 		const api = await adminApp(deps);
 		const created = await (
 			await api.request("POST", "/destinations", {
 				project_id: project.id,
-				name: "API",
-				url: "https://api.example.com/x",
+				name: "Slack",
+				url: "https://hooks.example.com/services/created-secret?token=q1",
 			})
 		).json<Dest>();
-		const all = spies.flatMap((s) => s.mock.calls.map((c) => String(c[0])));
-		expect(all.some((l) => l.includes("admin.destination.created"))).toBe(true);
-		expect(all.some((l) => l.includes(created.signing_secret as string))).toBe(
-			false,
-		);
-	});
-
-	it("logs only the url origin in audit lines", async () => {
-		const log = vi.spyOn(console, "log").mockImplementation(() => {});
-		const deps = testDeps();
-		const { project, destination } = await seedPipeline(deps);
-		const api = await adminApp(deps);
-		await api.request("POST", "/destinations", {
-			project_id: project.id,
-			name: "Slack",
-			url: "https://hooks.example.com/services/created-secret?token=q1",
-		});
 		await api.request("PATCH", `/destinations/${destination.id}`, {
 			url: "https://hooks.example.com/services/patched-secret?token=q2",
 		});
-		const audits = log.mock.calls
-			.map((c) => JSON.parse(String(c[0])))
-			.filter((l) => String(l.msg).startsWith("admin.destination."));
-		expect(audits.map((l) => l.diff.url)).toEqual([
+		const rows = [
+			...(await auditRows(deps, created.id)),
+			...(await auditRows(deps, destination.id)),
+		];
+		expect(rows.map((r) => r.action)).toEqual([
+			"destination.created",
+			"destination.updated",
+		]);
+		expect(rows.map((r) => r.diffJson?.url)).toEqual([
 			"https://hooks.example.com",
 			"https://hooks.example.com",
 		]);
-		const all = log.mock.calls.map((c) => String(c[0])).join("\n");
-		expect(all).not.toMatch(/secret\?token|q1|q2/);
+		const text = JSON.stringify(rows);
+		expect(text).not.toContain(created.signing_secret as string);
+		expect(text).not.toMatch(/secret\?token|q1|q2/);
+	});
+
+	it("audits pause and resume with an optional reason", async () => {
+		const deps = testDeps();
+		const { destination } = await seedPipeline(deps);
+		const api = await adminApp(deps, { role: "operator" });
+		expect(
+			(
+				await api.request("POST", `/destinations/${destination.id}/pause`, {
+					reason: "backend deploy",
+				})
+			).status,
+		).toBe(200);
+		expect(
+			(await api.request("POST", `/destinations/${destination.id}/resume`))
+				.status,
+		).toBe(200);
+		const rows = await auditRows(deps, destination.id);
+		expect(rows.map((r) => [r.action, r.reason])).toEqual([
+			["destination.paused", "backend deploy"],
+			["destination.resumed", null],
+		]);
+	});
+
+	it("does not audit a pause of an already paused destination", async () => {
+		const deps = testDeps();
+		const { destination } = await seedPipeline(deps, {
+			destination: { status: "paused" },
+		});
+		const api = await adminApp(deps);
+		expect(
+			(await api.request("POST", `/destinations/${destination.id}/pause`))
+				.status,
+		).toBe(200);
+		expect(await auditRows(deps, destination.id)).toEqual([]);
 	});
 
 	it("rejects unsafe urls with 422 and resolver failures with 503", async () => {
