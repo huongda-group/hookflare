@@ -1,5 +1,7 @@
 import { env } from "cloudflare:workers";
+import * as shared from "@hookflare/shared";
 import { describe, expect, it } from "vitest";
+import * as db from "../../../src/core/db/schema";
 
 const TABLES = [
 	"settings",
@@ -101,5 +103,14 @@ describe("0002_core_pipeline migration", () => {
 			"SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'delivery_attempts'",
 		).all<{ sql: string | null }>();
 		expect(results.some((r) => /UNIQUE/i.test(r.sql ?? ""))).toBe(true);
+	});
+});
+
+describe("enum parity between the DB schema and @hookflare/shared", () => {
+	it("uses the same values", () => {
+		expect(shared.PROJECT_STATUSES).toEqual(db.PROJECT_STATUSES);
+		expect(shared.SOURCE_STATUSES).toEqual(db.SOURCE_STATUSES);
+		expect(shared.AUTH_TYPES).toEqual(db.AUTH_TYPES);
+		expect(shared.EVENT_ID_FROM).toEqual(db.EVENT_ID_FROM);
 	});
 });
