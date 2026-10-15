@@ -38,7 +38,7 @@
 
 | # | Topic | Decision | Why |
 |---|---|---|---|
-| M2-1 | Retry scheduling | After recording a retryable attempt, the consumer **acks the message and sends a new one** with `delaySeconds`. `msg.retry()` is used only for infra errors and as a fallback when that send fails. | One message serves one attempt, so `msg.attempts` counts only consecutive infra failures. The native DLQ then catches only poison messages, and M5 limiter rejections can never push a delivery into the DLQ while its D1 budget remains. |
+| M2-1 | Retry scheduling | After recording a retryable attempt, the consumer **acks the message and sends a new one** with `delaySeconds`. `msg.retry()` is used only for infra errors, as a fallback when that send fails, and to re-delay a duplicate message that arrives before `next_attempt_at` (§7 step 2). | One message serves one attempt, so `msg.attempts` counts only consecutive infra failures. The native DLQ then catches only poison messages, and M5 limiter rejections can never push a delivery into the DLQ while its D1 budget remains. |
 | M2-2 | Lease placement | All checks (destination status, payload load, SSRF, signing) run **before** the lease, as in M1. The lease covers only send + record. | Errors before the lease need no lease release, so an infra error never strands a delivery in `in_flight`. |
 | M2-3 | Large payloads | Add `webhook_events.r2_key`. `body_inline` stays `NOT NULL` and holds an empty blob when the payload is in R2. Code enforces "exactly one location holds the payload". | Making a column nullable or adding a `CHECK` requires a SQLite table rebuild of the largest table, which `deliveries` references by FK; D1 migrations cannot turn `foreign_keys` off the way drizzle-kit's rebuild expects. |
 | M2-4 | Body size ceiling | `max_body_bytes` default 1 MB, allowed 1 B–10 MB. | Covers providers with large payloads while the buffered body stays far below the 128 MB isolate limit. Streaming verification is not needed. |
@@ -206,7 +206,7 @@ The record update matches `lease_until = :L`. If a reconciler (§8.1 rule b), an
 - **Infra delay:** `min(60 · 2^(msg.attempts − 1), 3600)` s. 20 consecutive infra failures span about 15h before the DLQ.
 - `next_attempt_at = now + delaySeconds · 1000`.
 
-With the defaults (30s, 6h, 20 attempts) the retry window is about 68h, above the 48h requirement. The minimum infra delay (60s) is never shorter than a lease (`timeout_ms` ≤ 30s + 30s), so a message retried after a failed record finds the lease expired and can re-acquire it.
+With the defaults (30s, 6h, 20 attempts) the retry window is about 62h (19 delays: 30s doubling to the 6h cap), above the 48h requirement. The minimum infra delay (60s) is never shorter than a lease (`timeout_ms` ≤ 30s + 30s), so a message retried after a failed record finds the lease expired and can re-acquire it.
 
 ### 7.4 Policy — `core/policy.ts`
 
@@ -239,7 +239,7 @@ function resolvePolicy(d: DestinationRow): Policy; // NULL column → default
 
 ### 8.2 DLQ consumer — `delivery/dlq.ts`
 
-For each message: `UPDATE deliveries SET status='dead', last_error='dlq: infra retries exhausted', lease_until=NULL, next_attempt_at=NULL, completed_at=:now WHERE id=:id AND <claimable>`, log `delivery.dead`, `ack`. `paused`, terminal, and live-lease `in_flight` deliveries are left alone, so a worker mid-request still records its result. Malformed message → log + `ack`. D1 error → `msg.retry()`.
+For each message: `UPDATE deliveries SET status='dead', last_error='dlq: infra retries exhausted', lease_until=NULL, next_attempt_at=NULL, completed_at=:now WHERE id=:id AND <claimable> AND NOT (status='retrying' AND next_attempt_at > :now)`, log `delivery.dead`, `ack`. `paused`, terminal, and live-lease `in_flight` deliveries are left alone, so a worker mid-request still records its result. A `retrying` delivery whose backoff is not yet due is also left alone: a duplicate message reaching the DLQ must not kill a delivery whose delayed message is still pending. Malformed message → log + `ack`. D1 error → `msg.retry()`.
 
 ### 8.3 Pause / Resume — admin API
 
@@ -282,7 +282,7 @@ Faults wrap the **raw bindings**, and `Deps` is built from the wrapped bindings,
 | Ingress | > 64 KB → R2 object + `r2_key` + empty `body_inline`; ≤ 64 KB stays inline; 10 MB cap; R2 put failure → `503`, no D1 rows; D1 failure after R2 put → `503` and the object is deleted; queue failure → `503`, delivery `pending`; duplicate → `200`, still one event and one delivery; two concurrent requests → one event, no orphan object; `provider_event_id` NULL → no dedup; paused destination → delivery `paused`, no message |
 | Consumer | 408/429/5xx/timeout/network → `retrying` + delayed message + `enqueued_at`; budget exhausted → `dead`; 3xx/4xx → `failed_final`; per-destination `max_attempts`/`backoff_*` honored; `Retry-After` honored; D1/R2/DNS errors → `msg.retry` with no attempt counted; R2 object missing → `failed_final (payload_missing)`; paused destination → `paused`; expired lease is re-acquired; stale worker's record writes nothing (fencing); send OK + record failure → re-sent later with the same `webhook-id`; reschedule send failure → `msg.retry` |
 | Reconciler | each rule (a)–(e′); total cap of 500; cooldown prevents re-enqueue on the next run; send OK + update failure; send failure; `next_attempt_at` never moved earlier |
-| DLQ | marks non-terminal deliveries `dead`; leaves `paused` and terminal ones; malformed message acked |
+| DLQ | marks non-terminal deliveries `dead`; leaves `paused`, terminal, live-lease, and not-yet-due `retrying` ones; malformed message acked |
 | Pause/Resume | state transitions and `409`; resume moves ≤ 100 and returns `resumed`; idempotent pause |
 | Migration | seed duplicate `provider_event_id`s with migrations `0001`–`0002`, apply `0003`–`0004`: the earliest event keeps the ID, others are NULL, all deliveries/attempts remain, the unique index exists |
 | End to end | backend fails twice then returns `200`: 3 attempts, final `delivered`, the event timeline shows all three |

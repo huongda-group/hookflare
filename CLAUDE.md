@@ -41,11 +41,11 @@ To run a single test: `pnpm --filter gateway exec vitest run test/core/ids.test.
 
 ## Invariants that span multiple components
 
-- Ingress returns `202` only after the D1 write (and the R2 write, for payloads > 64 KB) **and** `QUEUE.send` have all succeeded. If D1 succeeds but the queue fails, return `503`; the reconciler later enqueues the delivery from D1.
+- Ingress returns `202` only after the D1 write (and the R2 write, for payloads > 64 KB) **and** `QUEUE.send` have all succeeded. If D1 succeeds but the queue fails, return `503`; the reconciler later enqueues the delivery from D1. Exception: a delivery to a paused destination is stored as `paused` and not enqueued; Resume or the reconciler enqueues it later.
 - Verify source signatures against the **raw body bytes**. Parse JSON (e.g. to extract the provider event ID) only after verification.
 - **D1 is the source of truth for retry state.** The retry budget is `deliveries.attempt_count` compared against the destination's `max_attempts`, not the queue's `msg.attempts`, which resets on re-enqueue. Native DLQ is only a safety net.
 - The consumer must acquire the conditional-UPDATE **lease** before calling a backend. If 0 rows are affected, ack and skip: that is how duplicate queue messages become harmless.
-- Retries are new delayed messages; `msg.retry()` is only for infra errors (and as a fallback when the reschedule send fails).
+- Retries are new delayed messages; `msg.retry()` is only for infra errors, as a fallback when the reschedule send fails, and to re-delay a duplicate message that arrives before `next_attempt_at`.
 - The record update is fenced by `lease_until`: it matches the lease value, so a stale worker whose lease expired writes neither the delivery update nor the attempt row.
 - Infra errors (D1/R2), limiter rejections, and paused destinations never count as attempts.
 - Replay always creates a **new** `deliveries` row (`kind=replay`) and never mutates past deliveries or attempts. Every admin mutation writes `audit_logs` with secrets redacted.

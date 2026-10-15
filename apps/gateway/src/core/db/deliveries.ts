@@ -1,5 +1,16 @@
 import type { SQL } from "drizzle-orm";
-import { and, asc, eq, inArray, lt, or, sql } from "drizzle-orm";
+import {
+	and,
+	asc,
+	eq,
+	inArray,
+	isNull,
+	lt,
+	lte,
+	ne,
+	or,
+	sql,
+} from "drizzle-orm";
 import type { AttemptOutcome } from "../../delivery/classify";
 import type { Deps } from "../../deps";
 import { newId } from "../ids";
@@ -153,11 +164,15 @@ export async function recordLeasedAttempt(
 	);
 }
 
-/** Spec §8.2: only claimable deliveries become dead; a live lease is left to its worker. */
+/**
+ * Spec §8.2: only claimable deliveries become dead; a live lease is left to its worker,
+ * and a retry whose backoff is not yet due is left to its delayed message.
+ */
 export async function markDeadFromDlq(
 	deps: Deps,
 	deliveryId: string,
 ): Promise<boolean> {
+	const now = deps.now();
 	const result = await deps.db
 		.update(deliveries)
 		.set({
@@ -165,9 +180,19 @@ export async function markDeadFromDlq(
 			lastError: "dlq: infra retries exhausted",
 			leaseUntil: null,
 			nextAttemptAt: null,
-			completedAt: deps.now(),
+			completedAt: now,
 		})
-		.where(and(eq(deliveries.id, deliveryId), claimable(deps.now())));
+		.where(
+			and(
+				eq(deliveries.id, deliveryId),
+				claimable(now),
+				or(
+					ne(deliveries.status, "retrying"),
+					isNull(deliveries.nextAttemptAt),
+					lte(deliveries.nextAttemptAt, now),
+				),
+			),
+		);
 	return result.meta.changes === 1;
 }
 

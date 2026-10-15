@@ -72,6 +72,34 @@ describe("DLQ consumer", () => {
 		expect(msgs.every((m) => m.ack.mock.calls.length === 1)).toBe(true);
 	});
 
+	it("leaves a retrying delivery whose backoff is not yet due", async () => {
+		const deps = testDeps({ now: () => T0 });
+		const p = await seedPipeline(deps);
+		const [notDue, due] = await Promise.all(
+			[T0 + 1, T0].map((nextAttemptAt) =>
+				seedDelivery(deps, p, {
+					status: "retrying",
+					delivery: { nextAttemptAt },
+				}),
+			),
+		);
+		const msgs = [notDue, due].map((s) =>
+			fakeMessage({ deliveryId: s.deliveryId }),
+		);
+		await handleDlqBatch(fakeBatch(DLQ_QUEUE, msgs), deps);
+		const statuses = await Promise.all(
+			[notDue, due].map(async (s) => {
+				const [d] = await deps.db
+					.select()
+					.from(deliveries)
+					.where(eq(deliveries.id, s.deliveryId));
+				return d.status;
+			}),
+		);
+		expect(statuses).toEqual(["retrying", "dead"]);
+		expect(msgs.every((m) => m.ack.mock.calls.length === 1)).toBe(true);
+	});
+
 	it("acks malformed messages and retries on D1 errors", async () => {
 		const base = testDeps();
 		const p = await seedPipeline(base);

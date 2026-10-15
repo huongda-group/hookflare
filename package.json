@@ -1,7 +1,7 @@
 {
-	"name": "hookflare",
+	"name": "@huongda-group/hookflare",
 	"private": true,
-	"packageManager": "pnpm@12.11.2",
+	"packageManager": "pnpm@12.13.0",
 	"scripts": {
 		"dev": "wrangler dev --config apps/gateway/wrangler.jsonc",
 		"test": "pnpm --recursive --if-present run test",

@@ -14,7 +14,7 @@ Hookflare sits between webhook providers (Stripe, GitHub, Shopify, your own serv
 When your backend goes down, deploys, or gets overloaded, webhook providers retry only for a limited time and then drop events. Hookflare decouples **receiving** a webhook from **processing** it:
 
 - **Never lose a webhook.** An event is acknowledged with `202 Accepted` only after it is stored in D1 (and R2 for large payloads) **and** enqueued. If any of those steps fails, the provider gets a `503` and retries.
-- **Survive long outages.** Exponential backoff with jitter keeps retrying for roughly 68 hours by default, so a backend that is down for two days still receives every event.
+- **Survive long outages.** Exponential backoff with jitter keeps retrying for roughly 62 hours by default, so a backend that is down for two days still receives every event.
 - **See everything.** Every delivery attempt is logged with its HTTP status, latency, and error. You can search events, inspect payloads, and replay one or many from the dashboard.
 - **Zero servers to run.** It is built only on Cloudflare managed services: Workers, D1, Queues, R2, Durable Objects, and Access.
 
@@ -154,7 +154,7 @@ Each request Hookflare sends to your backend includes:
 
 Return any `2xx` to acknowledge. Return `429` (optionally with `Retry-After`) or `5xx` to ask for a retry. Any other `4xx` or `3xx` marks the delivery as failed without retrying. Redirects are never followed.
 
-Retries on `408`/`429`/`5xx`, timeouts, and network errors use exponential backoff (30 s → 6 h by default, ±20% jitter, `Retry-After` honored on `429`), up to 20 attempts (~68 h window) by default. Per-destination `max_attempts`, `backoff_base_s`, and `backoff_max_s` override the defaults. Every retry carries the same `webhook-id`: deduplicate on it, because delivery is at-least-once. `3xx` and other `4xx` responses are final and never retried.
+Retries on `408`/`429`/`5xx`, timeouts, and network errors use exponential backoff (30 s → 6 h by default, ±20% jitter, `Retry-After` honored on `429`), up to 20 attempts (~62 h window) by default. Per-destination `max_attempts`, `backoff_base_s`, and `backoff_max_s` override the defaults. Every retry carries the same `webhook-id`: deduplicate on it, because delivery is at-least-once. `3xx` and other `4xx` responses are final and never retried.
 
 Pausing a destination (`POST /api/admin/v1/destinations/:id/pause`) holds its deliveries with status `paused` without consuming attempts; resuming it (`POST /api/admin/v1/destinations/:id/resume`) releases them for delivery.
 
