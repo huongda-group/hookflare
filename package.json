@@ -9,6 +9,7 @@
 		"lint": "biome check .",
 		"format": "biome check --write .",
 		"cf-typegen": "wrangler types --strict-vars=false --config apps/gateway/wrangler.jsonc apps/gateway/worker-configuration.d.ts",
+		"db:generate": "pnpm --filter gateway db:generate",
 		"db:migrate:local": "wrangler d1 migrations apply DB --local --config apps/gateway/wrangler.jsonc",
 		"db:migrate:remote": "wrangler d1 migrations apply DB --remote --config apps/gateway/wrangler.jsonc",
 		"deploy": "pnpm db:migrate:remote && wrangler deploy --config apps/gateway/wrangler.jsonc"
