@@ -5,7 +5,7 @@
 Hookflare sits between webhook providers (Stripe, GitHub, Shopify, your own services…) and your backends. It verifies each incoming webhook, persists it durably, and acknowledges it, all before your backend is involved. It then delivers the webhook with automatic retries, keeps a full delivery log, and lets you replay anything from a dashboard.
 
 > [!NOTE]
-> **Status: M1 (Core pipeline) done.** Webhooks are received, verified, stored in D1, queued, and delivered once with Standard Webhooks signing. Retries, R2, and the dashboard arrive in M2–M4.
+> **Status: M2 (Reliability) done.** Webhooks are received, verified, stored in D1 (and R2 for large payloads), queued, and delivered with retries, a reconciler, and pause/resume. The admin API and the dashboard arrive in M3–M4.
 
 ---
 
@@ -59,7 +59,7 @@ D1 is the source of truth. The queue is only a transport, so the reconciler can 
 ## Getting started
 
 > [!NOTE]
-> These steps describe the current M1 setup. Exact commands, resource names, and config files may still evolve as later milestones (R2, Durable Objects) land.
+> These steps describe the current M2 setup. Exact commands, resource names, and config files may still evolve as later milestones (Durable Objects) land.
 
 ### Prerequisites
 
@@ -74,11 +74,11 @@ Each deployment is one isolated environment. For another independent deployment,
 ```bash
 pnpm exec wrangler d1 create hookflare
 pnpm exec wrangler queues create hookflare-deliveries
+pnpm exec wrangler queues create hookflare-deliveries-dlq
+pnpm exec wrangler r2 bucket create hookflare-payloads
 ```
 
-The ingress rate limiter (`INGRESS_LIMITER`, 100 requests per 10 s per source) is declared in `wrangler.jsonc` and needs no setup.
-
-(R2 buckets are created by later milestones when they are first used.)
+The ingress rate limiter (`INGRESS_LIMITER`, 100 requests per 10 s per source) is declared in `wrangler.jsonc` and needs no setup. The cron trigger (`* * * * *`, reconciler) is likewise declared in `wrangler.jsonc` and deployed with the Worker.
 
 Replace the committed `database_id` in `apps/gateway/wrangler.jsonc` (the maintainers' production database) with the ID from that command.
 
@@ -154,13 +154,17 @@ Each request Hookflare sends to your backend includes:
 
 Return any `2xx` to acknowledge. Return `429` (optionally with `Retry-After`) or `5xx` to ask for a retry. Any other `4xx` or `3xx` marks the delivery as failed without retrying. Redirects are never followed.
 
+Retries on `408`/`429`/`5xx`, timeouts, and network errors use exponential backoff (30 s → 6 h by default, ±20% jitter, `Retry-After` honored on `429`), up to 20 attempts (~68 h window) by default. Per-destination `max_attempts`, `backoff_base_s`, and `backoff_max_s` override the defaults. Every retry carries the same `webhook-id`: deduplicate on it, because delivery is at-least-once. `3xx` and other `4xx` responses are final and never retried.
+
+Pausing a destination (`POST /api/admin/v1/destinations/:id/pause`) holds its deliveries with status `paused` without consuming attempts; resuming it (`POST /api/admin/v1/destinations/:id/resume`) releases them for delivery.
+
 ## Roadmap
 
 | Milestone | Scope | Status |
 |---|---|---|
 | **M0: Foundation** | Monorepo, Wrangler config, migrations, CI | Done |
 | **M1: Core pipeline** | Ingress, D1 ledger, queue, single-shot delivery, signing, SSRF guard | Done |
-| **M2: Reliability** | Retries, dead letter, idempotency, R2 payloads, reconciler, pause/resume | Planned |
+| **M2: Reliability** | Retries, dead letter, idempotency, R2 payloads, reconciler, pause/resume | Done |
 | **M3: Admin API & security** | Access + RBAC, audit log, replay, test delivery, secret rotation | Planned |
 | **M4: Dashboard** | All dashboard pages, stats rollups | Planned |
 | **M5: Operations** | Alerting, R2 archival, per-destination concurrency and rate limits | Planned |
@@ -174,7 +178,7 @@ Hookflare is deliberately **not** an integration platform. The following are out
 
 ## Contributing
 
-The project is in early development (M1 done, M2 next), and feedback on the [roadmap](docs/superpowers/specs/2026-10-14-hookflare-roadmap.md) is very welcome. Please open an issue to discuss a change before you send a pull request.
+The project is in early development (M2 done, M3 next), and feedback on the [roadmap](docs/superpowers/specs/2026-10-14-hookflare-roadmap.md) is very welcome. Please open an issue to discuss a change before you send a pull request.
 
 ## License
 

@@ -37,6 +37,20 @@ This roadmap covers features and their dependency order only. It does not cover 
 | §10 Retention: delivered payloads 30 days, metadata 180 days | Replaced by archival: fully delivered events are archived after `hot_retention_days` (default 30); events with `failed_final`/`dead` deliveries after `failed_retention_days` (default 90) | DEC-12 |
 | §2 Reconciliation | The reconciler's scope now also covers the `paused` status and Resume | DEC-10 |
 
+### M2 deviations
+
+M2 implements this roadmap with the deviations recorded in the [M2 spec §3.1](2026-10-15-m2-reliability-design.md#31-deviations-from-the-roadmap-and-m1), copied here verbatim:
+
+| Source | Change | Reason |
+|---|---|---|
+| Roadmap §7.2 step 7 `retry({delaySeconds})` | Ack + new delayed message | M2-1 |
+| Roadmap §6/§7.2 lease first | Checks first, lease last | M2-2 |
+| M1 §5 "M2 makes `body_inline` nullable" | Stays `NOT NULL`; empty blob when in R2 | M2-3 |
+| Roadmap §7.2 step 3 limiter | Not in M2 | M5 scope |
+| Roadmap §7.2 DLQ consumer "opens an alert" | Logs only | Alerts are M5 |
+| Roadmap §7.3 reconcile | Adds rules (e)/(e′) for `paused` deliveries (§8.1) | Resume moves only the first batch; the rest must not stay `paused` forever |
+| Roadmap §6 backoff | Final delay clamped to `[1, 43200]` s | M2-5 |
+
 ## 4. Architecture
 
 ```text
@@ -82,6 +96,8 @@ Constraints and indexes:
 - Indexes: `deliveries(status, next_attempt_at)`, `deliveries(status, enqueued_at)`, `deliveries(destination_id, created_at)`, `webhook_events(project_id, received_at)`, `webhook_events(source_id, received_at)`, `delivery_attempts(delivery_id, attempt_no)`.
 
 Tables after `settings` are not `STRICT` (drizzle-kit cannot emit it); enums are enforced with `CHECK` constraints instead. `deliveries(event_id)` is indexed for event detail lookups.
+
+M2 notes: `webhook_events.body_inline` stays `NOT NULL` (a zero-length blob when the payload lives in R2; see the M2 spec §3.1 M2-3), and `destinations.backoff_max_s` is capped at 43200 s, the Queues `delaySeconds` maximum (M2 spec §3.1 M2-5).
 
 ## 6. Delivery state machine
 
