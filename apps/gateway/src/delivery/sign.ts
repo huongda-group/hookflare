@@ -31,7 +31,7 @@ function secretKeyBytes(secret: string): Uint8Array<ArrayBuffer> {
 export async function signWebhook(input: {
 	id: string;
 	timestampSec: number;
-	body: Uint8Array<ArrayBuffer>;
+	body: Uint8Array<ArrayBufferLike>;
 	secret: string;
 }): Promise<string> {
 	const prefix = new TextEncoder().encode(`${input.id}.${input.timestampSec}.`);
