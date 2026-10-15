@@ -5,7 +5,7 @@
 Hookflare sits between webhook providers (Stripe, GitHub, Shopify, your own services…) and your backends. It verifies each incoming webhook, persists it durably, and acknowledges it, all before your backend is involved. It then delivers the webhook with automatic retries, keeps a full delivery log, and lets you replay anything from a dashboard.
 
 > [!NOTE]
-> **Status: M0 (Foundation) done.** Monorepo scaffold, Wrangler config, D1 migrations, and CI are in place. The setup instructions below describe the current M0 setup; Queues and R2 buckets arrive in later milestones when first used.
+> **Status: M1 (Core pipeline) done.** Webhooks are received, verified, stored in D1, queued, and delivered once with Standard Webhooks signing. Retries, R2, and the dashboard arrive in M2–M4.
 
 ---
 
@@ -59,7 +59,7 @@ D1 is the source of truth. The queue is only a transport, so the reconciler can 
 ## Getting started
 
 > [!NOTE]
-> These steps describe the current M0 setup. Exact commands, resource names, and config files may still evolve as later milestones (Queues, R2) land.
+> These steps describe the current M1 setup. Exact commands, resource names, and config files may still evolve as later milestones (R2, Durable Objects) land.
 
 ### Prerequisites
 
@@ -73,9 +73,12 @@ Each deployment is one isolated environment. For another independent deployment,
 
 ```bash
 pnpm exec wrangler d1 create hookflare
+pnpm exec wrangler queues create hookflare-deliveries
 ```
 
-(Queues and R2 buckets are created by later milestones when they are first used.)
+The ingress rate limiter (`INGRESS_LIMITER`, 100 requests per 10 s per source) is declared in `wrangler.jsonc` and needs no setup.
+
+(R2 buckets are created by later milestones when they are first used.)
 
 Replace the committed `database_id` in `apps/gateway/wrangler.jsonc` (the maintainers' production database) with the ID from that command.
 
@@ -97,11 +100,11 @@ pnpm exec wrangler secret put SECRETS_KEY --config apps/gateway/wrangler.jsonc
 
 For local development, copy `apps/gateway/.dev.vars.example` to `apps/gateway/.dev.vars` and fill in a key.
 
-(The Access-related settings, `BOOTSTRAP_ADMIN_EMAILS`, `ACCESS_TEAM_DOMAIN`, and `ACCESS_AUD`, arrive with the admin API in M3.)
-
 ### 3. Protect the dashboard with Cloudflare Access
 
 Create an Access application that covers the dashboard (`/`) and the admin API (`/api/admin/*`). Bypass (leave public) `/in/*` and `/healthz`, because webhook providers and uptime monitors must be able to reach them without logging in.
+
+Then set the Access values in `apps/gateway/wrangler.jsonc` → `vars`: `ACCESS_TEAM_DOMAIN` (`https://<team>.cloudflareaccess.com`), `ACCESS_AUD` (the application's AUD tag), and `BOOTSTRAP_ADMIN_EMAILS` (comma-separated). The admin API fails closed (`500`) until both Access values are set. For local development, set `ACCESS_DEV_EMAIL` in `.dev.vars`; it is honored only on `localhost`. If the ingress hostname differs from the admin hostname, set `PUBLIC_BASE_URL` (e.g. `https://hooks.example.com`) so `ingress_url` in admin responses points at it.
 
 ### 4. Migrate and deploy
 
@@ -111,12 +114,32 @@ pnpm run deploy   # applies remote D1 migrations, then deploys the Worker
 curl https://<your-worker-domain>/healthz   # {"status":"ok","version":"..."}
 ```
 
-### 5. Receive your first webhook (from M1/M3)
+### 5. Receive your first webhook
 
-1. Sign in to the dashboard with a bootstrap admin email.
-2. Create a **project**, a **destination** (your backend URL), and a **source** that points to it.
-3. Configure your provider to send webhooks to `https://<your-worker-domain>/in/<sourceId>`.
-4. Verify the signature in your backend with any [Standard Webhooks library](https://github.com/standard-webhooks/standard-webhooks#reference-implementations).
+```bash
+API=http://localhost:8787/api/admin/v1
+PROJECT=$(curl -s -X POST $API/projects -H 'content-type: application/json' \
+  -d '{"name":"Shop","slug":"shop"}' | jq -r .id)
+curl -s -X POST $API/destinations -H 'content-type: application/json' \
+  -d "{\"project_id\":\"$PROJECT\",\"name\":\"Backend\",\"url\":\"https://backend.example.com/hooks\"}"
+# → save signing_secret: it is shown only once
+DEST=<destination id from the response>
+curl -s -X POST $API/sources -H 'content-type: application/json' \
+  -d "{\"project_id\":\"$PROJECT\",\"destination_id\":\"$DEST\",\"name\":\"Provider\",\"auth_type\":\"hmac\",\"auth_config\":{\"header\":\"x-signature\",\"algorithm\":\"sha256\",\"encoding\":\"hex\"}}"
+# → save secret and ingress_url: the secret is shown only once
+SOURCE_SECRET=<secret from the response>
+INGRESS_URL=<ingress_url from the response>
+BODY='{"id":"evt_1","type":"order.paid"}'
+SIG=$(printf %s "$BODY" | openssl dgst -sha256 -hmac "$SOURCE_SECRET" | awk '{print $2}')
+curl -i -X POST "$INGRESS_URL" -H 'content-type: application/json' -H "x-signature: $SIG" -d "$BODY"
+# → 202 {"event_id":"evt_..."}; then GET $API/events/<event_id> shows the delivery and its attempt
+```
+
+On a deployed Worker, replace the host and drop nothing else — Access adds the JWT for browser sessions; for `curl`, use `cloudflared access curl`.
+
+Verify the signature in your backend with any [Standard Webhooks library](https://github.com/standard-webhooks/standard-webhooks#reference-implementations).
+
+Source changes made with `PATCH` can take up to 30 seconds to reach ingress.
 
 ## Delivery contract for your backend
 
@@ -136,7 +159,7 @@ Return any `2xx` to acknowledge. Return `429` (optionally with `Retry-After`) or
 | Milestone | Scope | Status |
 |---|---|---|
 | **M0: Foundation** | Monorepo, Wrangler config, migrations, CI | Done |
-| **M1: Core pipeline** | Ingress, D1 ledger, queue, single-shot delivery, signing, SSRF guard | Planned |
+| **M1: Core pipeline** | Ingress, D1 ledger, queue, single-shot delivery, signing, SSRF guard | Done |
 | **M2: Reliability** | Retries, dead letter, idempotency, R2 payloads, reconciler, pause/resume | Planned |
 | **M3: Admin API & security** | Access + RBAC, audit log, replay, test delivery, secret rotation | Planned |
 | **M4: Dashboard** | All dashboard pages, stats rollups | Planned |
@@ -151,7 +174,7 @@ Hookflare is deliberately **not** an integration platform. The following are out
 
 ## Contributing
 
-The project is in early development (M0 done, M1 next), and feedback on the [roadmap](docs/superpowers/specs/2026-10-14-hookflare-roadmap.md) is very welcome. Please open an issue to discuss a change before you send a pull request.
+The project is in early development (M1 done, M2 next), and feedback on the [roadmap](docs/superpowers/specs/2026-10-14-hookflare-roadmap.md) is very welcome. Please open an issue to discuss a change before you send a pull request.
 
 ## License
 

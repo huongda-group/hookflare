@@ -27,6 +27,11 @@ jobs:
         run: |
           pnpm cf-typegen
           git diff --exit-code
+      - name: Check migrations match the Drizzle schema
+        run: |
+          pnpm db:generate
+          git diff --exit-code apps/gateway/migrations
+          test -z "$(git status --porcelain apps/gateway/migrations)"
       - name: Typecheck
         run: pnpm typecheck
       - name: Lint

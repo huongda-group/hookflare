@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Hookflare is an inbound webhook gateway on Cloudflare (Workers + Hono, D1, Queues, R2, Durable Objects, Access). Milestone M0 (Foundation) is done: the monorepo, gateway Worker skeleton, D1 migration tooling, and core building blocks are scaffolded.
+Hookflare is an inbound webhook gateway on Cloudflare (Workers + Hono, D1, Queues, R2, Durable Objects, Access). Milestones M0 (Foundation) and M1 (Core pipeline) are done: ingress, D1 ledger via Drizzle, queue consumer with single-shot delivery, Standard Webhooks signing, SSRF guard, and a minimal admin API behind Access.
 
 ## Source documents and precedence
 
@@ -24,6 +24,7 @@ All commands run from the repository root.
 | `pnpm lint` / `pnpm format` | `biome check` / `biome check --write` |
 | `pnpm cf-typegen` | `wrangler types --strict-vars=false` (regenerates the committed `worker-configuration.d.ts`; run it without a local `.dev.vars`, or local secrets end up in `Env` and CI fails its staleness check) |
 | `pnpm db:migrate:local` | `wrangler d1 migrations apply DB --local` |
+| `pnpm db:generate` | `drizzle-kit generate` from `apps/gateway/src/core/db/schema.ts` into `apps/gateway/migrations/` (never hand-edit generated migrations; CI fails on drift) |
 | `pnpm db:migrate:remote` | `wrangler d1 migrations apply DB --remote` |
 | `pnpm run deploy` | `db:migrate:remote`, then `wrangler deploy` |
 
@@ -36,6 +37,7 @@ To run a single test: `pnpm --filter gateway exec vitest run test/core/ids.test.
 - **One Worker, three handlers** (DEC-7). `fetch` serves `/in/:sourceId` (public ingress), `/api/admin/v1/*` (behind Cloudflare Access + RBAC), and the dashboard as static assets. `queue` runs the delivery consumer and the DLQ consumer. `scheduled` runs the reconcile, alerts, rollup, and archive/retention jobs.
 - **Layout:** `apps/gateway` (Hono; modules `core/`, `ingress/`, `delivery/`, `admin/`, `jobs/`), `apps/dashboard` (React + Vite + Tailwind + TanStack), `packages/shared`. `ingress/` must not import from `admin/`, so ingress can later be split into its own Worker.
 - **One deployment = one environment** (DEC-1). There is no `environment` column; staging and production are separate Workers with their own D1/R2/Queues.
+- **Data access** uses Drizzle ORM (`core/db/`); handlers get `db`, `queue`, `fetch`, `resolveDns`, and `now` from the `Deps` seam (`src/deps.ts`), never from `env` directly, so tests can inject them.
 
 ## Invariants that span multiple components
 
