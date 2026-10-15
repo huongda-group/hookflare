@@ -1,12 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { eq } from "drizzle-orm";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearAccessKeyCache } from "../src/admin/auth/access";
 import { createApp } from "../src/app";
+import { acquireLease } from "../src/core/db/deliveries";
+import { deliveries } from "../src/core/db/schema";
 import { createLogger } from "../src/core/log";
 import { clearSourceCache } from "../src/core/source-cache";
 import { clearSsrfCache } from "../src/core/ssrf";
 import { processDelivery } from "../src/delivery/consumer";
 import { signWebhook } from "../src/delivery/sign";
 import type { Deps } from "../src/deps";
+import { reconcile } from "../src/jobs/reconcile";
 import { adminApp } from "./helpers/admin";
 import { recordingQueue, testDeps } from "./helpers/deps";
 
@@ -192,5 +196,157 @@ describe("end to end", () => {
 		);
 		expect(res.status).toBe(401);
 		expect(queue.sent).toHaveLength(0);
+	});
+});
+
+describe("reliability (M2 exit criteria)", () => {
+	const T0 = 1_800_000_000_000;
+	beforeEach(() => {
+		clearAccessKeyCache();
+		clearSourceCache();
+		clearSsrfCache();
+		for (const m of ["log", "warn", "error"] as const)
+			vi.spyOn(console, m).mockImplementation(() => {});
+	});
+	afterEach(() => vi.restoreAllMocks());
+
+	function clockedDeps(fetchImpl: (n: number) => Response | Promise<Response>) {
+		let t = T0;
+		let calls = 0;
+		const queue = recordingQueue();
+		const deps = testDeps({
+			queue,
+			now: () => t,
+			fetch: vi.fn(async () => fetchImpl(++calls)) as unknown as typeof fetch,
+		});
+		return { deps, queue, set: (v: number) => (t = v), calls: () => calls };
+	}
+
+	async function delivery(deps: Deps, id: string) {
+		const [d] = await deps.db
+			.select()
+			.from(deliveries)
+			.where(eq(deliveries.id, id));
+		return d;
+	}
+
+	it("fails twice, then delivers; the timeline shows all three attempts", async () => {
+		const { deps, queue, set } = clockedDeps((n) =>
+			n < 3 ? new Response("", { status: 503 }) : new Response("ok"),
+		);
+		const { api, source } = await setup(deps);
+		const res = await send(
+			deps,
+			source.ingress_url,
+			source.secret,
+			JSON.stringify({ id: "r1" }),
+		);
+		const { event_id } = await res.json<{ event_id: string }>();
+		const id = queue.sent[0].deliveryId;
+		const logger = createLogger(deps.env, {});
+		for (let i = 0; i < 3; i++) {
+			await processDelivery(deps, id, logger);
+			const d = await delivery(deps, id);
+			if (d.nextAttemptAt) set(d.nextAttemptAt);
+		}
+		const event = await (await api.request("GET", `/events/${event_id}`)).json<{
+			deliveries: { status: string; attempts: { http_status: number }[] }[];
+		}>();
+		expect(event.deliveries[0].status).toBe("delivered");
+		expect(event.deliveries[0].attempts.map((a) => a.http_status)).toEqual([
+			503, 503, 200,
+		]);
+		expect(queue.sent).toHaveLength(3); // ingress + 2 reschedules
+	});
+
+	it("still delivers to a backend that recovers after 48 h", async () => {
+		vi.spyOn(Math, "random").mockReturnValue(0); // shortest delays: worst case for the window
+		let now = T0;
+		const { deps, queue, set } = clockedDeps(() =>
+			now < T0 + 48 * 3_600_000
+				? new Response("", { status: 503 })
+				: new Response("ok"),
+		);
+		const { source } = await setup(deps);
+		await send(
+			deps,
+			source.ingress_url,
+			source.secret,
+			JSON.stringify({ id: "r48" }),
+		);
+		const id = queue.sent[0].deliveryId;
+		const logger = createLogger(deps.env, {});
+		for (let i = 0; i < 25; i++) {
+			await processDelivery(deps, id, logger);
+			const d = await delivery(deps, id);
+			if (d.status !== "retrying") break;
+			now = d.nextAttemptAt as number;
+			set(now);
+		}
+		const d = await delivery(deps, id);
+		expect(d.status).toBe("delivered");
+		expect(d.attemptCount).toBeLessThanOrEqual(20);
+		expect(now - T0).toBeGreaterThanOrEqual(48 * 3_600_000);
+	});
+
+	it("recovers a delivery whose worker crashed holding the lease", async () => {
+		const { deps, queue, set } = clockedDeps(() => new Response("ok"));
+		const { source } = await setup(deps);
+		await send(
+			deps,
+			source.ingress_url,
+			source.secret,
+			JSON.stringify({ id: "crash" }),
+		);
+		const id = queue.sent[0].deliveryId;
+		// The worker leased, then died before sending or recording.
+		await acquireLease(deps, id, T0 + 40_000);
+		set(T0 + 40_000 + 6 * 60_000);
+		await reconcile(deps);
+		expect(await delivery(deps, id)).toMatchObject({
+			status: "retrying",
+			attemptCount: 0,
+		});
+		expect(queue.sent).toContainEqual({ deliveryId: id });
+		await processDelivery(deps, id, createLogger(deps.env, {}));
+		expect(await delivery(deps, id)).toMatchObject({
+			status: "delivered",
+			attemptCount: 1,
+		});
+	});
+
+	it("forwards a 200 KB body from R2 byte-for-byte with a valid signature", async () => {
+		const received: { body: Uint8Array; headers: Headers }[] = [];
+		const queue = recordingQueue();
+		const deps = testDeps({
+			queue,
+			fetch: vi.fn(async (_u: RequestInfo | URL, init?: RequestInit) => {
+				received.push({
+					body: new Uint8Array(init?.body as ArrayBuffer),
+					headers: new Headers(init?.headers),
+				});
+				return new Response("ok");
+			}) as unknown as typeof fetch,
+		});
+		const { source, destination } = await setup(deps);
+		const signingSecret = destination.signing_secret;
+		const payload = JSON.stringify({ id: "big", pad: "x".repeat(200_000) });
+		expect(
+			(await send(deps, source.ingress_url, source.secret, payload)).status,
+		).toBe(202);
+		await processDelivery(
+			deps,
+			queue.sent[0].deliveryId,
+			createLogger(deps.env, {}),
+		);
+		expect(new TextDecoder().decode(received[0].body)).toBe(payload);
+		const h = received[0].headers;
+		const expected = await signWebhook({
+			id: h.get("webhook-id") as string,
+			timestampSec: Number(h.get("webhook-timestamp")),
+			body: received[0].body as Uint8Array<ArrayBuffer>,
+			secret: signingSecret,
+		});
+		expect(h.get("webhook-signature")).toBe(expected);
 	});
 });
