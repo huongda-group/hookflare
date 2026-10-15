@@ -2,17 +2,24 @@ import type { SQL } from "drizzle-orm";
 import {
 	and,
 	asc,
+	desc,
 	eq,
+	getTableColumns,
+	gt,
+	gte,
 	inArray,
 	isNull,
 	lt,
 	lte,
 	ne,
+	notExists,
 	or,
 	sql,
 } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import type { AttemptOutcome } from "../../delivery/classify";
-import type { Deps } from "../../deps";
+import type { Db, Deps } from "../../deps";
+import { chunks } from "../enqueue";
 import { newId } from "../ids";
 import {
 	type DeliveryRow,
@@ -227,4 +234,87 @@ export async function markQueuedMany(deps: Deps, ids: string[]): Promise<void> {
 		.update(deliveries)
 		.set({ status: "queued", enqueuedAt: deps.now() })
 		.where(and(inArray(deliveries.id, ids), eq(deliveries.status, "pending")));
+}
+
+const FAILED = ["failed_final", "dead"] as const;
+
+export type FailureFilter = {
+	statuses?: (typeof FAILED)[number][];
+	projectId?: string;
+	destinationId?: string;
+	from?: number;
+	to?: number;
+	/** Hide failures that already have a newer replay for the same event and destination. */
+	unresolved: boolean;
+	after?: { at: number; id: string };
+	limit: number;
+};
+
+/** Spec §8.4. Ordered by (completed_at, id) desc; returns limit + 1 rows. */
+export async function listFailures(db: Db, f: FailureFilter) {
+	const newer = alias(deliveries, "newer");
+	const where: (SQL | undefined)[] = [
+		inArray(deliveries.status, f.statuses?.length ? f.statuses : [...FAILED]),
+		f.projectId ? eq(deliveries.projectId, f.projectId) : undefined,
+		f.destinationId ? eq(deliveries.destinationId, f.destinationId) : undefined,
+		f.from !== undefined ? gte(deliveries.completedAt, f.from) : undefined,
+		f.to !== undefined ? lte(deliveries.completedAt, f.to) : undefined,
+		f.after
+			? or(
+					lt(deliveries.completedAt, f.after.at),
+					and(
+						eq(deliveries.completedAt, f.after.at),
+						lt(deliveries.id, f.after.id),
+					),
+				)
+			: undefined,
+		f.unresolved
+			? notExists(
+					db
+						.select({ one: sql`1` })
+						.from(newer)
+						.where(
+							and(
+								eq(newer.eventId, deliveries.eventId),
+								eq(newer.destinationId, deliveries.destinationId),
+								eq(newer.kind, "replay"),
+								gt(newer.id, deliveries.id),
+							),
+						),
+				)
+			: undefined,
+	];
+	return db
+		.select({
+			...getTableColumns(deliveries),
+			sourceId: webhookEvents.sourceId,
+			receivedAt: webhookEvents.receivedAt,
+		})
+		.from(deliveries)
+		.innerJoin(webhookEvents, eq(webhookEvents.id, deliveries.eventId))
+		.where(and(...where))
+		.orderBy(desc(deliveries.completedAt), desc(deliveries.id))
+		.limit(f.limit + 1)
+		.all();
+}
+
+/** Newest replay per (event, destination), keyed "<eventId>|<destinationId>". */
+export async function latestReplays(
+	db: Db,
+	pairs: { eventId: string; destinationId: string }[],
+): Promise<Map<string, DeliveryRow>> {
+	const out = new Map<string, DeliveryRow>();
+	const eventIds = [...new Set(pairs.map((p) => p.eventId))];
+	for (const chunk of chunks(eventIds)) {
+		const rows = await db
+			.select()
+			.from(deliveries)
+			.where(
+				and(inArray(deliveries.eventId, chunk), eq(deliveries.kind, "replay")),
+			)
+			.orderBy(asc(deliveries.id))
+			.all();
+		for (const r of rows) out.set(`${r.eventId}|${r.destinationId}`, r);
+	}
+	return out;
 }

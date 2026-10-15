@@ -3,6 +3,7 @@ import type { AppBindings } from "../app";
 import { accessMiddleware } from "./auth/access";
 import { destinationRoutes } from "./routes/destinations";
 import { eventRoutes } from "./routes/events";
+import { failureRoutes } from "./routes/failures";
 import { meRoutes } from "./routes/me";
 import { projectRoutes } from "./routes/projects";
 import { sourceRoutes } from "./routes/sources";
@@ -16,5 +17,6 @@ export function adminRoutes(options: { accessFetch?: typeof fetch } = {}) {
 	routes.route("/destinations", destinationRoutes());
 	routes.route("/sources", sourceRoutes());
 	routes.route("/events", eventRoutes());
+	routes.route("/failures", failureRoutes());
 	return routes;
 }
