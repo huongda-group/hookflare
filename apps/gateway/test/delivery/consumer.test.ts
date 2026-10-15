@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deliveries, deliveryAttempts } from "../../src/core/db/schema";
 import { DnsError } from "../../src/core/dns";
 import { createLogger } from "../../src/core/log";
@@ -10,8 +10,10 @@ import {
 	readSnippet,
 } from "../../src/delivery/consumer";
 import { signWebhook } from "../../src/delivery/sign";
-import type { DeliveryMessage, Deps } from "../../src/deps";
-import { testDeps, withFailingBatch } from "../helpers/deps";
+import type { Deps } from "../../src/deps";
+import { type RecordingQueue, recordingQueue, testDeps } from "../helpers/deps";
+import { faultyDeps } from "../helpers/faults";
+import { fakeBatch, fakeMessage } from "../helpers/queue";
 import {
 	seedDelivery,
 	seedPipeline,
@@ -58,7 +60,9 @@ describe("processDelivery", () => {
 		const p = await seedPipeline(deps);
 		const { eventId, deliveryId } = await seedDelivery(deps, p);
 
-		expect(await processDelivery(deps, deliveryId, logger)).toBe("ack");
+		expect(await processDelivery(deps, deliveryId, logger)).toEqual({
+			action: "ack",
+		});
 
 		const { delivery, attempts } = await state(deps, deliveryId);
 		expect(delivery).toMatchObject({
@@ -124,11 +128,11 @@ describe("processDelivery", () => {
 
 	it.each([
 		[
-			"a 500",
-			() => new Response("down", { status: 500 }),
-			"http_5xx",
-			500,
-			"HTTP 500",
+			"a 400",
+			() => new Response("", { status: 400 }),
+			"http_4xx",
+			400,
+			"HTTP 400",
 		],
 		[
 			"a 404",
@@ -166,44 +170,14 @@ describe("processDelivery", () => {
 		},
 	);
 
-	it.each([
-		[
-			"timeout",
-			new DOMException("The operation timed out.", "TimeoutError"),
-			"timeout after 10000 ms",
-		],
-		[
-			"network",
-			new TypeError("Network connection lost."),
-			"TypeError: Network connection lost.",
-		],
-	])("records a %s failure", async (errorKind, err, message) => {
-		const deps = testDeps({
-			fetch: vi.fn(async () => Promise.reject(err)) as unknown as typeof fetch,
-		});
-		const p = await seedPipeline(deps);
-		const { deliveryId } = await seedDelivery(deps, p);
-		expect(await processDelivery(deps, deliveryId, logger)).toBe("ack");
-		const { delivery, attempts } = await state(deps, deliveryId);
-		expect(delivery).toMatchObject({
-			status: "failed_final",
-			lastHttpStatus: null,
-			lastError: message,
-		});
-		expect(attempts[0]).toMatchObject({
-			errorKind,
-			httpStatus: null,
-			errorMessage: message,
-			responseSnippet: null,
-		});
-	});
-
 	it("fails a disabled destination without an attempt or a request", async () => {
 		const fetchMock = fetchReturning(() => new Response("ok"));
 		const deps = testDeps({ fetch: fetchMock });
 		const p = await seedPipeline(deps, { destination: { status: "disabled" } });
 		const { deliveryId } = await seedDelivery(deps, p);
-		expect(await processDelivery(deps, deliveryId, logger)).toBe("ack");
+		expect(await processDelivery(deps, deliveryId, logger)).toEqual({
+			action: "ack",
+		});
 		const { delivery, attempts } = await state(deps, deliveryId);
 		expect(delivery).toMatchObject({
 			status: "failed_final",
@@ -239,7 +213,9 @@ describe("processDelivery", () => {
 			destination: { signingSecretEnc: "v1.corrupt.ciphertext" },
 		});
 		const { deliveryId } = await seedDelivery(deps, p);
-		expect(await processDelivery(deps, deliveryId, logger)).toBe("ack");
+		expect(await processDelivery(deps, deliveryId, logger)).toEqual({
+			action: "ack",
+		});
 		const { delivery, attempts } = await state(deps, deliveryId);
 		expect(delivery).toMatchObject({
 			status: "failed_final",
@@ -248,19 +224,6 @@ describe("processDelivery", () => {
 		});
 		expect(attempts).toHaveLength(0);
 		expect(fetchMock).not.toHaveBeenCalled();
-	});
-
-	it("fails with dns_error when the resolver errors", async () => {
-		const deps = testDeps({
-			resolveDns: vi.fn(async () => Promise.reject(new DnsError("SERVFAIL"))),
-		});
-		const p = await seedPipeline(deps);
-		const { deliveryId } = await seedDelivery(deps, p);
-		await processDelivery(deps, deliveryId, logger);
-		expect((await state(deps, deliveryId)).delivery).toMatchObject({
-			status: "failed_final",
-			lastError: "dns_error",
-		});
 	});
 
 	it("calls the backend once for a duplicate message", async () => {
@@ -272,7 +235,7 @@ describe("processDelivery", () => {
 			processDelivery(deps, deliveryId, logger),
 			processDelivery(deps, deliveryId, logger),
 		]);
-		expect(results).toEqual(["ack", "ack"]);
+		expect(results).toEqual([{ action: "ack" }, { action: "ack" }]);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 		expect((await state(deps, deliveryId)).attempts).toHaveLength(1);
 	});
@@ -292,38 +255,7 @@ describe("processDelivery", () => {
 				"dlv_01JAAAAAAAAAAAAAAAAAAAAAAA",
 				logger,
 			),
-		).toBe("ack");
-	});
-
-	it("retries when loading fails", async () => {
-		const deps = testDeps();
-		const broken: Deps = {
-			...deps,
-			db: new Proxy(deps.db, {
-				get(target, prop, receiver) {
-					if (prop === "select" || prop === "query")
-						throw new Error("D1_ERROR: simulated outage");
-					return Reflect.get(target, prop, receiver);
-				},
-			}),
-		};
-		expect(
-			await processDelivery(broken, "dlv_01JAAAAAAAAAAAAAAAAAAAAAAA", logger),
-		).toBe("retry");
-	});
-
-	it("retries when recording fails and leaves the delivery in_flight (M2 lease fixes this)", async () => {
-		const deps = testDeps();
-		const p = await seedPipeline(deps);
-		const { deliveryId } = await seedDelivery(deps, p);
-		expect(
-			await processDelivery(
-				{ ...deps, db: withFailingBatch(deps.db) },
-				deliveryId,
-				logger,
-			),
-		).toBe("retry");
-		expect((await state(deps, deliveryId)).delivery.status).toBe("in_flight");
+		).toEqual({ action: "ack" });
 	});
 
 	it("keeps the HTTP status when the response body errors", async () => {
@@ -366,37 +298,320 @@ describe("readSnippet", () => {
 	});
 });
 
-describe("handleDeliveryBatch", () => {
-	it("acks or retries each message on its own", async () => {
-		const deps = testDeps();
+const T0 = 1_800_000_000_000;
+
+function clocked(overrides: Partial<Deps> = {}) {
+	let t = T0;
+	const deps = testDeps({
+		now: () => t,
+		queue: recordingQueue(),
+		...overrides,
+	});
+	return {
+		deps,
+		queue: deps.queue as RecordingQueue,
+		advance: (ms: number) => {
+			t += ms;
+		},
+	};
+}
+
+describe("processDelivery retries (M2)", () => {
+	beforeEach(() => {
+		clearSsrfCache();
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.spyOn(Math, "random").mockReturnValue(0.5);
+	});
+	afterEach(() => vi.restoreAllMocks());
+
+	it.each([
+		["408", () => new Response("", { status: 408 }), "http_4xx"],
+		["429", () => new Response("", { status: 429 }), "http_4xx"],
+		["500", () => new Response("", { status: 500 }), "http_5xx"],
+		["503", () => new Response("", { status: 503 }), "http_5xx"],
+		[
+			"timeout",
+			() => Promise.reject(new DOMException("t", "TimeoutError")),
+			"timeout",
+		],
+		["network", () => Promise.reject(new TypeError("lost")), "network"],
+	] as const)(
+		"%s → retrying + delayed message",
+		async (_l, make, errorKind) => {
+			const { deps, queue } = clocked({ fetch: fetchReturning(make) });
+			const p = await seedPipeline(deps);
+			const { deliveryId } = await seedDelivery(deps, p);
+			expect(await processDelivery(deps, deliveryId, logger)).toEqual({
+				action: "ack",
+			});
+			const { delivery, attempts } = await state(deps, deliveryId);
+			expect(delivery).toMatchObject({
+				status: "retrying",
+				attemptCount: 1,
+				nextAttemptAt: T0 + 30_000,
+				enqueuedAt: T0,
+				leaseUntil: null,
+				completedAt: null,
+			});
+			expect(attempts[0].errorKind).toBe(errorKind);
+			expect(queue.sent).toEqual([{ deliveryId }]);
+			expect(queue.delays).toEqual([30]);
+		},
+	);
+
+	it("goes dead when the budget is exhausted", async () => {
+		const { deps, queue } = clocked({
+			fetch: fetchReturning(() => new Response("", { status: 503 })),
+		});
+		const p = await seedPipeline(deps, { destination: { maxAttempts: 3 } });
+		const { deliveryId } = await seedDelivery(deps, p, {
+			delivery: { status: "retrying", attemptCount: 2, nextAttemptAt: T0 },
+		});
+		await processDelivery(deps, deliveryId, logger);
+		expect((await state(deps, deliveryId)).delivery).toMatchObject({
+			status: "dead",
+			attemptCount: 3,
+			completedAt: T0,
+			nextAttemptAt: null,
+		});
+		expect(queue.sent).toHaveLength(0);
+	});
+
+	it("goes dead when max_attempts was lowered below attempt_count", async () => {
+		const { deps } = clocked({
+			fetch: fetchReturning(() => new Response("", { status: 503 })),
+		});
+		const p = await seedPipeline(deps, { destination: { maxAttempts: 3 } });
+		const { deliveryId } = await seedDelivery(deps, p, {
+			delivery: { status: "retrying", attemptCount: 5, nextAttemptAt: T0 },
+		});
+		await processDelivery(deps, deliveryId, logger);
+		expect((await state(deps, deliveryId)).delivery.status).toBe("dead");
+	});
+
+	it("uses the destination's backoff and honors Retry-After on 429", async () => {
+		const { deps, queue } = clocked({
+			fetch: fetchReturning(
+				() =>
+					new Response("", {
+						status: 429,
+						headers: { "retry-after": "99999" },
+					}),
+			),
+		});
+		const p = await seedPipeline(deps, {
+			destination: { backoffBaseS: 100, backoffMaxS: 600 },
+		});
+		const { deliveryId } = await seedDelivery(deps, p);
+		await processDelivery(deps, deliveryId, logger);
+		expect(queue.delays).toEqual([600]);
+		expect((await state(deps, deliveryId)).delivery.nextAttemptAt).toBe(
+			T0 + 600_000,
+		);
+	});
+
+	it.each([
+		[1, 60],
+		[3, 240],
+		[10, 3600],
+	])(
+		"D1 load failure → infra retry (msg.attempts %i → %i s), no attempt",
+		async (n, delay) => {
+			const { deps: base } = clocked();
+			const p = await seedPipeline(base);
+			const { deliveryId } = await seedDelivery(base, p);
+			const deps = faultyDeps(base, {
+				d1: [{ match: /from "deliveries" inner join/ }],
+			});
+			expect(await processDelivery(deps, deliveryId, logger, n)).toEqual({
+				action: "retry",
+				delaySeconds: delay,
+			});
+			expect((await state(base, deliveryId)).delivery).toMatchObject({
+				status: "queued",
+				attemptCount: 0,
+			});
+		},
+	);
+
+	it("R2 get failure → infra retry; missing object → failed_final payload_missing", async () => {
+		const fetchMock = fetchReturning(() => new Response("ok"));
+		const { deps: base } = clocked({ fetch: fetchMock });
+		const p = await seedPipeline(base);
+		const broken = await seedDelivery(base, p, {
+			event: {
+				r2Key: "events/2026/10/15/evt_missing",
+				bodyInline: new Uint8Array(),
+			},
+		});
+		const deps = faultyDeps(base, { r2: [{ match: /^get / }] });
+		expect(
+			await processDelivery(deps, broken.deliveryId, logger),
+		).toMatchObject({
+			action: "retry",
+		});
+		expect((await state(base, broken.deliveryId)).delivery.status).toBe(
+			"queued",
+		);
+
+		expect(await processDelivery(base, broken.deliveryId, logger)).toEqual({
+			action: "ack",
+		});
+		expect((await state(base, broken.deliveryId)).delivery).toMatchObject({
+			status: "failed_final",
+			lastError: "payload_missing",
+			attemptCount: 0,
+		});
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("delivers an R2 payload byte-for-byte", async () => {
+		const fetchMock = fetchReturning(() => new Response("ok"));
+		const { deps } = clocked({ fetch: fetchMock });
+		const p = await seedPipeline(deps);
+		const body = new Uint8Array(100_000).fill(9);
+		const key = `events/2026/10/15/evt_${crypto.randomUUID()}`;
+		await deps.payloads.put(key, body);
+		const { deliveryId } = await seedDelivery(deps, p, {
+			body,
+			event: { r2Key: key, bodyInline: new Uint8Array() },
+		});
+		await processDelivery(deps, deliveryId, logger);
+		const init = fetchMock.mock.calls[0][1] as RequestInit;
+		expect(new Uint8Array(init.body as ArrayBuffer)).toEqual(body);
+	});
+
+	it("DNS resolver error → infra retry without an attempt", async () => {
+		const { deps } = clocked({
+			resolveDns: vi.fn(async () => Promise.reject(new DnsError("SERVFAIL"))),
+		});
 		const p = await seedPipeline(deps);
 		const { deliveryId } = await seedDelivery(deps, p);
-		const make = (id: string) => ({
-			id,
-			body: { deliveryId: id },
-			timestamp: new Date(),
-			attempts: 1,
-			ack: vi.fn(),
-			retry: vi.fn(),
+		expect(await processDelivery(deps, deliveryId, logger)).toMatchObject({
+			action: "retry",
 		});
-		const ok = make(deliveryId);
-		const unknown = make("dlv_01JAAAAAAAAAAAAAAAAAAAAAAA");
-		const malformed = { ...make("msg_bad"), body: {} };
-		const batch = {
-			queue: "hookflare-deliveries",
-			messages: [ok, unknown, malformed],
-			ackAll: vi.fn(),
-			retryAll: vi.fn(),
-		};
+		expect((await state(deps, deliveryId)).delivery).toMatchObject({
+			status: "queued",
+			attemptCount: 0,
+		});
+	});
+
+	it("parks a delivery of a paused destination without a request", async () => {
+		const fetchMock = fetchReturning(() => new Response("ok"));
+		const { deps } = clocked({ fetch: fetchMock });
+		const p = await seedPipeline(deps, { destination: { status: "paused" } });
+		const { deliveryId } = await seedDelivery(deps, p);
+		expect(await processDelivery(deps, deliveryId, logger)).toEqual({
+			action: "ack",
+		});
+		expect((await state(deps, deliveryId)).delivery.status).toBe("paused");
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("re-acquires an expired lease and skips a live one", async () => {
+		const fetchMock = fetchReturning(() => new Response("ok"));
+		const { deps } = clocked({ fetch: fetchMock });
+		const p = await seedPipeline(deps);
+		const expired = await seedDelivery(deps, p, {
+			delivery: { status: "in_flight", leaseUntil: T0 - 1 },
+		});
+		const live = await seedDelivery(deps, p, {
+			delivery: { status: "in_flight", leaseUntil: T0 + 60_000 },
+		});
+		await processDelivery(deps, expired.deliveryId, logger);
+		await processDelivery(deps, live.deliveryId, logger);
+		expect((await state(deps, expired.deliveryId)).delivery.status).toBe(
+			"delivered",
+		);
+		expect((await state(deps, live.deliveryId)).delivery.status).toBe(
+			"in_flight",
+		);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("record failure → infra retry; the retry re-sends with the same webhook-id", async () => {
+		const fetchMock = fetchReturning(() => new Response("ok"));
+		const { deps: base, advance } = clocked({ fetch: fetchMock });
+		const p = await seedPipeline(base);
+		const { deliveryId } = await seedDelivery(base, p);
+		const deps = faultyDeps(base, {
+			d1: [{ match: /insert into "delivery_attempts"/, on: { nth: 1 } }],
+		});
+		expect(await processDelivery(deps, deliveryId, logger)).toEqual({
+			action: "retry",
+			delaySeconds: 60,
+		});
+		expect((await state(base, deliveryId)).delivery).toMatchObject({
+			status: "in_flight",
+			leaseUntil: T0 + 10_000 + 30_000,
+		});
+		advance(60_000);
+		await processDelivery(deps, deliveryId, logger, 2);
+		expect((await state(base, deliveryId)).delivery).toMatchObject({
+			status: "delivered",
+			attemptCount: 1,
+		});
+		const ids = fetchMock.mock.calls.map((c) =>
+			new Headers((c[1] as RequestInit).headers).get("webhook-id"),
+		);
+		expect(ids).toEqual([deliveryId, deliveryId]);
+	});
+
+	it("a stale worker writes nothing when its lease was taken over", async () => {
+		const { deps } = clocked();
+		const p = await seedPipeline(deps);
+		const { deliveryId } = await seedDelivery(deps, p);
+		deps.fetch = fetchReturning(async () => {
+			await deps.db
+				.update(deliveries)
+				.set({ leaseUntil: T0 + 999_999 })
+				.where(eq(deliveries.id, deliveryId));
+			return new Response("ok");
+		});
+		expect(await processDelivery(deps, deliveryId, logger)).toEqual({
+			action: "ack",
+		});
+		const { delivery, attempts } = await state(deps, deliveryId);
+		expect(attempts).toHaveLength(0);
+		expect(delivery).toMatchObject({ status: "in_flight", attemptCount: 0 });
+	});
+
+	it("reschedule failure → msg.retry with the backoff delay", async () => {
+		const { deps: base } = clocked({
+			fetch: fetchReturning(() => new Response("", { status: 503 })),
+		});
+		const p = await seedPipeline(base);
+		const { deliveryId } = await seedDelivery(base, p);
+		const deps = faultyDeps(base, { queue: [{ match: /^send$/ }] });
+		expect(await processDelivery(deps, deliveryId, logger)).toEqual({
+			action: "retry",
+			delaySeconds: 30,
+		});
+		expect((await state(base, deliveryId)).delivery.status).toBe("retrying");
+	});
+});
+
+describe("handleDeliveryBatch", () => {
+	it("acks, retries with a delay, and drops malformed messages", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		const { deps: base } = clocked();
+		const p = await seedPipeline(base);
+		const ok = await seedDelivery(base, p);
+		const deps = faultyDeps(base, {
+			d1: [{ match: /from "deliveries" inner join/, on: { nth: 2 } }],
+		});
+		const good = fakeMessage({ deliveryId: ok.deliveryId });
+		const infra = fakeMessage({ deliveryId: ok.deliveryId }, 2);
+		const bad = fakeMessage({ nope: 1 });
+		await handleDeliveryBatch(fakeBatch("hookflare-deliveries", [good]), deps);
 		await handleDeliveryBatch(
-			batch as unknown as MessageBatch<DeliveryMessage>,
+			fakeBatch("hookflare-deliveries", [infra, bad]),
 			deps,
 		);
-		expect(ok.ack).toHaveBeenCalledOnce();
-		expect(unknown.ack).toHaveBeenCalledOnce();
-		expect(ok.retry).not.toHaveBeenCalled();
-		// A message without a deliveryId can never succeed: ack, don't retry.
-		expect(malformed.ack).toHaveBeenCalledOnce();
-		expect(malformed.retry).not.toHaveBeenCalled();
+		expect(good.ack).toHaveBeenCalled();
+		expect(infra.retry).toHaveBeenCalledWith({ delaySeconds: 120 });
+		expect(bad.ack).toHaveBeenCalled();
 	});
 });

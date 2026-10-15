@@ -108,7 +108,7 @@ describe("end to end", () => {
 				queue.sent[0].deliveryId,
 				createLogger(deps.env, {}),
 			),
-		).toBe("ack");
+		).toEqual({ action: "ack" });
 
 		const fetchMock = vi.mocked(deps.fetch);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -142,7 +142,7 @@ describe("end to end", () => {
 		);
 	});
 
-	it("accepts and stores webhooks while the backend is offline (M1 exit criterion)", async () => {
+	it("accepts and stores webhooks while the backend is offline, scheduled for retry", async () => {
 		const queue = recordingQueue();
 		const deps = testDeps({
 			queue,
@@ -173,7 +173,7 @@ describe("end to end", () => {
 				attempts: { error_kind: string; http_status: number | null }[];
 			}[];
 		}>();
-		expect(event.deliveries[0].status).toBe("failed_final");
+		expect(event.deliveries[0].status).toBe("retrying");
 		expect(event.deliveries[0].last_error).toContain("Network connection lost");
 		expect(event.deliveries[0].attempts).toEqual([
 			expect.objectContaining({ error_kind: "network", http_status: null }),

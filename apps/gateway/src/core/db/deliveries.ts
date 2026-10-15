@@ -1,6 +1,6 @@
 import type { SQL } from "drizzle-orm";
 import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
-import type { AttemptOutcome, Outcome } from "../../delivery/classify";
+import type { AttemptOutcome } from "../../delivery/classify";
 import type { Deps } from "../../deps";
 import { newId } from "../ids";
 import {
@@ -151,57 +151,4 @@ export async function recordLeasedAttempt(
 	return (
 		(update as unknown as { meta: { changes: number } }).meta.changes === 1
 	);
-}
-
-/** true when this consumer won the delivery. M2 replaces this with a lease. */
-export async function claimDelivery(
-	deps: Deps,
-	deliveryId: string,
-): Promise<boolean> {
-	const result = await deps.db
-		.update(deliveries)
-		.set({ status: "in_flight" })
-		.where(
-			and(
-				eq(deliveries.id, deliveryId),
-				inArray(deliveries.status, ["pending", "queued"]),
-			),
-		);
-	return result.meta.changes === 1;
-}
-
-export async function recordAttempt(
-	deps: Deps,
-	ctx: DeliveryContext,
-	a: {
-		startedAt: number;
-		durationMs: number;
-		outcome: Outcome;
-		snippet: string | null;
-	},
-): Promise<void> {
-	const attemptNo = ctx.delivery.attemptCount + 1;
-	await deps.db.batch([
-		deps.db.insert(deliveryAttempts).values({
-			id: newId("att", a.startedAt),
-			deliveryId: ctx.delivery.id,
-			attemptNo,
-			startedAt: a.startedAt,
-			durationMs: a.durationMs,
-			httpStatus: a.outcome.httpStatus,
-			errorKind: a.outcome.errorKind,
-			errorMessage: a.outcome.error,
-			responseSnippet: a.snippet,
-		}),
-		deps.db
-			.update(deliveries)
-			.set({
-				attemptCount: sql`${deliveries.attemptCount} + 1`,
-				status: a.outcome.status,
-				lastHttpStatus: a.outcome.httpStatus,
-				lastError: a.outcome.error,
-				completedAt: deps.now(),
-			})
-			.where(eq(deliveries.id, ctx.delivery.id)),
-	]);
 }
