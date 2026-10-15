@@ -300,10 +300,14 @@ describe("processDelivery", () => {
 	});
 
 	it("keeps the HTTP status when the response body errors", async () => {
+		let pulls = 0;
 		const body = new ReadableStream<Uint8Array>({
-			start(c) {
-				c.enqueue(new TextEncoder().encode("partial"));
-				c.error(new Error("connection reset"));
+			pull(c) {
+				if (pulls++ === 0) {
+					c.enqueue(new TextEncoder().encode("partial"));
+				} else {
+					c.error(new Error("connection reset"));
+				}
 			},
 		});
 		const deps = testDeps({
