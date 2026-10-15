@@ -1,3 +1,5 @@
+import { type SQL, sql } from "drizzle-orm";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import type { AppEnv } from "../env";
 import type { SecretsEnv } from "./crypto";
 import { decryptSecret, encryptSecret } from "./crypto";
@@ -78,10 +80,18 @@ export async function rotationColumns(input: {
 	};
 }
 
-/** True when the prev columns hold an expired secret that a write should clear. */
-export function expiredPrevCleared(
-	prevExpiresAt: number | null,
+/**
+ * SET values that clear an expired prev. Decided inside the UPDATE, not from
+ * an earlier read, so a rotation that lands in between keeps its fresh prev.
+ */
+export function clearExpiredPrev(
+	prevEnc: SQLiteColumn,
+	prevExpiresAt: SQLiteColumn,
 	now: number,
-): boolean {
-	return prevExpiresAt !== null && prevExpiresAt <= now;
+): { enc: SQL; expiresAt: SQL } {
+	const expired = sql`${prevExpiresAt} IS NOT NULL AND ${prevExpiresAt} <= ${now}`;
+	return {
+		enc: sql`CASE WHEN ${expired} THEN NULL ELSE ${prevEnc} END`,
+		expiresAt: sql`CASE WHEN ${expired} THEN NULL ELSE ${prevExpiresAt} END`,
+	};
 }

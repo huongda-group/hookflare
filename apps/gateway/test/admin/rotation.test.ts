@@ -2,7 +2,11 @@ import type { Destination, Source } from "@hookflare/shared";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { clearAccessKeyCache } from "../../src/admin/auth/access";
-import { decryptSecret, secretFingerprint } from "../../src/core/crypto";
+import {
+	decryptSecret,
+	encryptSecret,
+	secretFingerprint,
+} from "../../src/core/crypto";
 import { destinations, sources } from "../../src/core/db/schema";
 import { aad } from "../../src/core/secrets";
 import { adminApp, auditRows } from "../helpers/admin";
@@ -179,5 +183,99 @@ describe("POST /sources/:id/rotate-secret", () => {
 			.from(sources)
 			.where(eq(sources.id, source.id));
 		expect([row.secretPrevEnc, row.secretPrevExpiresAt]).toEqual([null, null]);
+	});
+});
+
+describe("rotation races", () => {
+	it("a PATCH racing a rotation keeps the fresh prev", async () => {
+		const deps = testDeps();
+		const { destination } = await seedPipeline(deps);
+		const where = eq(destinations.id, destination.id);
+		await deps.db
+			.update(destinations)
+			.set({
+				signingSecretPrevEnc: "stale",
+				signingSecretPrevExpiresAt: deps.now() - 1,
+			})
+			.where(where);
+		const freshEnc = await encryptSecret(
+			deps.env,
+			TEST_SIGNING_SECRET,
+			aad.destinationPrev(destination.id),
+		);
+		const freshUntil = deps.now() + HOUR;
+		// The SSRF check runs between the PATCH's read and its write: rotate there.
+		const resolve = deps.resolveDns;
+		deps.resolveDns = async (host) => {
+			await deps.db
+				.update(destinations)
+				.set({
+					signingSecretPrevEnc: freshEnc,
+					signingSecretPrevExpiresAt: freshUntil,
+				})
+				.where(where);
+			return resolve(host);
+		};
+		const api = await adminApp(deps);
+		const res = await api.request("PATCH", `/destinations/${destination.id}`, {
+			url: "https://example.com/moved",
+		});
+		expect(res.status).toBe(200);
+		const [row] = await deps.db.select().from(destinations).where(where);
+		expect([row.signingSecretPrevEnc, row.signingSecretPrevExpiresAt]).toEqual([
+			freshEnc,
+			freshUntil,
+		]);
+	});
+
+	/** Runs `before` right ahead of the next db.batch, i.e. after the handler's read. */
+	function beforeNextBatch(
+		deps: ReturnType<typeof testDeps>,
+		before: () => Promise<unknown>,
+	) {
+		const batch = deps.db.batch.bind(deps.db);
+		deps.db.batch = (async (queries: Parameters<typeof batch>[0]) => {
+			deps.db.batch = batch;
+			await before();
+			return batch(queries);
+		}) as unknown as typeof batch;
+	}
+
+	it("a destination rotation that loses the race answers 409 and writes no audit row", async () => {
+		const deps = testDeps();
+		const { destination } = await seedPipeline(deps);
+		const api = await adminApp(deps);
+		await api.request("GET", "/me"); // bootstrap batch happens here
+		beforeNextBatch(deps, () =>
+			deps.db
+				.update(destinations)
+				.set({ signingSecretEnc: "rotated-elsewhere" })
+				.where(eq(destinations.id, destination.id)),
+		);
+		const res = await api.request(
+			"POST",
+			`/destinations/${destination.id}/rotate-secret`,
+		);
+		expect(res.status).toBe(409);
+		expect(await auditRows(deps, destination.id)).toEqual([]);
+	});
+
+	it("a source rotation that loses the race answers 409 and writes no audit row", async () => {
+		const deps = testDeps();
+		const { source } = await seedPipeline(deps, HMAC);
+		const api = await adminApp(deps);
+		await api.request("GET", "/me");
+		beforeNextBatch(deps, () =>
+			deps.db
+				.update(sources)
+				.set({ secretEnc: "rotated-elsewhere" })
+				.where(eq(sources.id, source.id)),
+		);
+		const res = await api.request(
+			"POST",
+			`/sources/${source.id}/rotate-secret`,
+		);
+		expect(res.status).toBe(409);
+		expect(await auditRows(deps, source.id)).toEqual([]);
 	});
 });

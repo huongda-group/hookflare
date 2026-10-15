@@ -1,6 +1,6 @@
 import { and, asc, eq, gt, sql } from "drizzle-orm";
 import type { Db } from "../../deps";
-import { auditInsert } from "../audit";
+import { auditInsertIfChanged } from "../audit";
 import { type Role, type UserRow, users } from "./schema";
 
 export async function getUser(
@@ -20,7 +20,8 @@ export function bootstrapStatements(db: Db, email: string, now: number) {
 			.insert(users)
 			.values({ email, role: "admin", createdAt: now, updatedAt: now })
 			.onConflictDoNothing(),
-		auditInsert(db, {
+		// A racing first request already inserted the row: no second audit.
+		auditInsertIfChanged(db, {
 			actor: email,
 			action: "user.bootstrapped",
 			resourceType: "user",

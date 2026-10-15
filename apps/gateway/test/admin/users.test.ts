@@ -91,6 +91,21 @@ describe("/users", () => {
 		]);
 	});
 
+	it("treats a PATCH that changes nothing as a no-op", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps, { role: "admin" });
+		const email = uniqueEmail("viewer");
+		await deps.db
+			.insert(users)
+			.values({ email, role: "viewer", createdAt: 1, updatedAt: 1 });
+		for (const body of [{ role: "viewer" }, { disabled: false }]) {
+			const res = await api.request("PATCH", `/users/${email}`, body);
+			expect(res.status).toBe(200);
+			expect((await res.json<User>()).updated_at).toBe(1);
+		}
+		expect(await auditRows(deps, email)).toEqual([]);
+	});
+
 	it("refuses to demote or disable the last active admin", async () => {
 		const deps = testDeps();
 		const api = await soleAdmin(deps);

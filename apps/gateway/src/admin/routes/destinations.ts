@@ -14,6 +14,7 @@ import { and, eq } from "drizzle-orm";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import type { AppBindings } from "../../app";
+import { auditInsertIfChanged } from "../../core/audit";
 import {
 	decryptSecret,
 	encryptSecret,
@@ -47,8 +48,8 @@ import { failureOf, sendSigned } from "../../core/outbound";
 import { resolvePolicy } from "../../core/policy";
 import {
 	aad,
+	clearExpiredPrev,
 	destinationSigningSecrets,
-	expiredPrevCleared,
 	rotationColumns,
 } from "../../core/secrets";
 import { buildOutboundHeaders, signWebhookAll } from "../../core/sign";
@@ -268,14 +269,20 @@ export function destinationRoutes() {
 		const conflict = backoffConflict(c, { ...existing, ...set });
 		if (conflict) return conflict;
 		const ts = now();
-		if (expiredPrevCleared(existing.signingSecretPrevExpiresAt, ts)) {
-			set.signingSecretPrevEnc = null;
-			set.signingSecretPrevExpiresAt = null;
-		}
+		const prev = clearExpiredPrev(
+			destinations.signingSecretPrevEnc,
+			destinations.signingSecretPrevExpiresAt,
+			ts,
+		);
 		const [[row]] = await db.batch([
 			db
 				.update(destinations)
-				.set({ ...set, updatedAt: ts })
+				.set({
+					...set,
+					signingSecretPrevEnc: prev.enc,
+					signingSecretPrevExpiresAt: prev.expiresAt,
+					updatedAt: ts,
+				})
 				.where(eq(destinations.id, id))
 				.returning(),
 			auditStmt(c, {
@@ -329,7 +336,9 @@ export function destinationRoutes() {
 						),
 					)
 					.returning(),
-				auditStmt(c, {
+				auditInsertIfChanged(db, {
+					actor: c.var.actor?.email ?? "",
+					at: ts,
 					action: "destination.secret_rotated",
 					resourceType: "destination",
 					resourceId: id,
@@ -464,8 +473,10 @@ export function destinationRoutes() {
 			try {
 				ssrf = await checkUrl(destination.url, deps);
 			} catch (err) {
-				if (err instanceof DnsError)
+				if (err instanceof DnsError) {
+					c.var.logger.warn("admin.dns_failed", { error: err });
 					return c.json({ error: "unavailable" }, 503);
+				}
 				throw err;
 			}
 			if (!ssrf.ok) {

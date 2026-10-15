@@ -86,6 +86,11 @@ export function userRoutes() {
 		if (disabled === true && email === c.var.actor?.email) {
 			return c.json({ error: "self_disable" }, 409);
 		}
+		// Like a repeat Pause: nothing changes, so nothing is written or audited.
+		const sameRole = role === undefined || role === existing.role;
+		const sameState =
+			disabled === undefined || disabled === (existing.disabledAt !== null);
+		if (sameRole && sameState) return c.json(toUser(existing));
 		const ts = now();
 		const action: AuditAction =
 			disabled === true

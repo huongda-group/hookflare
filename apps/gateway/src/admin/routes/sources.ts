@@ -12,6 +12,7 @@ import { and, eq } from "drizzle-orm";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import type { AppBindings } from "../../app";
+import { auditInsertIfChanged } from "../../core/audit";
 import {
 	bytesToB64url,
 	decryptSecret,
@@ -23,7 +24,7 @@ import { getProject } from "../../core/db/projects";
 import { type SourceRow, sources } from "../../core/db/schema";
 import { getSource, listSources } from "../../core/db/sources";
 import { newId } from "../../core/ids";
-import { aad, expiredPrevCleared, rotationColumns } from "../../core/secrets";
+import { aad, clearExpiredPrev, rotationColumns } from "../../core/secrets";
 import { requirePermission } from "../auth/permission";
 import {
 	auditStmt,
@@ -187,10 +188,11 @@ export function sourceRoutes() {
 
 		const ts = now();
 		const set: Partial<SourceRow> = { updatedAt: ts };
-		if (expiredPrevCleared(existing.secretPrevExpiresAt, ts)) {
-			set.secretPrevEnc = null;
-			set.secretPrevExpiresAt = null;
-		}
+		const prev = clearExpiredPrev(
+			sources.secretPrevEnc,
+			sources.secretPrevExpiresAt,
+			ts,
+		);
 		if (patch.name !== undefined) set.name = patch.name;
 		if (patch.status !== undefined) set.status = patch.status;
 		if (patch.max_body_bytes !== undefined)
@@ -236,7 +238,11 @@ export function sourceRoutes() {
 		const [[row]] = await db.batch([
 			db
 				.update(sources)
-				.set(set)
+				.set({
+					...set,
+					secretPrevEnc: prev.enc,
+					secretPrevExpiresAt: prev.expiresAt,
+				})
 				.where(eq(sources.id, existing.id))
 				.returning(),
 			auditStmt(c, {
@@ -291,7 +297,9 @@ export function sourceRoutes() {
 						and(eq(sources.id, id), eq(sources.secretEnc, existing.secretEnc)),
 					)
 					.returning(),
-				auditStmt(c, {
+				auditInsertIfChanged(db, {
+					actor: c.var.actor?.email ?? "",
+					at: ts,
 					action: "source.secret_rotated",
 					resourceType: "source",
 					resourceId: id,

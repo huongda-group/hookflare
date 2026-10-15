@@ -154,6 +154,21 @@ describe("Access middleware", () => {
 		]);
 	});
 
+	it("audits a bootstrap once when the first requests race", async () => {
+		const email = uniqueEmail("boot");
+		const deps = testDeps({ env: testEnv({ BOOTSTRAP_ADMIN_EMAILS: email }) });
+		const api = await adminApp(deps, { email });
+		const statuses = await Promise.all(
+			[1, 2, 3].map(async () => (await api.request("GET", "/me")).status),
+		);
+		expect(statuses).toEqual([200, 200, 200]);
+		const audits = await deps.db
+			.select()
+			.from(auditLogs)
+			.where(eq(auditLogs.resourceId, email));
+		expect(audits).toHaveLength(1);
+	});
+
 	it("does not re-bootstrap a disabled bootstrap admin", async () => {
 		const email = uniqueEmail("boot");
 		const deps = testDeps({ env: testEnv({ BOOTSTRAP_ADMIN_EMAILS: email }) });
