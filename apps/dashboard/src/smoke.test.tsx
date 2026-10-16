@@ -15,5 +15,5 @@ it("renders the root route", async () => {
 			<RouterProvider router={router} />
 		</QueryClientProvider>,
 	);
-	expect(await screen.findByText("Hookflare")).toBeInTheDocument();
+	expect(await screen.findByText("admin@example.com")).toBeInTheDocument();
 });

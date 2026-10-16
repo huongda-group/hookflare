@@ -1,0 +1,34 @@
+/** One key factory for every resource; mutations invalidate by prefix (spec §9.2). */
+export const qk = {
+	me: ["me"] as const,
+	settings: ["settings"] as const,
+	overview: (q: object) => ["overview", q] as const,
+	projects: {
+		all: ["projects"] as const,
+		list: (q: object) => ["projects", "list", q] as const,
+		one: (id: string) => ["projects", id] as const,
+	},
+	destinations: {
+		all: ["destinations"] as const,
+		list: (q: object) => ["destinations", "list", q] as const,
+		one: (id: string) => ["destinations", id] as const,
+		stats: (q: object) => ["destinations", "stats", q] as const,
+		tests: (id: string) => ["destinations", id, "tests"] as const,
+	},
+	sources: {
+		all: ["sources"] as const,
+		list: (q: object) => ["sources", "list", q] as const,
+		one: (id: string) => ["sources", id] as const,
+	},
+	events: {
+		all: ["events"] as const,
+		list: (q: object) => ["events", "list", q] as const,
+		one: (id: string) => ["events", id] as const,
+	},
+	failures: {
+		all: ["failures"] as const,
+		list: (q: object) => ["failures", "list", q] as const,
+	},
+	users: { all: ["users"] as const },
+	audit: { list: (q: object) => ["audit", q] as const },
+};

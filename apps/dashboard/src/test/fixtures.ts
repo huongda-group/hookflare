@@ -1,0 +1,133 @@
+import type {
+	Delivery,
+	DeliveryAttempt,
+	Destination,
+	EventSummary,
+	Failure,
+	Project,
+	Source,
+	WebhookEvent,
+} from "@hookflare/shared";
+
+export const T = Date.UTC(2026, 9, 16, 3, 0, 0); // 10:00 in Asia/Ho_Chi_Minh
+
+export const project = (o: Partial<Project> = {}): Project => ({
+	id: "prj_1",
+	name: "Payments",
+	slug: "payments",
+	status: "active",
+	created_at: T,
+	updated_at: T,
+	...o,
+});
+export const destination = (o: Partial<Destination> = {}): Destination => ({
+	id: "dst_1",
+	project_id: "prj_1",
+	name: "Billing API",
+	url: "https://billing.example.com/hooks",
+	status: "active",
+	timeout_ms: null,
+	max_attempts: null,
+	backoff_base_s: null,
+	backoff_max_s: null,
+	signing_secret_fingerprint: "ab12cd34",
+	previous_secret_fingerprint: null,
+	previous_secret_expires_at: null,
+	created_at: T,
+	updated_at: T,
+	...o,
+});
+export const source = (o: Partial<Source> = {}): Source => ({
+	id: "src_1",
+	project_id: "prj_1",
+	destination_id: "dst_1",
+	name: "Stripe",
+	status: "active",
+	auth_type: "hmac",
+	auth_config: {
+		header: "Stripe-Signature",
+		algorithm: "sha256",
+		encoding: "hex",
+	},
+	secret_fingerprint: "ef56ab78",
+	previous_secret_fingerprint: null,
+	previous_secret_expires_at: null,
+	event_id_from: "none",
+	event_id_selector: null,
+	max_body_bytes: null,
+	ingress_url: "https://hooks.example.com/in/src_1",
+	created_at: T,
+	updated_at: T,
+	...o,
+});
+export const attempt = (o: Partial<DeliveryAttempt> = {}): DeliveryAttempt => ({
+	id: "att_1",
+	attempt_no: 1,
+	started_at: T + 1000,
+	duration_ms: 120,
+	http_status: 503,
+	error_kind: "http_5xx",
+	error_message: "Service Unavailable",
+	response_snippet: "upstream down",
+	...o,
+});
+export const delivery = (o: Partial<Delivery> = {}): Delivery => ({
+	id: "dlv_1",
+	destination_id: "dst_1",
+	kind: "initial",
+	status: "dead",
+	attempt_count: 1,
+	enqueued_at: T,
+	next_attempt_at: null,
+	last_http_status: 503,
+	last_error: "HTTP 503",
+	completed_at: T + 5000,
+	created_at: T,
+	created_by: null,
+	attempts: [attempt()],
+	...o,
+});
+export const webhookEvent = (o: Partial<WebhookEvent> = {}): WebhookEvent => ({
+	id: "evt_1",
+	project_id: "prj_1",
+	source_id: "src_1",
+	provider_event_id: "pi_123",
+	received_at: T,
+	headers: { "content-type": "application/json" },
+	content_type: "application/json",
+	size_bytes: 17,
+	payload_sha256: "0".repeat(64),
+	deliveries: [delivery()],
+	...o,
+});
+export const eventSummary = (o: Partial<EventSummary> = {}): EventSummary => ({
+	id: "evt_1",
+	project_id: "prj_1",
+	source_id: "src_1",
+	provider_event_id: "pi_123",
+	received_at: T,
+	content_type: "application/json",
+	size_bytes: 17,
+	latest_delivery: {
+		id: "dlv_1",
+		destination_id: "dst_1",
+		kind: "initial",
+		status: "dead",
+		attempt_count: 1,
+		last_http_status: 503,
+		next_attempt_at: null,
+	},
+	...o,
+});
+export const failure = (o: Partial<Failure> = {}): Failure => {
+	const { attempts: _a, ...d } = delivery();
+	return {
+		...d,
+		event_id: "evt_1",
+		project_id: "prj_1",
+		source_id: "src_1",
+		received_at: T,
+		latest_replay: null,
+		...o,
+	};
+};
