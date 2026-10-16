@@ -52,9 +52,12 @@
 		]
 	},
 	"r2_buckets": [
-		{ "binding": "PAYLOADS", "bucket_name": "hookflare-payloads-staging" }
+		{ "binding": "PAYLOADS", "bucket_name": "hookflare-payloads-staging" },
+		{ "binding": "BACKUPS", "bucket_name": "hookflare-backups-staging" }
 	],
-	"triggers": { "crons": ["* * * * *", "*/5 * * * *", "0 3 * * *"] },
+	"triggers": {
+		"crons": ["* * * * *", "*/5 * * * *", "0 3 * * *", "0 20 * * *"]
+	},
 	"ratelimits": [
 		{
 			"name": "INGRESS_LIMITER",
@@ -86,6 +89,11 @@
 			"name": "hookflare-archive-staging",
 			"binding": "ARCHIVE",
 			"class_name": "ArchiveWorkflow"
+		},
+		{
+			"name": "hookflare-backup-staging",
+			"binding": "BACKUP",
+			"class_name": "BackupWorkflow"
 		}
 	],
 	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["DestinationLimiter"] }]

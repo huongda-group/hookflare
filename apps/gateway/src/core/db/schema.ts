@@ -57,6 +57,8 @@ export const ARCHIVE_STATUSES = [
 	"failed",
 	"expired",
 ] as const;
+export const BACKUP_STATUSES = ["running", "verified", "failed"] as const;
+export const BACKUP_TRIGGERS = ["cron", "manual"] as const;
 
 export type AuthType = (typeof AUTH_TYPES)[number];
 export type EventIdFrom = (typeof EVENT_ID_FROM)[number];
@@ -538,3 +540,33 @@ export const archiveParts = sqliteTable(
 
 export type ArchiveBatchRow = typeof archiveBatches.$inferSelect;
 export type ArchivePartRow = typeof archiveParts.$inferSelect;
+
+/** M6: full-DB backups to R2 (one row per day attempt). */
+export const backups = sqliteTable(
+	"backups",
+	{
+		id: text("id").primaryKey(),
+		/** UTC day, YYYY-MM-DD. */
+		day: text("day").notNull(),
+		status: text("status", { enum: BACKUP_STATUSES }).notNull(),
+		/** R2 prefix holding this backup's parts. */
+		prefix: text("prefix").notNull(),
+		partCount: integer("part_count").notNull().default(0),
+		/** JSON object of table name to row count. */
+		rowCountsJson: text("row_counts_json").notNull().default("{}"),
+		bytes: integer("bytes").notNull().default(0),
+		/** The latest workflow instance working on this backup. */
+		instanceId: text("instance_id").notNull(),
+		trigger: text("trigger", { enum: BACKUP_TRIGGERS }).notNull(),
+		startedAt: integer("started_at").notNull(),
+		finishedAt: integer("finished_at"),
+		error: text("error"),
+	},
+	(t) => [
+		check("backups_status_check", inList("status", BACKUP_STATUSES)),
+		index("backups_status_idx").on(t.status),
+		index("backups_started_at_idx").on(t.startedAt),
+	],
+);
+
+export type BackupRow = typeof backups.$inferSelect;

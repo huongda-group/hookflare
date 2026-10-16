@@ -689,6 +689,8 @@ export const storageSettingsSchema = z
 		failed_retention_days: z.number().int().min(1).max(3_650),
 		archive_retention_days: z.number().int().min(30).max(36_500).nullable(),
 		audit_retention_days: z.number().int().min(30).max(36_500),
+		backup_enabled: z.boolean().default(true),
+		backup_retention_days: z.number().int().min(7).max(365).default(35),
 	})
 	.refine((v) => v.failed_retention_days >= v.hot_retention_days, {
 		path: ["failed_retention_days"],
@@ -701,6 +703,8 @@ export const DEFAULT_STORAGE_SETTINGS: StorageSettings = {
 	failed_retention_days: 90,
 	archive_retention_days: null,
 	audit_retention_days: 365,
+	backup_enabled: true,
+	backup_retention_days: 35,
 };
 
 export const ARCHIVE_KINDS = ["events", "audit"] as const;
@@ -756,6 +760,20 @@ export type ArchiveLastRun = {
 	instance_id: string;
 	status: string;
 	started_at: number;
+};
+
+export const BACKUP_STATUSES = ["running", "verified", "failed"] as const;
+export type BackupSummary = {
+	enabled: boolean;
+	last_verified: {
+		id: string;
+		started_at: number;
+		finished_at: number;
+		bytes: number;
+		rows: number;
+	} | null;
+	last_failed: { id: string; started_at: number; error: string | null } | null;
+	running: { id: string; instance_id: string; started_at: number } | null;
 };
 
 export const patchSettingsRequest = z

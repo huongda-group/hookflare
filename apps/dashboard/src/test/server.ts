@@ -51,6 +51,8 @@ export const DEFAULT_SETTINGS: Settings = {
 		failed_retention_days: 90,
 		archive_retention_days: null,
 		audit_retention_days: 365,
+		backup_enabled: true,
+		backup_retention_days: 35,
 	},
 	storage_updated_at: null,
 	archive_last_run: null,

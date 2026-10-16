@@ -13,6 +13,7 @@ import {
 	readRetryDefaults,
 	readSetting,
 	SETTINGS_CACHE_TTL_MS,
+	STORAGE_SETTING,
 	upsertRetryDefaults,
 	upsertSetting,
 } from "../../src/core/settings";
@@ -102,6 +103,28 @@ describe("generic settings", () => {
 			value: DEFAULT_ALERT_RULES,
 			updatedAt: 5,
 			corrupt: true,
+		});
+	});
+
+	it("reads a pre-M6 storage row with the backup defaults", async () => {
+		await deps.db.insert(settings).values({
+			key: STORAGE_SETTING.key,
+			valueJson: JSON.stringify({
+				archive_enabled: true,
+				hot_retention_days: 30,
+				failed_retention_days: 90,
+				archive_retention_days: null,
+				audit_retention_days: 365,
+			}),
+			updatedAt: 7,
+		});
+		await expect(readSetting(deps.db, STORAGE_SETTING)).resolves.toEqual({
+			value: expect.objectContaining({
+				backup_enabled: true,
+				backup_retention_days: 35,
+			}),
+			updatedAt: 7,
+			corrupt: false,
 		});
 	});
 

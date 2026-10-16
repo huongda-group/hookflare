@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
+import type { z } from "zod";
 import { FieldError } from "@/components/ProjectFormDialog";
 import { TimeText } from "@/components/TimeText";
 import { Button } from "@/components/ui/button";
@@ -42,7 +43,10 @@ function StorageForm({ initial }: { initial: StorageSettings }) {
 		extra: number;
 	} | null>(null);
 	const [saved, setSaved] = useState(false);
-	const form = useForm<StorageSettings>({
+	// The schema defaults the backup fields, so the form works on its input
+	// type and fills the defaults back on submit (the backup UI is a later task).
+	type StorageFormValues = z.input<typeof storageSettingsSchema>;
+	const form = useForm<StorageFormValues>({
 		resolver: zodResolver(storageSettingsSchema),
 		defaultValues: initial,
 	});
@@ -60,16 +64,21 @@ function StorageForm({ initial }: { initial: StorageSettings }) {
 
 	const submit = form.handleSubmit(async (value) => {
 		setSaved(false);
+		const storage: StorageSettings = {
+			backup_enabled: true,
+			backup_retention_days: 35,
+			...value,
+		};
 		const lowered =
-			value.hot_retention_days < initial.hot_retention_days ||
-			value.failed_retention_days < initial.failed_retention_days;
-		if (!lowered) return write(value);
+			storage.hot_retention_days < initial.hot_retention_days ||
+			storage.failed_retention_days < initial.failed_retention_days;
+		if (!lowered) return write(storage);
 		const p = await api.get<ArchivePreview>("/archives/preview", {
-			hot_retention_days: value.hot_retention_days,
-			failed_retention_days: value.failed_retention_days,
+			hot_retention_days: storage.hot_retention_days,
+			failed_retention_days: storage.failed_retention_days,
 		});
 		setConfirm({
-			value,
+			value: storage,
 			extra: Math.max(0, p.eligible - p.currently_eligible),
 		});
 	});

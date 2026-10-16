@@ -1,5 +1,6 @@
 import { type DrizzleD1Database, drizzle } from "drizzle-orm/d1";
 import type { ArchiveParams } from "./core/archive-run";
+import type { BackupParams } from "./core/backup-run";
 import * as schema from "./core/db/schema";
 import { createDohResolver, type ResolveDns } from "./core/dns";
 import type { LimiterStub } from "./delivery/limiter";
@@ -27,6 +28,10 @@ export type Deps = {
 	limiter: (destinationId: string) => LimiterStub;
 	/** M5c: the archive Workflow binding (spec §7.4). */
 	archive: Workflow<ArchiveParams>;
+	/** M6: R2 bucket holding full-DB backup parts. */
+	backups: R2Bucket;
+	/** M6: the backup Workflow binding. */
+	backup: Workflow<BackupParams>;
 	env: AppEnv;
 };
 
@@ -44,6 +49,8 @@ export function createDeps(env: AppEnv): Deps {
 				env.LIMITER.idFromName(destinationId),
 			) as unknown as LimiterStub,
 		archive: env.ARCHIVE as Workflow<ArchiveParams>,
+		backups: env.BACKUPS,
+		backup: env.BACKUP as Workflow<BackupParams>,
 		env,
 	};
 }
