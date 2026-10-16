@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import type { AppBindings } from "../app";
 import { accessMiddleware } from "./auth/access";
+import { alertChannelRoutes } from "./routes/alert-channels";
+import { alertRoutes } from "./routes/alerts";
 import { auditLogRoutes } from "./routes/audit-logs";
 import { destinationRoutes } from "./routes/destinations";
 import { eventRoutes } from "./routes/events";
@@ -23,6 +25,8 @@ export function adminRoutes(options: { accessFetch?: typeof fetch } = {}) {
 	routes.route("/sources", sourceRoutes());
 	routes.route("/events", eventRoutes());
 	routes.route("/failures", failureRoutes());
+	routes.route("/alerts", alertRoutes());
+	routes.route("/alert-channels", alertChannelRoutes());
 	routes.route("/users", userRoutes());
 	routes.route("/audit-logs", auditLogRoutes());
 	routes.route("/settings", settingsRoutes());

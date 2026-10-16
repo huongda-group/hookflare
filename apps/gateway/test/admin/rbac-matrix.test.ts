@@ -2,7 +2,8 @@ import type { Permission, Role } from "@hookflare/shared";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { clearAccessKeyCache } from "../../src/admin/auth/access";
-import { settings } from "../../src/core/db/schema";
+import { alertChannels, alerts, settings } from "../../src/core/db/schema";
+import { newId } from "../../src/core/ids";
 import { ROLE_PERMISSIONS } from "../../src/core/rbac";
 import {
 	clearSettingsCache,
@@ -34,6 +35,8 @@ function cases(ids: {
 	destination: string;
 	event: string;
 	delivery: string;
+	alert: string;
+	channel: string;
 }): Case[] {
 	return [
 		{ method: "GET", path: "/projects", permission: "events.read" },
@@ -145,6 +148,37 @@ function cases(ids: {
 		},
 		{ method: "GET", path: "/audit-logs", permission: "audit.read" },
 		{ method: "GET", path: "/overview", permission: "events.read" },
+		{ method: "GET", path: "/alerts", permission: "events.read" },
+		{ method: "GET", path: `/alerts/${ids.alert}`, permission: "events.read" },
+		{ method: "GET", path: "/alert-channels", permission: "settings.manage" },
+		{
+			method: "POST",
+			path: "/alert-channels",
+			permission: "settings.manage",
+			body: {
+				name: "x",
+				config: {
+					type: "discord",
+					url: "https://discord.com/api/webhooks/1/a",
+				},
+			},
+		},
+		{
+			method: "PATCH",
+			path: `/alert-channels/${ids.channel}`,
+			permission: "settings.manage",
+			body: { enabled: false },
+		},
+		{
+			method: "POST",
+			path: `/alert-channels/${ids.channel}/test`,
+			permission: "settings.manage",
+		},
+		{
+			method: "DELETE",
+			path: `/alert-channels/${ids.channel}`,
+			permission: "settings.manage",
+		},
 		{ method: "GET", path: "/destinations/stats", permission: "events.read" },
 		{ method: "GET", path: "/settings", permission: "events.read" },
 		{
@@ -171,6 +205,28 @@ describe("RBAC matrix (spec §6.2–6.3)", () => {
 			const { eventId, deliveryId } = await seedDelivery(deps, p, {
 				status: "dead",
 			});
+			const now = deps.now();
+			const channelId = newId("ach", now);
+			await deps.db.insert(alertChannels).values({
+				id: channelId,
+				name: "rbac",
+				type: "discord",
+				configEnc: "enc",
+				configFingerprint: "deadbeef",
+				createdAt: now,
+				updatedAt: now,
+			});
+			const alertId = newId("alr", now);
+			await deps.db.insert(alerts).values({
+				id: alertId,
+				rule: "new_dead",
+				resourceType: "destination",
+				resourceId: p.destination.id,
+				projectId: p.project.id,
+				status: "open",
+				openedAt: now,
+				detailsJson: "{}",
+			});
 			const api = await adminApp(deps, { role });
 			for (const k of cases({
 				project: p.project.id,
@@ -178,6 +234,8 @@ describe("RBAC matrix (spec §6.2–6.3)", () => {
 				destination: p.destination.id,
 				event: eventId,
 				delivery: deliveryId,
+				alert: alertId,
+				channel: channelId,
 			})) {
 				const res = await api.request(k.method, k.path, k.body);
 				const allowed = ROLE_PERMISSIONS[role].includes(k.permission);

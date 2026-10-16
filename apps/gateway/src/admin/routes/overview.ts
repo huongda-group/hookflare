@@ -1,11 +1,14 @@
 import {
+	type AlertRule,
 	type Overview,
 	RANGE_HOURS,
 	statsQuery,
 	type TrendPoint,
 } from "@hookflare/shared";
+import { eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppBindings } from "../../app";
+import { alerts } from "../../core/db/schema";
 import {
 	failingDestinations,
 	HOUR_MS,
@@ -36,11 +39,16 @@ export function overviewRoutes() {
 			...statsWindow(generatedAt, hours),
 			projectId: q.value.project_id,
 		};
-		const [totals, trend, failing, live] = await Promise.all([
+		const [totals, trend, failing, live, openAlerts] = await Promise.all([
 			overviewTotals(db, scope),
 			trendRows(db, scope),
 			failingDestinations(db, scope),
 			liveCounts(db, q.value.project_id),
+			db
+				.select({ rule: alerts.rule, n: sql<number>`COUNT(*)` })
+				.from(alerts)
+				.where(eq(alerts.status, "open"))
+				.groupBy(alerts.rule),
 		]);
 		const byHour = new Map(trend.map((t) => [t.hour, t]));
 		const points: TrendPoint[] = [];
@@ -77,6 +85,12 @@ export function overviewRoutes() {
 				failed: f.failed,
 				delivered: f.delivered,
 			})),
+			open_alerts: {
+				count: openAlerts.reduce((s, r) => s + r.n, 0),
+				by_rule: Object.fromEntries(
+					openAlerts.map((r) => [r.rule, r.n]),
+				) as Partial<Record<AlertRule, number>>,
+			},
 		} satisfies Overview);
 	});
 

@@ -30,6 +30,7 @@ const overview = (o: Partial<Overview> = {}): Overview => ({
 	failing_destinations: [
 		{ destination_id: "dst_1", name: "Billing API", failed: 5, delivered: 50 },
 	],
+	open_alerts: { count: 0, by_rule: {} },
 	...o,
 });
 

@@ -1,10 +1,11 @@
 import type { Overview } from "@hookflare/shared";
 import { beforeEach, describe, expect, it } from "vitest";
 import { clearAccessKeyCache } from "../../src/admin/auth/access";
-import { destinations, statsHourly } from "../../src/core/db/schema";
+import { alerts, destinations, statsHourly } from "../../src/core/db/schema";
 import { floorHour, HOUR_MS } from "../../src/core/db/stats";
 import { newId } from "../../src/core/ids";
 import { adminApp } from "../helpers/admin";
+import { resetAlerts } from "../helpers/alerts";
 import { testDeps } from "../helpers/deps";
 import { seedDelivery, seedPipeline } from "../helpers/seed";
 
@@ -155,5 +156,44 @@ describe("GET /overview", () => {
 	it("rejects an unknown range", async () => {
 		const { api } = await fixture();
 		expect((await api.request("GET", "/overview?range=1y")).status).toBe(400);
+	});
+
+	it("counts open alerts by rule", async () => {
+		const deps = testDeps();
+		await resetAlerts(deps);
+		await deps.db.insert(alerts).values([
+			{
+				id: "alr_o1",
+				rule: "new_dead",
+				resourceType: "destination",
+				resourceId: "dst_a",
+				status: "open",
+				openedAt: 1,
+				detailsJson: "{}",
+			},
+			{
+				id: "alr_o2",
+				rule: "new_dead",
+				resourceType: "destination",
+				resourceId: "dst_b",
+				status: "open",
+				openedAt: 1,
+				detailsJson: "{}",
+			},
+			{
+				id: "alr_o3",
+				rule: "d1_storage",
+				resourceType: "system",
+				resourceId: "d1",
+				status: "resolved",
+				openedAt: 1,
+				detailsJson: "{}",
+			},
+		]);
+		const api = await adminApp(deps);
+		const body = await (await api.request("GET", "/overview?range=24h")).json<{
+			open_alerts: { count: number; by_rule: Record<string, number> };
+		}>();
+		expect(body.open_alerts).toEqual({ count: 2, by_rule: { new_dead: 2 } });
 	});
 });

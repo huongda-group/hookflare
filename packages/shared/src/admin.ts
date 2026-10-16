@@ -725,6 +725,7 @@ export type Overview = {
 	live: Record<LiveStatus, number>;
 	trend: TrendPoint[];
 	failing_destinations: FailingDestination[];
+	open_alerts: { count: number; by_rule: Partial<Record<AlertRule, number>> };
 };
 export type DestinationStats = {
 	destination_id: string;
