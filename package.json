@@ -6,7 +6,7 @@
 		"dev": "node scripts/ensure-dashboard-dist.mjs && wrangler dev --config apps/gateway/wrangler.jsonc",
 		"dev:dashboard": "pnpm --filter dashboard dev",
 		"build": "pnpm --filter dashboard build",
-		"test": "pnpm --recursive --if-present run test",
+		"test": "pnpm --recursive --if-present run test && node --test scripts/test/*.test.mjs",
 		"typecheck": "pnpm --recursive --if-present run typecheck",
 		"lint": "biome check .",
 		"format": "biome check --write .",
@@ -14,7 +14,9 @@
 		"db:generate": "pnpm --filter gateway db:generate",
 		"db:migrate:local": "wrangler d1 migrations apply DB --local --config apps/gateway/wrangler.jsonc",
 		"db:migrate:remote": "wrangler d1 migrations apply DB --remote --config apps/gateway/wrangler.jsonc",
-		"deploy": "pnpm build && pnpm db:migrate:remote && wrangler deploy --config apps/gateway/wrangler.jsonc"
+		"db:migrate:remote:staging": "wrangler d1 migrations apply DB --remote --config apps/gateway/wrangler.staging.jsonc",
+		"deploy": "pnpm build && pnpm db:migrate:remote && wrangler deploy --config apps/gateway/wrangler.jsonc",
+		"deploy:staging": "pnpm build && pnpm db:migrate:remote:staging && wrangler deploy --config apps/gateway/wrangler.staging.jsonc"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.15",

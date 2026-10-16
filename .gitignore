@@ -11,3 +11,6 @@ apps/dashboard/playwright-report
 .env*
 .DS_Store
 docs/superpowers/plans/
+.deploy/
+tools/bench/results/
+.restore/
