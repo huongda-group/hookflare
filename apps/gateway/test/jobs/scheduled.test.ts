@@ -4,7 +4,7 @@ import {
 	ROLLUP_CRON,
 	runScheduled,
 } from "../../src/jobs/scheduled";
-import { testDeps, withFailingBatch } from "../helpers/deps";
+import { fakeArchive, testDeps, withFailingBatch } from "../helpers/deps";
 import { faultyDeps } from "../helpers/faults";
 
 const lines = (
@@ -51,5 +51,13 @@ describe("runScheduled", () => {
 		).toBe(true);
 		log.mockRestore();
 		err.mockRestore();
+	});
+
+	it("starts today's archive instance once on 0 3 * * *", async () => {
+		const archive = fakeArchive();
+		const deps = testDeps({ archive, now: () => Date.UTC(2027, 0, 5, 3) });
+		await runScheduled("0 3 * * *", deps);
+		await runScheduled("0 3 * * *", deps);
+		expect(archive.created).toEqual(["archive-2027-01-05"]);
 	});
 });

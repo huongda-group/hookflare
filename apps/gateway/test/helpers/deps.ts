@@ -37,6 +37,27 @@ export function recordingQueue(
 	return queue as unknown as RecordingQueue;
 }
 
+/** Records create() calls; get().status() reports `status` (default "complete"). */
+export function fakeArchive(status = "complete") {
+	const created: string[] = [];
+	const archive = {
+		created,
+		async create(opts?: { id?: string }) {
+			const id = opts?.id ?? crypto.randomUUID();
+			if (created.includes(id))
+				throw new Error(`instance.already_exists: ${id}`);
+			created.push(id);
+			return { id };
+		},
+		async get(id: string) {
+			if (!created.includes(id) && status === "missing")
+				throw new Error("instance.not_found");
+			return { id, status: async () => ({ status }) };
+		},
+	};
+	return archive as unknown as Workflow & { created: string[] };
+}
+
 export function testDeps(overrides: Partial<Deps> = {}): Deps {
 	const env = overrides.env ?? testEnv();
 	return {
@@ -52,6 +73,7 @@ export function testDeps(overrides: Partial<Deps> = {}): Deps {
 		limiter: () => {
 			throw new Error("limiter not stubbed: use fakeLimiter()");
 		},
+		archive: fakeArchive(),
 		env,
 		...overrides,
 	};

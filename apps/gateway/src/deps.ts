@@ -1,4 +1,5 @@
 import { type DrizzleD1Database, drizzle } from "drizzle-orm/d1";
+import type { ArchiveParams } from "./core/archive-run";
 import * as schema from "./core/db/schema";
 import { createDohResolver, type ResolveDns } from "./core/dns";
 import type { LimiterStub } from "./delivery/limiter";
@@ -24,6 +25,8 @@ export type Deps = {
 	now: () => number;
 	/** M5a: the destination's DestinationLimiter (spec §5.3). */
 	limiter: (destinationId: string) => LimiterStub;
+	/** M5c: the archive Workflow binding (spec §7.4). */
+	archive: Workflow<ArchiveParams>;
 	env: AppEnv;
 };
 
@@ -40,6 +43,7 @@ export function createDeps(env: AppEnv): Deps {
 			env.LIMITER.get(
 				env.LIMITER.idFromName(destinationId),
 			) as unknown as LimiterStub,
+		archive: env.ARCHIVE as Workflow<ArchiveParams>,
 		env,
 	};
 }

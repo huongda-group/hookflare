@@ -172,3 +172,26 @@ describe("matchChannels (spec §6.3 routing)", () => {
 		expect(matchChannels(routes, "d1_storage", null)).toEqual(["all"]);
 	});
 });
+
+describe("archive_stuck", () => {
+	it("is active for failed batches and batches building for more than 48 h", async () => {
+		const { archiveStuck } = await import("../../src/jobs/alerts/rules");
+		const { isolateArchive, seedBatch } = await import("../helpers/archive");
+		await isolateArchive(deps);
+		expect(await archiveStuck(deps.db, NOW)).toEqual([]);
+		await seedBatch(deps, {
+			status: "building",
+			createdAt: NOW - 47 * 3_600_000,
+		});
+		expect(await archiveStuck(deps.db, NOW)).toEqual([]);
+		const failed = await seedBatch(deps, { status: "failed", createdAt: NOW });
+		const [a] = await archiveStuck(deps.db, NOW);
+		expect(a).toMatchObject({
+			rule: "archive_stuck",
+			resourceType: "system",
+			resourceId: "archive",
+			projectId: null,
+		});
+		expect(a.details.batch_ids).toEqual([failed.id]);
+	});
+});

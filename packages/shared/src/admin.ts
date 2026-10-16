@@ -508,6 +508,7 @@ export const ALERT_RULES = [
 	"new_dead",
 	"stuck_pending",
 	"d1_storage",
+	"archive_stuck",
 ] as const;
 export type AlertRule = (typeof ALERT_RULES)[number];
 

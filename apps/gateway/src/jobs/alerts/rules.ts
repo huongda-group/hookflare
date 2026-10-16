@@ -161,20 +161,44 @@ export type Evaluation = {
 	deadCursor: { from: number | null; to: number };
 };
 
+export const ARCHIVE_STUCK_AFTER_MS = 48 * 3_600_000;
+
+/** Spec §7.4 monitoring: a failed batch needs an operator; one stuck in building is a dead run. */
+export async function archiveStuck(
+	db: Db,
+	now: number,
+): Promise<ActiveAlert[]> {
+	const rows = await db.all<{ id: string }>(sql`
+		SELECT id FROM archive_batches
+		WHERE status = 'failed' OR (status = 'building' AND created_at < ${now - ARCHIVE_STUCK_AFTER_MS})
+		ORDER BY created_at DESC LIMIT 20`);
+	if (rows.length === 0) return [];
+	return [
+		{
+			rule: "archive_stuck",
+			resourceType: "system",
+			resourceId: "archive",
+			projectId: null,
+			details: { batch_ids: rows.map((r) => r.id) },
+		},
+	];
+}
+
 export async function evaluateRules(
 	deps: Pick<Deps, "db" | "now">,
 	rules: AlertRules,
 	open: OpenAlertRow[],
 ): Promise<Evaluation> {
 	const now = deps.now();
-	const [cf, stuck, dead, d1] = await Promise.all([
+	const [cf, stuck, dead, d1, stuckArchive] = await Promise.all([
 		consecutiveFailures(deps.db, rules),
 		stuckPending(deps.db, rules, now),
 		newDead(deps.db, rules, open, now),
 		d1Storage(deps.db, rules, open),
+		archiveStuck(deps.db, now),
 	]);
 	return {
-		active: [...cf, ...stuck, ...dead.active, ...d1],
+		active: [...cf, ...stuck, ...dead.active, ...d1, ...stuckArchive],
 		deadCursor: dead.cursor,
 	};
 }
