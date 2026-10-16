@@ -5,8 +5,10 @@ import { HttpResponse, http } from "msw";
 import { type ReactNode, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { createQueryClient } from "@/router";
+import { destination, project } from "@/test/fixtures";
 import { apiUrl, server } from "@/test/server";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { DestinationFormDialog } from "./DestinationFormDialog";
 import { ReplayDialog } from "./ReplayDialog";
 import { RotateSecretDialog } from "./RotateSecretDialog";
 import { SecretRevealDialog } from "./SecretRevealDialog";
@@ -308,5 +310,69 @@ describe("ConfirmDialog", () => {
 		rerender(<ConfirmDialog open={false} {...props} />);
 		rerender(<ConfirmDialog open {...props} />);
 		expect(await screen.findByLabelText("Reason (optional)")).toHaveValue("");
+	});
+});
+
+describe("DestinationFormDialog limits", () => {
+	it("sends limits on create and leaves them out when empty", async () => {
+		const bodies: unknown[] = [];
+		server.use(
+			http.get(apiUrl("/projects"), () =>
+				HttpResponse.json({ data: [project()], next_cursor: null }),
+			),
+			http.post(apiUrl("/destinations"), async ({ request }) => {
+				bodies.push(await request.json());
+				return HttpResponse.json(
+					{ destination: destination(), signing_secret: "whsec_x" },
+					{ status: 201 },
+				);
+			}),
+		);
+		const user = userEvent.setup();
+		wrap(
+			<DestinationFormDialog
+				open
+				onOpenChange={() => {}}
+				onCreated={() => {}}
+			/>,
+		);
+		await user.click(screen.getByLabelText("Project"));
+		await user.click(await screen.findByRole("option", { name: "Payments" }));
+		await user.type(screen.getByLabelText("Name"), "Billing API");
+		await user.type(
+			screen.getByLabelText("URL"),
+			"https://billing.example.com/hooks",
+		);
+		expect(screen.getByLabelText("Max in flight")).toHaveAttribute(
+			"placeholder",
+			"Unlimited",
+		);
+		await user.type(screen.getByLabelText("Max in flight"), "4");
+		await user.click(screen.getByRole("button", { name: /create/i }));
+		await waitFor(() => expect(bodies).toHaveLength(1));
+		expect(bodies[0]).toMatchObject({ max_in_flight: 4 });
+		expect(bodies[0]).not.toHaveProperty("rate_limit_per_s");
+	});
+
+	it("sends null when a limit is cleared on edit", async () => {
+		const bodies: unknown[] = [];
+		server.use(
+			http.patch(apiUrl("/destinations/dst_1"), async ({ request }) => {
+				bodies.push(await request.json());
+				return HttpResponse.json(destination({ id: "dst_1" }));
+			}),
+		);
+		const user = userEvent.setup();
+		wrap(
+			<DestinationFormDialog
+				open
+				onOpenChange={() => {}}
+				destination={destination({ id: "dst_1", rate_limit_per_s: 10 })}
+			/>,
+		);
+		await user.clear(screen.getByLabelText("Rate limit (per s)"));
+		await user.click(screen.getByRole("button", { name: /save/i }));
+		await waitFor(() => expect(bodies).toHaveLength(1));
+		expect(bodies[0]).toMatchObject({ rate_limit_per_s: null });
 	});
 });
