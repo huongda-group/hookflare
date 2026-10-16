@@ -1,9 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { z } from "zod";
+import { FailuresPage, failuresSearch } from "@/pages/FailuresPage";
 
 export const Route = createFileRoute("/failures")({
-	validateSearch: z.object({
-		destination_id: z.string().optional().catch(undefined),
-	}),
-	component: () => <h1 className="p-6 text-xl font-semibold">Failures</h1>,
+	validateSearch: failuresSearch,
+	component: function FailuresRoute() {
+		const search = Route.useSearch();
+		const navigate = Route.useNavigate();
+		return (
+			<FailuresPage
+				search={search}
+				setSearch={(s) => navigate({ search: (prev) => ({ ...prev, ...s }) })}
+			/>
+		);
+	},
 });
