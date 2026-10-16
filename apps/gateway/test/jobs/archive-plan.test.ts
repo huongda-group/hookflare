@@ -87,13 +87,11 @@ describe("planRun", () => {
 	});
 
 	it("does nothing on a corrupt storage row (Review Focus 5)", async () => {
-		await deps.db
-			.insert(settings)
-			.values({
-				key: "storage",
-				valueJson: '{"hot_retention_days":"x"}',
-				updatedAt: 1,
-			});
+		await deps.db.insert(settings).values({
+			key: "storage",
+			valueJson: '{"hot_retention_days":"x"}',
+			updatedAt: 1,
+		});
 		const p = await seedPipeline(deps);
 		await seedDelivery(deps, p, {
 			status: "delivered",
@@ -114,16 +112,14 @@ describe("planRun", () => {
 
 	it("plans audit days older than audit_retention_days once", async () => {
 		const { auditLogs } = await import("../../src/core/db/schema");
-		await deps.db
-			.insert(auditLogs)
-			.values({
-				id: "aud_plan_1",
-				actorEmail: "plan@test",
-				action: "settings.updated",
-				resourceType: "settings",
-				resourceId: "x",
-				at: NOW - 400 * DAY_MS,
-			});
+		await deps.db.insert(auditLogs).values({
+			id: "aud_plan_1",
+			actorEmail: "plan@test",
+			action: "settings.updated",
+			resourceType: "settings",
+			resourceId: "x",
+			at: NOW - 400 * DAY_MS,
+		});
 		const first = await planRun(deps, "inst-4", never, logger);
 		const second = await planRun(
 			deps,

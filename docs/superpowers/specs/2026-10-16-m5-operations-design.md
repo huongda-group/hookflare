@@ -70,6 +70,13 @@
 | DEC-6 "cooldown" | Reminders every `reminder_s` while open, a quiet period for `new_dead`, and hysteresis for `d1_storage` | §6.2 |
 | M2 "the DLQ consumer opens an alert" | The `new_dead` rule detects every dead delivery; the DLQ consumer is unchanged | M5-13 |
 | Roadmap §8 "download archive: operator+" | Uses the existing `payload.read` | M5-23 |
+| §5.1 CHECK 1–1000 on the limit columns | Enforced by the API only | A table-level CHECK makes drizzle-kit rebuild `destinations` |
+| §6.1 reclaim by `created_at` | `alert_notifications.claimed_at` | A retried row would otherwise be reclaimable while being sent |
+| §4 `jobs/alerts/channels.ts` | `core/alert-channels.ts` | The admin "Send test" route uses it; `admin/` does not import `jobs/` |
+| §6.2 `new_dead` window `(cursor, now]` | `(cursor, now − 10 s]`; a missing cursor starts there without alerting | Clock skew; no page storm on first deploy |
+| §6.5 channel delete marks notifications `failed` | Deletes the channel's notifications | `alert_notifications.channel_id` is an FK |
+| §7.4 one `purge` step | `purge` (D1, returns keys) + `purge-r2` (deletes them) | Only a finished step's result survives a retry (M5-20) |
+| §7.6 download | `404` unless `verified`/`purged` with files | A building or failed batch can hold an incomplete part |
 
 ## 4. Layout
 
