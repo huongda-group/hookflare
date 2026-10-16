@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Hookflare is an inbound webhook gateway on Cloudflare (Workers + Hono, D1, Queues, R2, Durable Objects, Access). Milestones M0 (Foundation) and M1 (Core pipeline) are done: ingress, D1 ledger via Drizzle, queue consumer with single-shot delivery, Standard Webhooks signing, SSRF guard, and a minimal admin API behind Access. M2 (Reliability) is done: retries with exponential backoff, lease fencing, DLQ consumer, dedup by provider event ID, R2 payloads, per-minute reconciler, per-destination retry policy, and pause/resume. M3 (Admin API & security) is done: users + RBAC (viewer/operator/admin) with bootstrap admins, audit_logs written in the same batch as every mutation, event search and failures views with cursors, single and bulk replay, synchronous test delivery, and source/destination secret rotation with a grace window.
+Hookflare is an inbound webhook gateway on Cloudflare (Workers + Hono, D1, Queues, R2, Durable Objects, Access). Milestones M0 (Foundation) and M1 (Core pipeline) are done: ingress, D1 ledger via Drizzle, queue consumer with single-shot delivery, Standard Webhooks signing, SSRF guard, and a minimal admin API behind Access. M2 (Reliability) is done: retries with exponential backoff, lease fencing, DLQ consumer, dedup by provider event ID, R2 payloads, per-minute reconciler, per-destination retry policy, and pause/resume. M3 (Admin API & security) is done: users + RBAC (viewer/operator/admin) with bootstrap admins, audit_logs written in the same batch as every mutation, event search and failures views with cursors, single and bulk replay, synchronous test delivery, and source/destination secret rotation with a grace window. M4 (Dashboard) is done: React SPA served as Workers Static Assets from the same Worker, every §8 page except Archives and Alerts, `stats_hourly` rollup every 5 minutes, overview and per-destination stats, and editable retry defaults in Settings.
 
 ## Source documents and precedence
 
@@ -19,6 +19,9 @@ All commands run from the repository root.
 | Script | Runs |
 |---|---|
 | `pnpm dev` | `wrangler dev` for the gateway (local D1, `.dev.vars`) |
+| `pnpm dev:dashboard` | `vite` on 5173, proxying `/api` to `wrangler dev` (run `pnpm dev` alongside) |
+| `pnpm build` | builds the dashboard into `apps/dashboard/dist` |
+| `pnpm --filter dashboard e2e` | Playwright smoke test against `wrangler dev` |
 | `pnpm test` | Vitest for every workspace |
 | `pnpm typecheck` | `tsc --noEmit` for every workspace |
 | `pnpm lint` / `pnpm format` | `biome check` / `biome check --write` |
@@ -26,7 +29,7 @@ All commands run from the repository root.
 | `pnpm db:migrate:local` | `wrangler d1 migrations apply DB --local` |
 | `pnpm db:generate` | `drizzle-kit generate` from `apps/gateway/src/core/db/schema.ts` into `apps/gateway/migrations/` (never hand-edit generated migrations; CI fails on drift) |
 | `pnpm db:migrate:remote` | `wrangler d1 migrations apply DB --remote` |
-| `pnpm run deploy` | `db:migrate:remote`, then `wrangler deploy` |
+| `pnpm run deploy` | `build`, `db:migrate:remote`, then `wrangler deploy` |
 
 To run a single test: `pnpm --filter gateway exec vitest run test/core/ids.test.ts -t "strictly increasing"`.
 
@@ -34,7 +37,7 @@ To run a single test: `pnpm --filter gateway exec vitest run test/core/ids.test.
 
 ## Planned architecture (big picture)
 
-- **One Worker, three handlers** (DEC-7). `fetch` serves `/in/:sourceId` (public ingress), `/api/admin/v1/*` (behind Cloudflare Access + RBAC), and the dashboard as static assets. `queue` routes `hookflare-deliveries` batches to the delivery consumer and `hookflare-deliveries-dlq` batches to `delivery/dlq.ts`. `scheduled` currently runs only the reconciler (`jobs/reconcile.ts`); the alerts, rollup, and archive/retention jobs arrive in later milestones.
+- **One Worker, three handlers** (DEC-7). `fetch` serves `/in/:sourceId` (public ingress), `/api/admin/v1/*` (behind Cloudflare Access + RBAC), and the dashboard as static assets. `queue` routes `hookflare-deliveries` batches to the delivery consumer and `hookflare-deliveries-dlq` batches to `delivery/dlq.ts`. `scheduled` runs the reconciler every minute and the rollup (`jobs/rollup.ts`) every 5 minutes; the alerts and archive/retention jobs arrive in later milestones.
 - **Layout:** `apps/gateway` (Hono; modules `core/`, `ingress/`, `delivery/`, `admin/`, `jobs/`), `apps/dashboard` (React + Vite + Tailwind + TanStack), `packages/shared`. `ingress/` must not import from `admin/`, so ingress can later be split into its own Worker.
 - **One deployment = one environment** (DEC-1). There is no `environment` column; staging and production are separate Workers with their own D1/R2/Queues.
 - **Data access** uses Drizzle ORM (`core/db/`); handlers get `db`, `queue`, `fetch`, `resolveDns`, and `now` from the `Deps` seam (`src/deps.ts`), never from `env` directly, so tests can inject them.
@@ -52,3 +55,4 @@ To run a single test: `pnpm --filter gateway exec vitest run test/core/ids.test.
 - Every admin mutation and its audit_logs row are written in one db.batch; replay audits list every new delivery ID. Permissions are checked per route with requirePermission(); the users row is read on every admin request.
 - Outbound requests: HTTPS only, `redirect: "manual"`, SSRF check (DoH resolve) before every delivery, Standard Webhooks signing, and credential headers stripped via the shared denylist.
 - Archival never removes an event from D1 while any of its deliveries is non-terminal, and deletes from D1 only after the R2 manifest has been verified.
+- Retry defaults come from the `retry_defaults` settings row (30 s isolate cache); a destination's own policy fields override them per field.
