@@ -37,6 +37,14 @@ export const DEFAULT_SETTINGS: Settings = {
 		backoff_max_s: 21_600,
 	},
 	updated_at: null,
+	alert_rules: {
+		failure_threshold: 5,
+		stuck_after_s: 300,
+		dead_quiet_s: 1800,
+		d1_warn_pct: 80,
+		reminder_s: 3600,
+	},
+	alert_rules_updated_at: null,
 };
 
 const empty = { data: [], next_cursor: null };

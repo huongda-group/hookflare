@@ -5,7 +5,7 @@ import { clearAccessKeyCache } from "../../src/admin/auth/access";
 import { settings } from "../../src/core/db/schema";
 import { ROLE_PERMISSIONS } from "../../src/core/rbac";
 import {
-	clearRetryDefaultsCache,
+	clearSettingsCache,
 	RETRY_DEFAULTS_KEY,
 } from "../../src/core/settings";
 import { adminApp } from "../helpers/admin";
@@ -15,7 +15,7 @@ import { seedDelivery, seedPipeline } from "../helpers/seed";
 // Each adminApp mints fresh keys under the same kid.
 beforeEach(async () => {
 	clearAccessKeyCache();
-	clearRetryDefaultsCache();
+	clearSettingsCache();
 	const deps = testDeps();
 	await deps.db.delete(settings).where(eq(settings.key, RETRY_DEFAULTS_KEY));
 });

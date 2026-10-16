@@ -1,14 +1,20 @@
+import { DEFAULT_ALERT_RULES } from "@hookflare/shared";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { settings } from "../../src/core/db/schema";
 import { DEFAULT_POLICY } from "../../src/core/policy";
 import {
+	ALERT_RULES_SETTING,
 	clearRetryDefaultsCache,
+	clearSettingsCache,
+	loadAlertRules,
 	loadRetryDefaults,
 	RETRY_DEFAULTS_KEY,
 	readRetryDefaults,
+	readSetting,
 	SETTINGS_CACHE_TTL_MS,
 	upsertRetryDefaults,
+	upsertSetting,
 } from "../../src/core/settings";
 import { testDeps } from "../helpers/deps";
 
@@ -73,5 +79,57 @@ describe("retry defaults", () => {
 		expect(await loadRetryDefaults(deps)).toEqual(DEFAULT_POLICY);
 		now += SETTINGS_CACHE_TTL_MS;
 		expect((await loadRetryDefaults(deps)).maxAttempts).toBe(3);
+	});
+});
+
+describe("generic settings", () => {
+	const deps = testDeps();
+	beforeEach(async () => {
+		clearSettingsCache();
+		await deps.db.delete(settings).where(eq(settings.key, "alert_rules"));
+	});
+
+	it("falls back to defaults when missing or corrupt", async () => {
+		expect(await readSetting(deps.db, ALERT_RULES_SETTING)).toEqual({
+			value: DEFAULT_ALERT_RULES,
+			updatedAt: null,
+			corrupt: false,
+		});
+		await deps.db
+			.insert(settings)
+			.values({ key: "alert_rules", valueJson: "{bad", updatedAt: 5 });
+		expect(await readSetting(deps.db, ALERT_RULES_SETTING)).toEqual({
+			value: DEFAULT_ALERT_RULES,
+			updatedAt: 5,
+			corrupt: true,
+		});
+	});
+
+	it("compare-and-swaps on updated_at", async () => {
+		const v = { ...DEFAULT_ALERT_RULES, failure_threshold: 9 };
+		expect(
+			await upsertSetting(deps.db, "alert_rules", v, 10, null),
+		).toHaveLength(1);
+		expect(
+			await upsertSetting(deps.db, "alert_rules", v, 11, null),
+		).toHaveLength(0);
+		expect(await upsertSetting(deps.db, "alert_rules", v, 12, 10)).toHaveLength(
+			1,
+		);
+	});
+
+	it("caches for 30 s per isolate", async () => {
+		let now = 1_000;
+		const d = { ...deps, now: () => now };
+		expect((await loadAlertRules(d)).failure_threshold).toBe(5);
+		await upsertSetting(
+			deps.db,
+			"alert_rules",
+			{ ...DEFAULT_ALERT_RULES, failure_threshold: 9 },
+			2,
+		);
+		expect((await loadAlertRules(d)).failure_threshold).toBe(5);
+		now += 30_001;
+		expect((await loadAlertRules(d)).failure_threshold).toBe(9);
 	});
 });

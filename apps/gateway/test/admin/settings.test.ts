@@ -1,10 +1,11 @@
-import type { Settings } from "@hookflare/shared";
+import { DEFAULT_ALERT_RULES, type Settings } from "@hookflare/shared";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { clearAccessKeyCache } from "../../src/admin/auth/access";
 import { auditLogs, settings } from "../../src/core/db/schema";
 import {
-	clearRetryDefaultsCache,
+	ALERT_RULES_SETTING,
+	clearSettingsCache,
 	RETRY_DEFAULTS_KEY,
 	upsertRetryDefaults,
 } from "../../src/core/settings";
@@ -20,14 +21,20 @@ const next = {
 
 beforeEach(async () => {
 	clearAccessKeyCache();
-	clearRetryDefaultsCache();
+	clearSettingsCache();
 	const deps = testDeps();
 	await deps.db.delete(settings).where(eq(settings.key, RETRY_DEFAULTS_KEY));
+	await deps.db
+		.delete(settings)
+		.where(eq(settings.key, ALERT_RULES_SETTING.key));
 	// Same fixed resource ID in every test: drop audit rows too so the
 	// batch-atomicity test sees only rows written by its own request.
 	await deps.db
 		.delete(auditLogs)
 		.where(eq(auditLogs.resourceId, RETRY_DEFAULTS_KEY));
+	await deps.db
+		.delete(auditLogs)
+		.where(eq(auditLogs.resourceId, ALERT_RULES_SETTING.key));
 });
 
 describe("GET /settings", () => {
@@ -43,6 +50,8 @@ describe("GET /settings", () => {
 				backoff_max_s: 21_600,
 			},
 			updated_at: null,
+			alert_rules: DEFAULT_ALERT_RULES,
+			alert_rules_updated_at: null,
 		} satisfies Settings);
 	});
 });
@@ -146,5 +155,30 @@ describe("PATCH /settings", () => {
 				.where(eq(settings.key, RETRY_DEFAULTS_KEY)),
 		).toEqual([]);
 		expect(await auditRows(deps, RETRY_DEFAULTS_KEY)).toEqual([]);
+	});
+
+	it("returns alert_rules defaults and patches them independently", async () => {
+		const deps = testDeps();
+		const app = await adminApp(deps);
+		const got = await (await app.request("GET", "/settings")).json<Settings>();
+		expect(got.alert_rules).toEqual(DEFAULT_ALERT_RULES);
+		expect(got.alert_rules_updated_at).toBeNull();
+
+		const next = { ...DEFAULT_ALERT_RULES, failure_threshold: 8 };
+		const res = await app.request("PATCH", "/settings", { alert_rules: next });
+		expect(res.status).toBe(200);
+		const body = await res.json<Settings>();
+		expect(body.alert_rules).toEqual(next);
+		expect(body.alert_rules_updated_at).toEqual(expect.any(Number));
+		// retry_defaults untouched
+		expect(body.updated_at).toBeNull();
+		const audits = await auditRows(deps, "alert_rules");
+		expect(audits.map((a) => a.action)).toEqual(["settings.updated"]);
+	});
+
+	it("rejects an empty PATCH", async () => {
+		const api = await adminApp(testDeps());
+		const res = await api.request("PATCH", "/settings", {});
+		expect(res.status).toBe(400);
 	});
 });
