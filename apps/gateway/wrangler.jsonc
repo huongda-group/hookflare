@@ -41,7 +41,7 @@
 	"r2_buckets": [
 		{ "binding": "PAYLOADS", "bucket_name": "hookflare-payloads" }
 	],
-	"triggers": { "crons": ["* * * * *"] },
+	"triggers": { "crons": ["* * * * *", "*/5 * * * *"] },
 	"ratelimits": [
 		{
 			"name": "INGRESS_LIMITER",
