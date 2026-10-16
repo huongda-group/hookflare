@@ -1,10 +1,10 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { clearAccessKeyCache } from "../../src/admin/auth/access";
-import { deliveries } from "../../src/core/db/schema";
+import { deliveries, destinations } from "../../src/core/db/schema";
 import { DnsError } from "../../src/core/dns";
 import { clearSsrfCache } from "../../src/core/ssrf";
-import { adminApp, auditRows } from "../helpers/admin";
+import { adminApp, auditRows, beforeNextBatch } from "../helpers/admin";
 import { recordingQueue, testDeps } from "../helpers/deps";
 import { seedDelivery, seedPipeline } from "../helpers/seed";
 
@@ -121,6 +121,46 @@ describe("admin destinations", () => {
 			(await api.request("POST", `/destinations/${destination.id}/pause`))
 				.status,
 		).toBe(200);
+		expect(await auditRows(deps, destination.id)).toEqual([]);
+	});
+
+	it("does not audit a pause that loses the race to another pause", async () => {
+		const deps = testDeps();
+		const { destination } = await seedPipeline(deps);
+		const api = await adminApp(deps);
+		await api.request("GET", "/me"); // bootstrap batch happens here
+		beforeNextBatch(deps, () =>
+			deps.db
+				.update(destinations)
+				.set({ status: "paused" })
+				.where(eq(destinations.id, destination.id)),
+		);
+		const res = await api.request(
+			"POST",
+			`/destinations/${destination.id}/pause`,
+		);
+		expect(res.status).toBe(200);
+		expect(await auditRows(deps, destination.id)).toEqual([]);
+	});
+
+	it("does not audit a resume that loses the race to another resume", async () => {
+		const deps = testDeps();
+		const { destination } = await seedPipeline(deps, {
+			destination: { status: "paused" },
+		});
+		const api = await adminApp(deps);
+		await api.request("GET", "/me");
+		beforeNextBatch(deps, () =>
+			deps.db
+				.update(destinations)
+				.set({ status: "active" })
+				.where(eq(destinations.id, destination.id)),
+		);
+		const res = await api.request(
+			"POST",
+			`/destinations/${destination.id}/resume`,
+		);
+		expect(res.status).toBe(200);
 		expect(await auditRows(deps, destination.id)).toEqual([]);
 	});
 

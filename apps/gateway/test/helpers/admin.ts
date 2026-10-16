@@ -47,6 +47,16 @@ export function uniqueEmail(prefix = "user"): string {
 }
 
 /** Audit rows for one resource, oldest first. */
+/** Runs `before` right ahead of the next db.batch, i.e. after the handler's read. */
+export function beforeNextBatch(deps: Deps, before: () => Promise<unknown>) {
+	const batch = deps.db.batch.bind(deps.db);
+	deps.db.batch = (async (queries: Parameters<typeof batch>[0]) => {
+		deps.db.batch = batch;
+		await before();
+		return batch(queries);
+	}) as unknown as typeof batch;
+}
+
 export async function auditRows(deps: Deps, resourceId: string) {
 	return deps.db
 		.select()

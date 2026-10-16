@@ -373,7 +373,9 @@ export function destinationRoutes() {
 				const ts = now();
 				const [[row]] = await db.batch([
 					transitionDestinationStmt(db, id, "active", "paused", ts),
-					auditStmt(c, {
+					auditInsertIfChanged(db, {
+						actor: c.var.actor?.email ?? "",
+						at: ts,
 						action: "destination.paused",
 						resourceType: "destination",
 						resourceId: id,
@@ -401,15 +403,12 @@ export function destinationRoutes() {
 			// Only an actual transition is audited; a repeat Resume is a no-op.
 			let row: DestinationRow | undefined;
 			if (existing.status === "paused") {
+				const ts = deps.now();
 				const [[transitioned]] = await deps.db.batch([
-					transitionDestinationStmt(
-						deps.db,
-						id,
-						"paused",
-						"active",
-						deps.now(),
-					),
-					auditStmt(c, {
+					transitionDestinationStmt(deps.db, id, "paused", "active", ts),
+					auditInsertIfChanged(deps.db, {
+						actor: c.var.actor?.email ?? "",
+						at: ts,
 						action: "destination.resumed",
 						resourceType: "destination",
 						resourceId: id,

@@ -9,7 +9,7 @@ import {
 } from "../../src/core/crypto";
 import { destinations, sources } from "../../src/core/db/schema";
 import { aad } from "../../src/core/secrets";
-import { adminApp, auditRows } from "../helpers/admin";
+import { adminApp, auditRows, beforeNextBatch } from "../helpers/admin";
 import { testDeps } from "../helpers/deps";
 import {
 	seedPipeline,
@@ -227,19 +227,6 @@ describe("rotation races", () => {
 			freshUntil,
 		]);
 	});
-
-	/** Runs `before` right ahead of the next db.batch, i.e. after the handler's read. */
-	function beforeNextBatch(
-		deps: ReturnType<typeof testDeps>,
-		before: () => Promise<unknown>,
-	) {
-		const batch = deps.db.batch.bind(deps.db);
-		deps.db.batch = (async (queries: Parameters<typeof batch>[0]) => {
-			deps.db.batch = batch;
-			await before();
-			return batch(queries);
-		}) as unknown as typeof batch;
-	}
 
 	it("a destination rotation that loses the race answers 409 and writes no audit row", async () => {
 		const deps = testDeps();
