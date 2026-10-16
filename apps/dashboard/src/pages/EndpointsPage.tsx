@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ProjectSelect } from "@/components/ProjectSelect";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DestinationsTab } from "./endpoints/DestinationsTab";
+import { SourcesTab } from "./endpoints/SourcesTab";
 
 export const endpointsSearch = z.object({
 	tab: z
@@ -40,7 +41,7 @@ export function EndpointsPage({
 					<TabsTrigger value="destinations">Destinations</TabsTrigger>
 				</TabsList>
 				<TabsContent value="sources">
-					<p className="text-neutral-500">Sources</p>
+					<SourcesTab projectId={search.project_id} />
 				</TabsContent>
 				<TabsContent value="destinations">
 					<DestinationsTab projectId={search.project_id} />
