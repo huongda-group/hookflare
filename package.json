@@ -3,16 +3,18 @@
 	"private": true,
 	"packageManager": "pnpm@12.13.0",
 	"scripts": {
-		"dev": "wrangler dev --config apps/gateway/wrangler.jsonc",
+		"dev": "node scripts/ensure-dashboard-dist.mjs && wrangler dev --config apps/gateway/wrangler.jsonc",
+		"dev:dashboard": "pnpm --filter dashboard dev",
+		"build": "pnpm --filter dashboard build",
 		"test": "pnpm --recursive --if-present run test",
 		"typecheck": "pnpm --recursive --if-present run typecheck",
 		"lint": "biome check .",
 		"format": "biome check --write .",
-		"cf-typegen": "wrangler types --strict-vars=false --config apps/gateway/wrangler.jsonc apps/gateway/worker-configuration.d.ts",
+		"cf-typegen": "node scripts/ensure-dashboard-dist.mjs && wrangler types --strict-vars=false --config apps/gateway/wrangler.jsonc apps/gateway/worker-configuration.d.ts",
 		"db:generate": "pnpm --filter gateway db:generate",
 		"db:migrate:local": "wrangler d1 migrations apply DB --local --config apps/gateway/wrangler.jsonc",
 		"db:migrate:remote": "wrangler d1 migrations apply DB --remote --config apps/gateway/wrangler.jsonc",
-		"deploy": "pnpm db:migrate:remote && wrangler deploy --config apps/gateway/wrangler.jsonc"
+		"deploy": "pnpm build && pnpm db:migrate:remote && wrangler deploy --config apps/gateway/wrangler.jsonc"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.15",

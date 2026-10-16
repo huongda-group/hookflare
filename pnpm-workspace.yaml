@@ -9,3 +9,6 @@ allowBuilds:
 minimumReleaseAgeExclude:
   - miniflare@5.20261012.0-beta
   - wrangler@4.151.0
+permissions:
+  '@tanstack/router-plugin':
+    skills: true
