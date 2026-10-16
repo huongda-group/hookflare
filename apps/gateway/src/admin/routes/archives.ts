@@ -136,13 +136,23 @@ export function archiveRoutes() {
 		const deps = c.var.deps;
 		const instanceId = `archive-manual-${newId("arb").slice(4).toLowerCase()}`;
 		await startArchiveRun(deps, instanceId, "manual", c.var.logger);
-		await deps.db.batch([
-			auditStmt(c, {
-				action: "archive.run_started",
-				resourceType: "archive_run",
-				resourceId: instanceId,
-			}),
-		]);
+		// The run is already started and cannot share a transaction with the
+		// audit row; if the audit write fails, the start must not be silent.
+		try {
+			await deps.db.batch([
+				auditStmt(c, {
+					action: "archive.run_started",
+					resourceType: "archive_run",
+					resourceId: instanceId,
+				}),
+			]);
+		} catch (err) {
+			c.var.logger.error("archive.run_audit_failed", {
+				instance_id: instanceId,
+				error: String(err),
+			});
+			throw err;
+		}
 		return c.json({ instance_id: instanceId }, 202);
 	});
 

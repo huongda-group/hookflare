@@ -1,6 +1,10 @@
 import { and, eq, sql } from "drizzle-orm";
 import { countMarked, DAY_MS } from "../../core/db/archive";
-import { archiveBatches, archiveParts } from "../../core/db/schema";
+import {
+	archiveBatches,
+	archiveParts,
+	webhookEvents,
+} from "../../core/db/schema";
 import type { Deps } from "../../deps";
 import { batchPrefix, dayStartOf, manifestKey } from "./keys";
 
@@ -33,16 +37,30 @@ export async function verifyBatch(
 		.from(archiveParts)
 		.where(eq(archiveParts.batchId, batchId))
 		.orderBy(archiveParts.partNo);
+	// A failed batch is never purged, so it releases its marks in the same
+	// batch as the status change: the day is archived again by a later batch,
+	// and retention removes the failed batch's files.
 	const fail = async (error: string): Promise<VerifyResult> => {
-		await deps.db
-			.update(archiveBatches)
-			.set({ status: "failed", error })
-			.where(
-				and(
-					eq(archiveBatches.id, batchId),
-					eq(archiveBatches.status, "building"),
+		await deps.db.batch([
+			deps.db
+				.update(archiveBatches)
+				.set({ status: "failed", error })
+				.where(
+					and(
+						eq(archiveBatches.id, batchId),
+						eq(archiveBatches.status, "building"),
+					),
 				),
-			);
+			deps.db
+				.update(webhookEvents)
+				.set({ archiveBatchId: null, archivePart: null })
+				.where(
+					and(
+						eq(webhookEvents.archiveBatchId, batchId),
+						sql`EXISTS (SELECT 1 FROM archive_batches WHERE id = ${batchId} AND status = 'failed')`,
+					),
+				),
+		]);
 		return { ok: false, error };
 	};
 	for (const part of parts) {

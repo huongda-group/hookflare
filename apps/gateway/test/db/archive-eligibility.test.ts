@@ -1,14 +1,13 @@
-import { eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-	countEligible,
 	countMarked,
 	cutoffsFor,
 	DAY_MS,
 	eligibleSql,
 	markPart,
 } from "../../src/core/db/archive";
-import { type DeliveryStatus, webhookEvents } from "../../src/core/db/schema";
+import type { DeliveryStatus } from "../../src/core/db/schema";
 import type { Deps } from "../../src/deps";
 import { testDeps } from "../helpers/deps";
 import { seedDelivery, seedPipeline } from "../helpers/seed";

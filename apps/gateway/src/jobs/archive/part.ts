@@ -17,8 +17,26 @@ import { base64, groupBy, gzipLines, sha256Hex, toBytes } from "./ndjson";
 export const PART_MAX_EVENTS = 5_000;
 export const PART_MAX_RAW_BYTES = 32 * 1024 * 1024;
 const PAGE = 90;
+/** Spec §7.5: the `event` object of a line holds every webhook_events column but these. */
+export const EVENT_LINE_EXCLUDED = [
+	"body_inline", // sent as payload_b64
+	"archive_batch_id",
+	"archive_part",
+] as const;
+export const EVENT_LINE_COLUMNS = [
+	"id",
+	"project_id",
+	"source_id",
+	"provider_event_id",
+	"received_at",
+	"headers_json",
+	"content_type",
+	"size_bytes",
+	"payload_sha256",
+	"r2_key",
+] as const;
 const EVENT_COLUMNS = sql.raw(
-	"e.id, e.project_id, e.source_id, e.provider_event_id, e.received_at, e.headers_json, e.content_type, e.size_bytes, e.payload_sha256, e.r2_key",
+	EVENT_LINE_COLUMNS.map((c) => `e.${c}`).join(", "),
 );
 
 export type PartResult = { itemCount: number; bytes: number };

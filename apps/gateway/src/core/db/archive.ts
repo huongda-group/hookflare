@@ -43,9 +43,10 @@ export async function countEligible(db: Db, c: Cutoffs): Promise<number> {
 export async function eligibleDays(
 	db: Db,
 	c: Cutoffs,
-): Promise<{ dayStart: number; count: number }[]> {
-	return db.all<{ dayStart: number; count: number }>(sql`
-		SELECT CAST(e.received_at / ${DAY_MS} AS INTEGER) * ${DAY_MS} AS dayStart, COUNT(*) AS count
+): Promise<{ dayStart: number; count: number; bytes: number }[]> {
+	return db.all<{ dayStart: number; count: number; bytes: number }>(sql`
+		SELECT CAST(e.received_at / ${DAY_MS} AS INTEGER) * ${DAY_MS} AS dayStart, COUNT(*) AS count,
+			SUM(e.size_bytes) AS bytes
 		FROM webhook_events e
 		WHERE e.archive_batch_id IS NULL AND ${eligibleSql(c, "e")}
 		GROUP BY dayStart ORDER BY dayStart`);

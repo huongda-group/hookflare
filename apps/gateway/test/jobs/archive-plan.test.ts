@@ -6,6 +6,8 @@ import { archiveBatches, settings } from "../../src/core/db/schema";
 import { createLogger } from "../../src/core/log";
 import {
 	estimateSteps,
+	MAX_PARTS_PER_BATCH,
+	partsFor,
 	planRun,
 	STEP_BUDGET,
 } from "../../src/jobs/archive/plan";
@@ -106,8 +108,15 @@ describe("planRun", () => {
 
 	it("stops planning new days at the step budget (M5-22)", async () => {
 		expect(estimateSteps("events", 0)).toBeGreaterThan(0);
-		const perDay = estimateSteps("events", 500_000);
+		// A 500k-event day is 100 parts; a batch is capped so the budget always
+		// fits at least one full-size batch.
+		expect(partsFor(500_000)).toBe(100);
+		expect(partsFor(10, 100 * 1024 * 1024)).toBe(4); // bytes cap counts too
+		const perDay = estimateSteps("events", partsFor(500_000));
 		expect(Math.floor(STEP_BUDGET / perDay)).toBeLessThan(5);
+		expect(estimateSteps("events", MAX_PARTS_PER_BATCH)).toBeLessThan(
+			STEP_BUDGET - 10,
+		);
 	});
 
 	it("plans audit days older than audit_retention_days once", async () => {
@@ -137,10 +146,15 @@ describe("planRun", () => {
 
 describe("expireArchives", () => {
 	it("deletes files of purged batches older than archive_retention_days", async () => {
-		const old = await seedBatch(deps, { status: "purged", day: "2026-01-01" });
+		const old = await seedBatch(deps, {
+			status: "purged",
+			day: "2026-01-01",
+			purgedAt: NOW - 200 * DAY_MS,
+		});
 		const recent = await seedBatch(deps, {
 			status: "purged",
 			day: "2026-12-01",
+			purgedAt: NOW - 10 * DAY_MS,
 		});
 		await deps.payloads.put(
 			`archive/2026/01/01/${old.id}/part-0001.ndjson.gz`,

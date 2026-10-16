@@ -9,9 +9,10 @@ import {
 } from "../../src/core/db/schema";
 import { buildEventPart } from "../../src/jobs/archive/part";
 import {
-	deletePayloadObjects,
+	deleteGonePayloads,
+	deletePurgeChunk,
 	finishBatch,
-	purgeEventChunk,
+	selectPurgeChunk,
 } from "../../src/jobs/archive/purge";
 import { verifyBatch } from "../../src/jobs/archive/verify";
 import { beforeNextBatch } from "../helpers/admin";
@@ -48,6 +49,18 @@ const status = async (id: string) =>
 	(
 		await deps.db.select().from(archiveBatches).where(eq(archiveBatches.id, id))
 	)[0];
+/** Select + D1 delete of part 1's first chunk; R2 is left to the caller. */
+async function purgeD1(batchId: string) {
+	const sel = await selectPurgeChunk(deps, batchId, 1, cut, "");
+	const deleted = await deletePurgeChunk(
+		deps,
+		batchId,
+		1,
+		cut,
+		sel.rows.map((r) => r.id),
+	);
+	return { ...sel, deleted };
+}
 const eventExists = async (id: string) =>
 	(await deps.db.select().from(webhookEvents).where(eq(webhookEvents.id, id)))
 		.length === 1;
@@ -90,21 +103,31 @@ describe("verifyBatch", () => {
 			const r = await verifyBatch(deps, batch.id);
 			expect(r.ok).toBe(false);
 			expect((await status(batch.id)).status).toBe("failed");
-			await expect(purgeEventChunk(deps, batch.id, 1, cut)).rejects.toThrow(
-				/not verified/,
-			);
+			await expect(
+				selectPurgeChunk(deps, batch.id, 1, cut, ""),
+			).rejects.toThrow(/not verified/);
+			await expect(
+				deletePurgeChunk(deps, batch.id, 1, cut, [events[0].eventId]),
+			).rejects.toThrow(/not verified/);
+			// The failed batch releases its events (I6).
+			const [ev] = await deps.db
+				.select()
+				.from(webhookEvents)
+				.where(eq(webhookEvents.id, events[0].eventId));
+			expect(ev.archiveBatchId).toBeNull();
 			expect(await eventExists(events[0].eventId)).toBe(true);
 		},
 	);
 });
 
 describe("purge", () => {
-	it("deletes D1 rows first, returns the R2 keys, then deletes the objects", async () => {
+	it("lists the chunk, deletes D1 rows, then deletes only the gone events' objects", async () => {
 		const { batch, events } = await built();
 		await verifyBatch(deps, batch.id);
-		const chunk = await purgeEventChunk(deps, batch.id, 1, cut);
+		const chunk = await purgeD1(batch.id);
 		expect(chunk).toMatchObject({ deleted: 2, done: true });
-		expect(chunk.r2Keys).toHaveLength(2);
+		const keys = chunk.rows.map((r) => r.r2Key as string);
+		expect(keys.every(Boolean)).toBe(true);
 		expect(await eventExists(events[0].eventId)).toBe(false);
 		expect(
 			await deps.db
@@ -112,17 +135,25 @@ describe("purge", () => {
 				.from(deliveries)
 				.where(eq(deliveries.id, events[0].deliveryId)),
 		).toEqual([]);
-		// R2 still there until the second step: a crash here leaves only orphans (M5-20).
-		expect(await deps.payloads.head(chunk.r2Keys[0])).not.toBeNull();
-		await deletePayloadObjects(deps, chunk.r2Keys);
-		expect(await deps.payloads.head(chunk.r2Keys[0])).toBeNull();
-		// Retried D1 step matches nothing; retried R2 step is a no-op.
-		expect(await purgeEventChunk(deps, batch.id, 1, cut)).toEqual({
-			deleted: 0,
-			r2Keys: [],
+		// R2 still there until the third step (M5-20).
+		expect(await deps.payloads.head(keys[0])).not.toBeNull();
+		expect(await deleteGonePayloads(deps, chunk.rows)).toBe(2);
+		expect(await deps.payloads.head(keys[0])).toBeNull();
+		// Retried steps match nothing and are no-ops.
+		expect(
+			await deletePurgeChunk(
+				deps,
+				batch.id,
+				1,
+				cut,
+				chunk.rows.map((r) => r.id),
+			),
+		).toBe(0);
+		expect(await selectPurgeChunk(deps, batch.id, 1, cut, "")).toEqual({
+			rows: [],
 			done: true,
 		});
-		await deletePayloadObjects(deps, chunk.r2Keys);
+		await deleteGonePayloads(deps, chunk.rows);
 		await finishBatch(deps, batch.id);
 		expect((await status(batch.id)).status).toBe("purged");
 		expect(
@@ -138,8 +169,7 @@ describe("purge", () => {
 			.update(webhookEvents)
 			.set({ archiveBatchId: null, archivePart: null })
 			.where(eq(webhookEvents.id, events[0].eventId));
-		const chunk = await purgeEventChunk(deps, batch.id, 1, cut);
-		expect(chunk.deleted).toBe(1);
+		expect((await purgeD1(batch.id)).deleted).toBe(1);
 		expect(await eventExists(events[0].eventId)).toBe(true);
 	});
 
@@ -155,7 +185,7 @@ describe("purge", () => {
 		});
 		await buildEventPart(deps, batch.id, 1, cut);
 		expect(await verifyBatch(deps, batch.id)).toEqual({ ok: true });
-		expect((await purgeEventChunk(deps, batch.id, 1, cut)).deleted).toBe(1);
+		expect((await purgeD1(batch.id)).deleted).toBe(1);
 		await finishBatch(deps, batch.id);
 		expect(await eventExists(eventId)).toBe(false);
 		expect(
@@ -169,36 +199,39 @@ describe("purge", () => {
 		await deps.db.run(
 			sql`UPDATE deliveries SET status = 'retrying' WHERE id = ${events[1].deliveryId}`,
 		);
-		expect((await purgeEventChunk(deps, batch.id, 1, cut)).deleted).toBe(1);
+		expect((await purgeD1(batch.id)).deleted).toBe(1);
 		expect(await eventExists(events[1].eventId)).toBe(true);
 	});
 
-	it("returns R2 keys only for events the D1 delete actually removed (SELECT-vs-delete race)", async () => {
+	it("deletes R2 objects only for events the D1 delete actually removed (SELECT-vs-delete race)", async () => {
 		const { batch, events } = await built();
 		await verifyBatch(deps, batch.id);
-		const [victim] = await deps.db
-			.select({ id: webhookEvents.id, r2Key: webhookEvents.r2Key })
-			.from(webhookEvents)
-			.where(eq(webhookEvents.id, events[0].eventId));
-		if (!victim?.r2Key) throw new Error("test setup: victim has no r2 key");
+		const sel = await selectPurgeChunk(deps, batch.id, 1, cut, "");
+		const victim = sel.rows.find((r) => r.id === events[0].eventId);
+		const other = sel.rows.find((r) => r.id === events[1].eventId);
+		if (!victim?.r2Key || !other?.r2Key)
+			throw new Error("test setup: events have no r2 key");
 		const victimKey = victim.r2Key;
-		// A replay lands between the pre-delete SELECT and the D1 delete and
-		// clears the victim's mark, so the delete skips it.
+		// A replay lands between the SELECT step and the D1 delete and clears
+		// the victim's mark, so the delete skips it.
 		beforeNextBatch(deps, () =>
 			deps.db
 				.update(webhookEvents)
 				.set({ archiveBatchId: null, archivePart: null })
 				.where(eq(webhookEvents.id, victim.id)),
 		);
-		const chunk = await purgeEventChunk(deps, batch.id, 1, cut);
-		expect(chunk.deleted).toBe(1);
-		expect(chunk.r2Keys).toHaveLength(1);
-		expect(chunk.r2Keys).not.toContain(victimKey);
+		const deleted = await deletePurgeChunk(
+			deps,
+			batch.id,
+			1,
+			cut,
+			sel.rows.map((r) => r.id),
+		);
+		expect(deleted).toBe(1);
 		expect(await eventExists(victim.id)).toBe(true);
+		expect(await deleteGonePayloads(deps, sel.rows)).toBe(1);
+		// The skipped event's payload object survives; the other one is gone.
 		expect(await deps.payloads.head(victimKey)).not.toBeNull();
-		await deletePayloadObjects(deps, chunk.r2Keys);
-		// The skipped event's payload object survives; the others are gone.
-		expect(await deps.payloads.head(victimKey)).not.toBeNull();
-		expect(await deps.payloads.head(chunk.r2Keys[0])).toBeNull();
+		expect(await deps.payloads.head(other.r2Key)).toBeNull();
 	});
 });
