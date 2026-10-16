@@ -21,7 +21,8 @@ export type AuditAction =
 	| "user.created"
 	| "user.role_changed"
 	| "user.disabled"
-	| "user.enabled";
+	| "user.enabled"
+	| "settings.updated";
 
 const SENSITIVE_KEY = /secret|token|password/i;
 

@@ -60,9 +60,12 @@ export function eventRoutes() {
 					latest_delivery: d
 						? {
 								id: d.id,
+								destination_id: d.destinationId,
 								kind: d.kind,
 								status: d.status,
 								attempt_count: d.attemptCount,
+								last_http_status: d.lastHttpStatus,
+								next_attempt_at: d.nextAttemptAt,
 							}
 						: null,
 				};
