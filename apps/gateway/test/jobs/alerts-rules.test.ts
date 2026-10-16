@@ -133,6 +133,31 @@ describe("new_dead (M5-13)", () => {
 	});
 });
 
+describe("new_dead scan bounds (Minor 6)", () => {
+	it("stops at DEAD_MAX_DESTINATIONS and the cursor only passes what was read", async () => {
+		const { DEAD_MAX_DESTINATIONS, scanDead } = await import(
+			"../../src/jobs/alerts/rules"
+		);
+		const from = NOW + 50_000_000; // clear of rows other tests leave behind
+		const until = from + 10_000;
+		const ids: string[] = [];
+		for (let i = 0; i <= DEAD_MAX_DESTINATIONS; i++) {
+			const p = await seedPipeline(deps);
+			const { deliveryId } = await seedDelivery(deps, p, {
+				status: "dead",
+				delivery: { completedAt: from + 1 + i },
+			});
+			ids.push(deliveryId);
+		}
+		const first = await scanDead(deps.db, from, until);
+		expect(first.rows).toHaveLength(DEAD_MAX_DESTINATIONS);
+		expect(first.to).toBe(from + DEAD_MAX_DESTINATIONS);
+		const second = await scanDead(deps.db, first.to, until);
+		expect(second.rows.map((r) => r.id)).toEqual([ids.at(-1)]);
+		expect(second.to).toBe(until);
+	});
+});
+
 describe("d1_storage hysteresis", () => {
 	it("opens at d1_warn_pct and resolves only below d1_warn_pct − 5", async () => {
 		const GB = 1024 ** 3;

@@ -13,6 +13,8 @@ export type AlertKey = {
 export type ActiveAlert = AlertKey & {
 	projectId: string | null;
 	details: Record<string, unknown>;
+	/** new_dead only: kept active by the quiet period, with no fresh dead deliveries this run. */
+	carryOver?: boolean;
 };
 export type OpenAlertRow = typeof alerts.$inferSelect;
 export type ChannelRoute = {

@@ -196,4 +196,47 @@ describe("GET /overview", () => {
 		}>();
 		expect(body.open_alerts).toEqual({ count: 2, by_rule: { new_dead: 2 } });
 	});
+
+	it("scopes open alerts to the project and always includes global ones", async () => {
+		const deps = testDeps();
+		await resetAlerts(deps);
+		const open = (
+			id: string,
+			rule: "new_dead" | "d1_storage",
+			projectId: string | null,
+		) => ({
+			id,
+			rule,
+			resourceType: projectId ? ("destination" as const) : ("system" as const),
+			resourceId: id,
+			projectId,
+			status: "open" as const,
+			openedAt: 1,
+			detailsJson: "{}",
+		});
+		await deps.db
+			.insert(alerts)
+			.values([
+				open("alr_pa", "new_dead", "prj_a"),
+				open("alr_pb", "new_dead", "prj_b"),
+				open("alr_sys", "d1_storage", null),
+			]);
+		const api = await adminApp(deps);
+		const get = async (q: string) =>
+			(
+				await (
+					await api.request("GET", `/overview?range=24h${q}`)
+				).json<{
+					open_alerts: { count: number; by_rule: Record<string, number> };
+				}>()
+			).open_alerts;
+		expect(await get("&project_id=prj_a")).toEqual({
+			count: 2,
+			by_rule: { new_dead: 1, d1_storage: 1 },
+		});
+		expect(await get("")).toEqual({
+			count: 3,
+			by_rule: { new_dead: 2, d1_storage: 1 },
+		});
+	});
 });

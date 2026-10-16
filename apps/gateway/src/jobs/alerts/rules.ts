@@ -9,6 +9,9 @@ export const DEAD_CURSOR_KEY = "alerts.dead_cursor";
 /** Room for clock skew between isolates stamping completed_at (plan deviation). */
 export const DEAD_CURSOR_LAG_MS = 10_000;
 const NEWEST_IDS = 5;
+/** Per-run bounds of the new_dead scan (Minor 6); the rest is read next run. */
+export const DEAD_SCAN_LIMIT = 1_000;
+export const DEAD_MAX_DESTINATIONS = 100;
 
 export async function consecutiveFailures(
 	db: Db,
@@ -75,20 +78,12 @@ export async function newDead(
 	now: number,
 ) {
 	const from = await readDeadCursor(db);
-	const to = now - DEAD_CURSOR_LAG_MS;
+	let to = now - DEAD_CURSOR_LAG_MS;
 	const active = new Map<string, ActiveAlert>();
 	if (from !== null && to > from) {
-		const rows = await db.all<{
-			id: string;
-			destination_id: string;
-			project_id: string;
-			completed_at: number;
-		}>(sql`
-			SELECT d.id, d.destination_id, dst.project_id, d.completed_at
-			FROM deliveries d JOIN destinations dst ON dst.id = d.destination_id
-			WHERE d.status = 'dead' AND d.completed_at > ${from} AND d.completed_at <= ${to}
-			ORDER BY d.completed_at DESC, d.id DESC`);
-		for (const r of rows) {
+		const scanned = await scanDead(db, from, to);
+		to = scanned.to;
+		for (const r of scanned.rows) {
 			const a = active.get(r.destination_id) ?? {
 				rule: "new_dead" as const,
 				resourceType: "destination" as const,
@@ -119,10 +114,80 @@ export async function newDead(
 				resourceId: o.resourceId,
 				projectId: o.projectId,
 				details,
+				carryOver: true,
 			});
 		}
 	}
 	return { active: [...active.values()], cursor: { from, to } };
+}
+
+type DeadRow = {
+	id: string;
+	destination_id: string;
+	project_id: string;
+	completed_at: number;
+};
+
+const deadRows = (db: Db, where: ReturnType<typeof sql>, limit?: number) =>
+	db.all<DeadRow>(sql`
+		SELECT d.id, d.destination_id, dst.project_id, d.completed_at
+		FROM deliveries d JOIN destinations dst ON dst.id = d.destination_id
+		WHERE d.status = 'dead' AND ${where}
+		ORDER BY d.completed_at ASC, d.id ASC
+		${limit === undefined ? sql`` : sql`LIMIT ${limit}`}`);
+
+/**
+ * Oldest first, at most DEAD_SCAN_LIMIT rows and DEAD_MAX_DESTINATIONS
+ * destinations per run. When the window is cut short, `to` stops just before
+ * the first unprocessed millisecond, so the cursor only passes rows this run
+ * counted and the rest are read next minute. Returns newest first.
+ */
+export async function scanDead(
+	db: Db,
+	from: number,
+	to: number,
+): Promise<{ rows: DeadRow[]; to: number }> {
+	const rows = await deadRows(
+		db,
+		sql`d.completed_at > ${from} AND d.completed_at <= ${to}`,
+		DEAD_SCAN_LIMIT + 1,
+	);
+	let cut = Math.min(rows.length, DEAD_SCAN_LIMIT);
+	const seen = new Set<string>();
+	for (let i = 0; i < cut; i++) {
+		if (seen.has(rows[i].destination_id)) continue;
+		if (seen.size === DEAD_MAX_DESTINATIONS) {
+			cut = i;
+			break;
+		}
+		seen.add(rows[i].destination_id);
+	}
+	if (cut === rows.length) return { rows: rows.reverse(), to };
+	const boundary = rows[cut].completed_at;
+	const kept = rows.slice(0, cut).filter((r) => r.completed_at < boundary);
+	if (kept.length > 0) return { rows: kept.reverse(), to: boundary - 1 };
+	// Every scanned row shares one millisecond: take it whole so the cursor still moves.
+	const tied = await deadRows(db, sql`d.completed_at = ${boundary}`);
+	return { rows: tied.reverse(), to: boundary };
+}
+
+/** Never moves the cursor backwards, even when an older run writes last. */
+export function deadCursorStatement(db: Db, at: number, now: number) {
+	return db
+		.insert(settings)
+		.values({
+			key: DEAD_CURSOR_KEY,
+			valueJson: JSON.stringify({ at }),
+			updatedAt: now,
+		})
+		.onConflictDoUpdate({
+			target: settings.key,
+			set: {
+				valueJson: sql`excluded.value_json`,
+				updatedAt: sql`excluded.updated_at`,
+			},
+			setWhere: sql`coalesce(json_extract(${settings.valueJson}, '$.at'), -1) < ${at}`,
+		});
 }
 
 /** `meta.size_after` of any query is the database size in bytes. */

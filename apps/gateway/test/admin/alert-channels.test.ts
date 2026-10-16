@@ -129,6 +129,28 @@ describe("alert channels API (spec §6.5)", () => {
 		);
 	});
 
+	it("reports an unreadable config instead of failing the test request", async () => {
+		vi.mocked(deps.fetch).mockClear();
+		const app = await adminApp(deps);
+		const ch = await (
+			await app.request("POST", "/alert-channels", {
+				name: "ops",
+				config: { type: "discord", url: URL1 },
+			})
+		).json<AlertChannel>();
+		await deps.db
+			.update(alertChannels)
+			.set({ configEnc: "garbage" })
+			.where(eq(alertChannels.id, ch.id));
+		const res = await app.request("POST", `/alert-channels/${ch.id}/test`);
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({
+			ok: false,
+			error: "config_unreadable",
+		});
+		expect(deps.fetch).not.toHaveBeenCalled();
+	});
+
 	it("deletes a channel and its notifications", async () => {
 		const app = await adminApp(deps);
 		const ch = await (

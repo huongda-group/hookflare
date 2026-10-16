@@ -1,5 +1,5 @@
 import type { AlertChannelConfig, AlertRule } from "@hookflare/shared";
-import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, or, type SQL, sql } from "drizzle-orm";
 import {
 	formatAlertMessage,
 	openChannelConfig,
@@ -24,13 +24,22 @@ import {
 	projects,
 } from "../../core/db/schema";
 import type { Logger } from "../../core/log";
-import { loadAlertRules, upsertSetting } from "../../core/settings";
+import { loadAlertRules } from "../../core/settings";
 import type { Deps } from "../../deps";
-import { DEAD_CURSOR_KEY, evaluateRules } from "./rules";
+import { deadCursorStatement, evaluateRules } from "./rules";
 
 export const SEND_BATCH = 50;
+export const SEND_CONCURRENCY = 10;
+/**
+ * No new send starts once a run has spent this long; with the 5 s send
+ * timeout every claim settles well inside CLAIM_STALE_MS, so the next
+ * minute's run never reclaims (and re-sends) a row this run still owns.
+ */
+export const SEND_BUDGET_MS = 30_000;
 export const MAX_TRIES = 3;
 export const CLAIM_STALE_MS = 60_000;
+/** Per run and per kind (opens, resolves, reminders); the rest wait for the next run. */
+export const MAX_CHANGES_PER_RUN = 100;
 
 export type AlertsRunResult = {
 	opened: number;
@@ -67,21 +76,18 @@ export async function runAlerts(
 		failed: 0,
 	};
 
-	// 2. Open (and, for new_dead, refresh details of incidents that are already open).
-	const cursorStmt = upsertSetting(
-		deps.db,
-		DEAD_CURSOR_KEY,
-		{ at: deadCursor.to },
-		now,
-	);
-	const deadStmts: BatchItem[] = [cursorStmt];
+	// 2. Open (and, for new_dead, add fresh dead deliveries to incidents that are already open).
+	// new_dead is bounded by the rule's own scan (≤ 100 destinations per run).
+	const deadStmts: BatchItem[] = [
+		deadCursorStatement(deps.db, deadCursor.to, now),
+	];
+	let deadOpened = 0;
+	let opens = 0;
 	for (const a of active) {
 		const existing = openByKey.get(keyOf(a));
 		if (existing) {
-			if (
-				a.rule === "new_dead" &&
-				JSON.stringify(a.details) !== existing.detailsJson
-			) {
+			// A carry-over only keeps the incident active; a fresh batch is always counted.
+			if (a.rule === "new_dead" && !a.carryOver) {
 				deadStmts.push(
 					updateDetailsStatement(
 						deps.db,
@@ -99,18 +105,23 @@ export async function runAlerts(
 			matchChannels(routes, a.rule, a.projectId),
 		);
 		// The dead cursor moves in the same batch as the new_dead opens (spec §6.2).
-		if (a.rule === "new_dead") deadStmts.push(...stmts);
-		else await runSafely(deps, logger, stmts, a, () => result.opened++);
+		if (a.rule === "new_dead") {
+			deadStmts.push(...stmts);
+			deadOpened++;
+		} else if (opens < MAX_CHANGES_PER_RUN) {
+			opens++;
+			await runSafely(deps, logger, stmts, a, () => result.opened++);
+		}
 	}
 	await runSafely(deps, logger, deadStmts, null, () => {
-		result.opened += active.filter(
-			(a) => a.rule === "new_dead" && !openByKey.has(keyOf(a)),
-		).length;
+		result.opened += deadOpened;
 	});
 
 	// 3. Resolve.
+	let resolves = 0;
 	for (const o of open) {
 		if (activeByKey.has(keyOf(o))) continue;
+		if (resolves++ >= MAX_CHANGES_PER_RUN) break;
 		const stmts = resolveAlertStatements(
 			deps.db,
 			o,
@@ -122,10 +133,12 @@ export async function runAlerts(
 
 	// 4. Remind.
 	if (rules.reminder_s > 0) {
+		let reminds = 0;
 		for (const o of open) {
 			if (!activeByKey.has(keyOf(o))) continue;
 			const last = o.lastNotifiedAt ?? o.openedAt;
 			if (last > now - rules.reminder_s * 1000) continue;
+			if (reminds++ >= MAX_CHANGES_PER_RUN) break;
 			const stmts = remindAlertStatements(
 				deps.db,
 				o,
@@ -147,18 +160,17 @@ function mergeDead(
 	previousJson: string,
 	next: Record<string, unknown>,
 ): Record<string, unknown> {
-	const prev = JSON.parse(previousJson) as {
-		new_dead?: number;
-		delivery_ids?: string[];
-	};
+	let prev: { new_dead?: number; delivery_ids?: string[] } = {};
+	try {
+		prev = JSON.parse(previousJson) as typeof prev;
+	} catch {
+		// Corrupt stored details: start over from this batch.
+	}
 	const n = next as {
 		new_dead: number;
 		delivery_ids: string[];
 		last_dead_at: number;
 	};
-	// Quiet-period carry-over returns the stored details unchanged.
-	if (!Array.isArray(n.delivery_ids) || n.new_dead === prev.new_dead)
-		return next;
 	return {
 		new_dead: (prev.new_dead ?? 0) + n.new_dead,
 		delivery_ids: [...n.delivery_ids, ...(prev.delivery_ids ?? [])].slice(0, 5),
@@ -185,13 +197,21 @@ async function runSafely(
 	}
 }
 
-/** M5-14: claim, send with a 5 s timeout, and settle each row on its own. */
+type Claimed = typeof alertNotifications.$inferSelect;
+type SendOutcome = { ok: true } | { ok: false; error: string; final?: boolean };
+
+/**
+ * M5-14: claim, send with bounded concurrency and a 5 s timeout, and settle
+ * each row on its own. Every settle is fenced by this run's claim
+ * (status = 'sending' AND claimed_at = claimedAt), so a run whose claim was
+ * taken over never overwrites the newer run's result.
+ */
 export async function sendPendingNotifications(
 	deps: Deps,
 	logger: Logger,
 ): Promise<{ sent: number; failed: number }> {
-	const now = deps.now();
-	const stale = now - CLAIM_STALE_MS;
+	const claimedAt = deps.now();
+	const stale = claimedAt - CLAIM_STALE_MS;
 	// A claim that died after its last try can never be sent again.
 	await deps.db
 		.update(alertNotifications)
@@ -205,7 +225,7 @@ export async function sendPendingNotifications(
 		);
 	const claimed = await deps.db
 		.update(alertNotifications)
-		.set({ status: "sending", claimedAt: now, tries: sql`tries + 1` })
+		.set({ status: "sending", claimedAt, tries: sql`tries + 1` })
 		.where(
 			inArray(
 				alertNotifications.id,
@@ -229,32 +249,83 @@ export async function sendPendingNotifications(
 			),
 		)
 		.returning();
-	let sent = 0;
-	let failed = 0;
-	for (const n of claimed) {
-		const outcome = await sendOne(deps, n.alertId, n.channelId, n.kind);
+	claimed.sort((a, b) => a.createdAt - b.createdAt);
+	const mine = (extra: SQL) =>
+		and(
+			extra,
+			eq(alertNotifications.status, "sending"),
+			eq(alertNotifications.claimedAt, claimedAt),
+		);
+	const totals = { sent: 0, failed: 0 };
+	for (let i = 0; i < claimed.length; i += SEND_CONCURRENCY) {
+		if (deps.now() - claimedAt >= SEND_BUDGET_MS) {
+			// Out of time: hand the rest back untouched; they were never tried.
+			const rest = claimed.slice(i).map((n) => n.id);
+			try {
+				await deps.db
+					.update(alertNotifications)
+					.set({
+						status: "pending",
+						claimedAt: null,
+						tries: sql`tries - 1`,
+					})
+					.where(mine(inArray(alertNotifications.id, rest)) as SQL);
+			} catch (err) {
+				logger.error("alerts.release_failed", { error: String(err) });
+			}
+			break;
+		}
+		await Promise.all(
+			claimed
+				.slice(i, i + SEND_CONCURRENCY)
+				.map((n) => sendAndSettle(deps, logger, n, mine, totals)),
+		);
+	}
+	return totals;
+}
+
+async function sendAndSettle(
+	deps: Deps,
+	logger: Logger,
+	n: Claimed,
+	mine: (extra: SQL) => SQL | undefined,
+	totals: { sent: number; failed: number },
+) {
+	let outcome: SendOutcome;
+	try {
+		outcome = await sendOne(deps, n.alertId, n.channelId, n.kind);
+	} catch (err) {
+		outcome = { ok: false, error: String(err).slice(0, 200) };
+	}
+	const where = mine(eq(alertNotifications.id, n.id)) as SQL;
+	try {
 		if (outcome.ok) {
-			sent++;
+			totals.sent++;
 			await deps.db
 				.update(alertNotifications)
 				.set({ status: "sent", sentAt: deps.now(), lastError: null })
-				.where(eq(alertNotifications.id, n.id));
-		} else {
-			const final = n.tries >= MAX_TRIES;
-			if (final) failed++;
-			logger.warn("alerts.send_failed", {
-				notification_id: n.id,
-				channel_id: n.channelId,
-				tries: n.tries,
-				error: outcome.error,
-			});
-			await deps.db
-				.update(alertNotifications)
-				.set({ status: final ? "failed" : "pending", lastError: outcome.error })
-				.where(eq(alertNotifications.id, n.id));
+				.where(where);
+			return;
 		}
+		const final = outcome.final === true || n.tries >= MAX_TRIES;
+		if (final) totals.failed++;
+		logger.warn("alerts.send_failed", {
+			notification_id: n.id,
+			channel_id: n.channelId,
+			tries: n.tries,
+			error: outcome.error,
+		});
+		await deps.db
+			.update(alertNotifications)
+			.set({ status: final ? "failed" : "pending", lastError: outcome.error })
+			.where(where);
+	} catch (err) {
+		// The claim stays; the next run past CLAIM_STALE_MS takes it over.
+		logger.error("alerts.settle_failed", {
+			notification_id: n.id,
+			error: String(err),
+		});
 	}
-	return { sent, failed };
 }
 
 async function sendOne(
@@ -262,7 +333,7 @@ async function sendOne(
 	alertId: string,
 	channelId: string,
 	kind: "opened" | "reminder" | "resolved",
-) {
+): Promise<SendOutcome> {
 	const [row] = await deps.db
 		.select({
 			alert: alerts,
@@ -281,7 +352,9 @@ async function sendOne(
 		)
 		.leftJoin(projects, eq(projects.id, alerts.projectId))
 		.where(eq(alerts.id, alertId));
-	if (!row) return { ok: false as const, error: "channel_or_alert_missing" };
+	if (!row) return { ok: false, error: "channel_or_alert_missing" };
+	if (!row.channel.enabled)
+		return { ok: false, error: "channel_disabled", final: true };
 	let config: AlertChannelConfig;
 	try {
 		config = await openChannelConfig(
@@ -290,7 +363,7 @@ async function sendOne(
 			row.channel.configEnc,
 		);
 	} catch {
-		return { ok: false as const, error: "config_unreadable" };
+		return { ok: false, error: "config_unreadable" };
 	}
 	const a = row.alert;
 	const base = deps.env.PUBLIC_BASE_URL?.replace(/\/$/, "");

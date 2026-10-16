@@ -117,6 +117,41 @@ describe("admin destinations", () => {
 		]);
 	});
 
+	it("resets consecutive failures on resume and on a URL change only", async () => {
+		const deps = testDeps();
+		const { destination } = await seedPipeline(deps);
+		const api = await adminApp(deps, { role: "admin" });
+		const failures = async () =>
+			(
+				await deps.db
+					.select({ n: destinations.consecutiveFailures })
+					.from(destinations)
+					.where(eq(destinations.id, destination.id))
+			)[0]?.n;
+		const fail = (n: number) =>
+			deps.db
+				.update(destinations)
+				.set({ consecutiveFailures: n })
+				.where(eq(destinations.id, destination.id));
+
+		await fail(7);
+		await api.request("POST", `/destinations/${destination.id}/pause`);
+		expect(await failures()).toBe(7);
+		await api.request("POST", `/destinations/${destination.id}/resume`);
+		expect(await failures()).toBe(0);
+
+		await fail(4);
+		await api.request("PATCH", `/destinations/${destination.id}`, {
+			name: "renamed",
+		});
+		expect(await failures()).toBe(4);
+		const res = await api.request("PATCH", `/destinations/${destination.id}`, {
+			url: "https://hooks.example.com/services/moved",
+		});
+		expect(res.status).toBe(200);
+		expect(await failures()).toBe(0);
+	});
+
 	it("does not audit a pause of an already paused destination", async () => {
 		const deps = testDeps();
 		const { destination } = await seedPipeline(deps, {

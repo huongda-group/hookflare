@@ -17,10 +17,15 @@ import {
 import { createLogger } from "../../src/core/log";
 import { clearSettingsCache } from "../../src/core/settings";
 import type { Deps } from "../../src/deps";
-import { runAlerts } from "../../src/jobs/alerts/job";
+import {
+	MAX_CHANGES_PER_RUN,
+	runAlerts,
+	sendPendingNotifications,
+} from "../../src/jobs/alerts/job";
+import { DEAD_CURSOR_KEY } from "../../src/jobs/alerts/rules";
 import { resetAlerts } from "../helpers/alerts";
 import { testDeps } from "../helpers/deps";
-import { seedPipeline } from "../helpers/seed";
+import { seedDelivery, seedPipeline } from "../helpers/seed";
 
 const logger = createLogger({ LOG_LEVEL: "error" });
 const DISCORD = {
@@ -339,5 +344,233 @@ describe("runAlerts", () => {
 		expect((await incidents(deps, p.destination.id))[0].status).toBe(
 			"resolved",
 		);
+	});
+
+	it("counts every fresh new_dead batch, even equal-sized ones (I4)", async () => {
+		const { deps, advance } = clockDeps(T);
+		await runAlerts(deps, logger); // initialises the cursor at T − 10 s
+		const p = await seedPipeline(deps);
+		const a = await seedDelivery(deps, p, {
+			status: "dead",
+			delivery: { completedAt: T - 5_000 },
+		});
+		advance(60_000);
+		await runAlerts(deps, logger);
+		const b = await seedDelivery(deps, p, {
+			status: "dead",
+			delivery: { completedAt: T + 55_000 },
+		});
+		advance(60_000);
+		await runAlerts(deps, logger);
+		const [inc] = await incidents(deps, p.destination.id);
+		expect(JSON.parse(inc.detailsJson)).toEqual({
+			new_dead: 2,
+			delivery_ids: [b.deliveryId, a.deliveryId],
+			last_dead_at: T + 55_000,
+		});
+		advance(60_000);
+		await runAlerts(deps, logger); // quiet run
+		const [same] = await incidents(deps, p.destination.id);
+		expect(same.status).toBe("open");
+		expect(same.detailsJson).toBe(inc.detailsJson);
+	});
+
+	it("never moves the dead cursor backwards (overlapping runs)", async () => {
+		const { deps } = clockDeps(T);
+		await deps.db.insert(settings).values({
+			key: DEAD_CURSOR_KEY,
+			valueJson: JSON.stringify({ at: T + 100_000 }),
+			updatedAt: 1,
+		});
+		await runAlerts(deps, logger);
+		const [cursor] = await deps.db
+			.select()
+			.from(settings)
+			.where(eq(settings.key, DEAD_CURSOR_KEY));
+		expect(JSON.parse(cursor.valueJson)).toEqual({ at: T + 100_000 });
+	});
+
+	it(`opens at most ${MAX_CHANGES_PER_RUN} incidents per run and the rest next run`, async () => {
+		const { deps, advance } = clockDeps(T);
+		const ids: string[] = [];
+		for (let i = 0; i < MAX_CHANGES_PER_RUN + 3; i++) {
+			const p = await seedPipeline(deps, {
+				destination: { consecutiveFailures: 5 },
+			});
+			ids.push(p.destination.id);
+		}
+		const first = await runAlerts(deps, logger);
+		expect(first.opened).toBe(MAX_CHANGES_PER_RUN);
+		advance(60_000);
+		const second = await runAlerts(deps, logger);
+		// Other active rules in the shared database may take some of the first run's slots.
+		expect(second.opened).toBeGreaterThanOrEqual(3);
+		for (const id of ids) expect(await incidents(deps, id)).toHaveLength(1);
+	});
+});
+
+async function seedNotifications(
+	deps: Deps,
+	destinationId: string,
+	projectId: string,
+	n: number,
+) {
+	await deps.db.insert(alerts).values({
+		id: "alr_out",
+		rule: "new_dead",
+		resourceType: "destination",
+		resourceId: destinationId,
+		projectId,
+		status: "open",
+		openedAt: T,
+		detailsJson: "{}",
+	});
+	const ids: string[] = [];
+	for (let i = 0; i < n; i++) {
+		const id = `ant_${String(i).padStart(3, "0")}`;
+		ids.push(id);
+		await deps.db.insert(alertNotifications).values({
+			id,
+			alertId: "alr_out",
+			channelId: "ach_a",
+			kind: "opened",
+			status: "pending",
+			tries: 0,
+			createdAt: T + i,
+		});
+	}
+	return ids;
+}
+
+describe("sendPendingNotifications (outbox)", () => {
+	beforeEach(async () => {
+		clearSettingsCache();
+		await resetAlerts(testDeps());
+	});
+
+	it("overlapping runs with slow sends deliver each notification exactly once (I3)", async () => {
+		let now = T;
+		let overlap: Promise<unknown> | null = null;
+		let deps!: Deps;
+		const fetchImpl = vi.fn(async () => {
+			now += 2_000; // each send takes 2 s
+			// The next minute's cron fires while this run is still sending.
+			if (!overlap && now >= T + 61_000)
+				overlap = sendPendingNotifications(deps, logger);
+			await new Promise((r) => setTimeout(r, 1));
+			return new Response(null, { status: 204 });
+		});
+		deps = testDeps({
+			now: () => now,
+			fetch: fetchImpl as unknown as typeof fetch,
+		});
+		await addChannel(deps, "ach_a");
+		const p = await seedPipeline(deps);
+		const ids = await seedNotifications(
+			deps,
+			p.destination.id,
+			p.project.id,
+			45,
+		);
+		await sendPendingNotifications(deps, logger);
+		if (overlap) await overlap;
+		for (let i = 0; i < 5; i++) {
+			now += 60_000;
+			await sendPendingNotifications(deps, logger);
+		}
+		const rows = await notes(deps, "alr_out");
+		expect(rows.map((r) => r.status)).toEqual(ids.map(() => "sent"));
+		expect(rows.every((r) => r.tries === 1)).toBe(true);
+		expect(fetchImpl).toHaveBeenCalledTimes(45);
+	});
+
+	it("a stale run cannot overwrite a newer run's settle (I3)", async () => {
+		let now = T;
+		let release!: () => void;
+		const gate = new Promise<void>((r) => {
+			release = r;
+		});
+		let calls = 0;
+		const fetchImpl = vi.fn(async () => {
+			calls++;
+			if (calls === 1) {
+				await gate;
+				return new Response(null, { status: 500 });
+			}
+			return new Response(null, { status: 204 });
+		});
+		const deps = testDeps({
+			now: () => now,
+			fetch: fetchImpl as unknown as typeof fetch,
+		});
+		await addChannel(deps, "ach_a");
+		const p = await seedPipeline(deps);
+		await seedNotifications(deps, p.destination.id, p.project.id, 1);
+		const stale = sendPendingNotifications(deps, logger);
+		await vi.waitFor(() => expect(calls).toBe(1));
+		now += 5 * 60_000;
+		await sendPendingNotifications(deps, logger);
+		release();
+		await stale;
+		const [row] = await notes(deps, "alr_out");
+		expect(row).toMatchObject({ status: "sent", tries: 2 });
+	});
+
+	it("settles notifications for a disabled channel as failed without sending", async () => {
+		const fetchImpl = vi.fn(async () => new Response(null, { status: 204 }));
+		const deps = testDeps({
+			now: () => T,
+			fetch: fetchImpl as unknown as typeof fetch,
+		});
+		await addChannel(deps, "ach_a");
+		await deps.db
+			.update(alertChannels)
+			.set({ enabled: false })
+			.where(eq(alertChannels.id, "ach_a"));
+		const p = await seedPipeline(deps);
+		await seedNotifications(deps, p.destination.id, p.project.id, 1);
+		const r = await sendPendingNotifications(deps, logger);
+		expect(r).toEqual({ sent: 0, failed: 1 });
+		expect(fetchImpl).not.toHaveBeenCalled();
+		const [row] = await notes(deps, "alr_out");
+		expect(row).toMatchObject({
+			status: "failed",
+			lastError: "channel_disabled",
+		});
+	});
+
+	it("a row that throws is settled as a failed try and the loop continues", async () => {
+		const fetchImpl = vi.fn(async () => new Response(null, { status: 204 }));
+		const deps = testDeps({
+			now: () => T,
+			fetch: fetchImpl as unknown as typeof fetch,
+		});
+		await addChannel(deps, "ach_a");
+		const p = await seedPipeline(deps);
+		await seedNotifications(deps, p.destination.id, p.project.id, 2);
+		await deps.db.insert(alerts).values({
+			id: "alr_corrupt",
+			rule: "new_dead",
+			resourceType: "destination",
+			resourceId: "dst_corrupt",
+			projectId: p.project.id,
+			status: "resolved",
+			openedAt: T,
+			detailsJson: "{not json",
+		});
+		await deps.db.insert(alertNotifications).values({
+			id: "ant_corrupt",
+			alertId: "alr_corrupt",
+			channelId: "ach_a",
+			kind: "opened",
+			status: "pending",
+			tries: 0,
+			createdAt: T - 1,
+		});
+		const r = await sendPendingNotifications(deps, logger);
+		expect(r.sent).toBe(2);
+		const [bad] = await notes(deps, "alr_corrupt");
+		expect(bad).toMatchObject({ status: "pending", tries: 1 });
+		expect(bad.lastError).toBeTruthy();
 	});
 });

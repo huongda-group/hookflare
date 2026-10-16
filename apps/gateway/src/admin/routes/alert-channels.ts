@@ -158,7 +158,16 @@ export function alertChannelRoutes() {
 		const ch = await loadChannel(c, c.req.param("id"));
 		if (!ch) return c.json({ error: "not_found" }, 404);
 		const { db, env, fetch } = c.var.deps;
-		const config = await openChannelConfig(env, ch.id, ch.configEnc);
+		let config: Awaited<ReturnType<typeof openChannelConfig>>;
+		try {
+			config = await openChannelConfig(env, ch.id, ch.configEnc);
+		} catch {
+			const result: ChannelTestResult = {
+				ok: false,
+				error: "config_unreadable",
+			};
+			return c.json(result);
+		}
 		const text = formatAlertMessage({
 			kind: "test",
 			rule: null,

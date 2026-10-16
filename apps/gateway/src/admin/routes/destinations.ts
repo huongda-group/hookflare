@@ -312,6 +312,11 @@ export function destinationRoutes() {
 			...(v.rate_limit_per_s !== undefined
 				? { rateLimitPerS: v.rate_limit_per_s }
 				: {}),
+			// A new URL or a resume starts the failure streak over.
+			...((v.url !== undefined && v.url !== existing.url) ||
+			(v.status === "active" && existing.status !== "active")
+				? { consecutiveFailures: 0 }
+				: {}),
 		};
 		// Only a patch that touches backoff is validated: raised defaults must not
 		// block unrelated edits (the delivery path clamps via resolvePolicy).
@@ -462,7 +467,15 @@ export function destinationRoutes() {
 			if (existing.status === "paused") {
 				const ts = deps.now();
 				const [[transitioned]] = await deps.db.batch([
-					transitionDestinationStmt(deps.db, id, "paused", "active", ts),
+					// A fresh start: failures from before the pause must not re-trigger
+					// consecutive_failures on the first post-resume error.
+					deps.db
+						.update(destinations)
+						.set({ status: "active", consecutiveFailures: 0, updatedAt: ts })
+						.where(
+							and(eq(destinations.id, id), eq(destinations.status, "paused")),
+						)
+						.returning(),
 					auditInsertIfChanged(deps.db, {
 						actor: c.var.actor?.email ?? "",
 						at: ts,

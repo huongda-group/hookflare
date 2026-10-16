@@ -5,7 +5,7 @@ import {
 	statsQuery,
 	type TrendPoint,
 } from "@hookflare/shared";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppBindings } from "../../app";
 import { alerts } from "../../core/db/schema";
@@ -47,7 +47,19 @@ export function overviewRoutes() {
 			db
 				.select({ rule: alerts.rule, n: sql<number>`COUNT(*)` })
 				.from(alerts)
-				.where(eq(alerts.status, "open"))
+				.where(
+					and(
+						eq(alerts.status, "open"),
+						// System alerts (no project) concern every project, so a
+						// project-scoped overview still counts them.
+						q.value.project_id
+							? or(
+									eq(alerts.projectId, q.value.project_id),
+									isNull(alerts.projectId),
+								)
+							: undefined,
+					),
+				)
 				.groupBy(alerts.rule),
 		]);
 		const byHour = new Map(trend.map((t) => [t.hour, t]));
