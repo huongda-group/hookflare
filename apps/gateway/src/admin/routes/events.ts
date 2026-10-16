@@ -34,6 +34,7 @@ export function eventRoutes() {
 			sourceId: q.value.source_id,
 			destinationId: q.value.destination_id,
 			statuses: q.value.status,
+			httpStatus: q.value.http_status,
 			providerEventId: q.value.provider_event_id,
 			from: q.value.from,
 			to: q.value.to,

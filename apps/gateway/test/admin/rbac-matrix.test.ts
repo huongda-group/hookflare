@@ -1,14 +1,23 @@
 import type { Permission, Role } from "@hookflare/shared";
+import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { clearAccessKeyCache } from "../../src/admin/auth/access";
+import { settings } from "../../src/core/db/schema";
 import { ROLE_PERMISSIONS } from "../../src/core/rbac";
+import {
+	clearRetryDefaultsCache,
+	RETRY_DEFAULTS_KEY,
+} from "../../src/core/settings";
 import { adminApp } from "../helpers/admin";
 import { testDeps } from "../helpers/deps";
 import { seedDelivery, seedPipeline } from "../helpers/seed";
 
 // Each adminApp mints fresh keys under the same kid.
-beforeEach(() => {
+beforeEach(async () => {
 	clearAccessKeyCache();
+	clearRetryDefaultsCache();
+	const deps = testDeps();
+	await deps.db.delete(settings).where(eq(settings.key, RETRY_DEFAULTS_KEY));
 });
 
 type Case = {
@@ -135,6 +144,22 @@ function cases(ids: {
 			body: {},
 		},
 		{ method: "GET", path: "/audit-logs", permission: "audit.read" },
+		{ method: "GET", path: "/overview", permission: "events.read" },
+		{ method: "GET", path: "/destinations/stats", permission: "events.read" },
+		{ method: "GET", path: "/settings", permission: "events.read" },
+		{
+			method: "PATCH",
+			path: "/settings",
+			permission: "settings.manage",
+			body: {
+				retry_defaults: {
+					timeout_ms: 10_000,
+					max_attempts: 20,
+					backoff_base_s: 30,
+					backoff_max_s: 21_600,
+				},
+			},
+		},
 	];
 }
 

@@ -1,6 +1,8 @@
-import type { EventSummary } from "@hookflare/shared";
+import type { EventSummary, WebhookEvent } from "@hookflare/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { clearAccessKeyCache } from "../../src/admin/auth/access";
+import { deliveries } from "../../src/core/db/schema";
+import { newId } from "../../src/core/ids";
 import { createLogger } from "../../src/core/log";
 import { clearSsrfCache } from "../../src/core/ssrf";
 import { processDelivery } from "../../src/delivery/consumer";
@@ -184,5 +186,84 @@ describe("GET /events/:id/deliveries", () => {
 		expect(
 			(await api.request("GET", "/events/evt_missing/deliveries")).status,
 		).toBe(404);
+	});
+});
+
+describe("M4 additions", () => {
+	it("filters by http_status, alone and combined with status", async () => {
+		const deps = testDeps();
+		const p = await seedPipeline(deps);
+		const gone = await seedDelivery(deps, p, {
+			status: "failed_final",
+			delivery: { lastHttpStatus: 410 },
+		});
+		const retry = await seedDelivery(deps, p, {
+			status: "retrying",
+			delivery: { lastHttpStatus: 410, nextAttemptAt: deps.now() + 60_000 },
+		});
+		await seedDelivery(deps, p, {
+			status: "delivered",
+			delivery: { lastHttpStatus: 200 },
+		});
+		const api = await adminApp(deps, { role: "viewer" });
+		const ids = async (q: string) =>
+			(
+				await (
+					await api.request("GET", `/events?source_id=${p.source.id}${q}`)
+				).json<{ data: EventSummary[] }>()
+			).data.map((e) => e.id);
+		expect((await ids("&http_status=410")).sort()).toEqual(
+			[gone.eventId, retry.eventId].sort(),
+		);
+		expect(await ids("&http_status=410&status=retrying")).toEqual([
+			retry.eventId,
+		]);
+	});
+
+	it("returns destination, HTTP status, and next retry in latest_delivery", async () => {
+		const deps = testDeps();
+		const p = await seedPipeline(deps);
+		const next = deps.now() + 60_000;
+		const d = await seedDelivery(deps, p, {
+			status: "retrying",
+			delivery: { lastHttpStatus: 503, nextAttemptAt: next, attemptCount: 2 },
+		});
+		const api = await adminApp(deps, { role: "viewer" });
+		const page = await (
+			await api.request("GET", `/events?source_id=${p.source.id}`)
+		).json<{ data: EventSummary[] }>();
+		expect(page.data[0]?.latest_delivery).toEqual({
+			id: d.deliveryId,
+			destination_id: p.destination.id,
+			kind: "initial",
+			status: "retrying",
+			attempt_count: 2,
+			last_http_status: 503,
+			next_attempt_at: next,
+		});
+	});
+
+	it("returns created_by on event deliveries", async () => {
+		const deps = testDeps();
+		const p = await seedPipeline(deps);
+		const d = await seedDelivery(deps, p, { status: "dead" });
+		await deps.db.insert(deliveries).values({
+			id: newId("dlv", deps.now() + 5),
+			eventId: d.eventId,
+			destinationId: p.destination.id,
+			projectId: p.project.id,
+			kind: "replay",
+			status: "queued",
+			createdBy: "ops@example.com",
+			createdAt: deps.now() + 5,
+		});
+		const api = await adminApp(deps, { role: "viewer" });
+		const event = await (
+			await api.request("GET", `/events/${d.eventId}`)
+		).json<WebhookEvent>();
+		expect(event.deliveries.map((x) => x.created_by)).toEqual([
+			null,
+			"ops@example.com",
+		]);
 	});
 });
