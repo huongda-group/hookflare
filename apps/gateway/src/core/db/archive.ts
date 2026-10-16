@@ -45,7 +45,7 @@ export async function eligibleDays(
 	c: Cutoffs,
 ): Promise<{ dayStart: number; count: number }[]> {
 	return db.all<{ dayStart: number; count: number }>(sql`
-		SELECT (e.received_at / ${DAY_MS}) * ${DAY_MS} AS dayStart, COUNT(*) AS count
+		SELECT CAST(e.received_at / ${DAY_MS} AS INTEGER) * ${DAY_MS} AS dayStart, COUNT(*) AS count
 		FROM webhook_events e
 		WHERE e.archive_batch_id IS NULL AND ${eligibleSql(c, "e")}
 		GROUP BY dayStart ORDER BY dayStart`);
