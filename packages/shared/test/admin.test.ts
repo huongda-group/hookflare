@@ -279,6 +279,23 @@ describe("M3 schemas", () => {
 				.email,
 		).toBe("ops@example.com");
 	});
+
+	it("accepts service-token identities normalized", () => {
+		expect(
+			createUserRequest.parse({ email: "SVC:Ab.Access", role: "operator" })
+				.email,
+		).toBe("svc:ab.access");
+	});
+
+	it("rejects bare and spaced svc identities", () => {
+		expect(
+			createUserRequest.safeParse({ email: "svc:", role: "operator" }).success,
+		).toBe(false);
+		expect(
+			createUserRequest.safeParse({ email: "svc:a b", role: "operator" })
+				.success,
+		).toBe(false);
+	});
 });
 
 describe("M4 contracts", () => {

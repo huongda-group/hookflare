@@ -315,6 +315,19 @@ const cursor = z.string().max(512).optional();
 /** Query flags arrive as strings. */
 const queryBool = z.enum(["true", "false"]).transform((v) => v === "true");
 const email = z.string().trim().toLowerCase().pipe(z.email().max(254));
+
+/** Service-token identities (`svc:`) authenticate like users (§6.1). */
+export function isServiceIdentity(id: string): boolean {
+	return id.startsWith("svc:");
+}
+
+const serviceIdentity = z
+	.string()
+	.trim()
+	.toLowerCase()
+	.regex(/^svc:[a-z0-9._-]{1,200}$/);
+/** Either a user email or a service-token identity. */
+export const userId = z.union([email, serviceIdentity]);
 const graceHours = z.number().int().min(0).max(168).default(24);
 
 /** `status` and `destination_id`-style filters may repeat (`?status=a&status=b`). */
@@ -348,7 +361,7 @@ export const failuresQuery = z.object({
 });
 
 export const auditLogQuery = z.object({
-	actor_email: email.optional(),
+	actor_email: userId.optional(),
 	resource_type: z.string().min(1).max(50).optional(),
 	resource_id: z.string().min(1).max(64).optional(),
 	action: z.string().min(1).max(100).optional(),
@@ -390,7 +403,7 @@ export const rotateDestinationSecretRequest = z.strictObject({
 export const operateRequest = z.strictObject({ ...optionalReason });
 
 export const createUserRequest = z.strictObject({
-	email,
+	email: userId,
 	role: z.enum(ROLES),
 	...optionalReason,
 });
