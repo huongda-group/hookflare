@@ -2,7 +2,12 @@ import type { Permission, Role } from "@hookflare/shared";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { clearAccessKeyCache } from "../../src/admin/auth/access";
-import { alertChannels, alerts, settings } from "../../src/core/db/schema";
+import {
+	alertChannels,
+	alerts,
+	archiveParts,
+	settings,
+} from "../../src/core/db/schema";
 import { newId } from "../../src/core/ids";
 import { ROLE_PERMISSIONS } from "../../src/core/rbac";
 import {
@@ -10,6 +15,7 @@ import {
 	RETRY_DEFAULTS_KEY,
 } from "../../src/core/settings";
 import { adminApp } from "../helpers/admin";
+import { seedBatch } from "../helpers/archive";
 import { testDeps } from "../helpers/deps";
 import { seedDelivery, seedPipeline } from "../helpers/seed";
 
@@ -37,6 +43,7 @@ function cases(ids: {
 	delivery: string;
 	alert: string;
 	channel: string;
+	archive: string;
 }): Case[] {
 	return [
 		{ method: "GET", path: "/projects", permission: "events.read" },
@@ -180,6 +187,23 @@ function cases(ids: {
 			permission: "settings.manage",
 		},
 		{ method: "GET", path: "/destinations/stats", permission: "events.read" },
+		{ method: "GET", path: "/archives", permission: "events.read" },
+		{
+			method: "GET",
+			path: "/archives/preview?hot_retention_days=30&failed_retention_days=90",
+			permission: "settings.manage",
+		},
+		{
+			method: "GET",
+			path: `/archives/${ids.archive}/parts/1`,
+			permission: "payload.read",
+		},
+		{
+			method: "POST",
+			path: "/archives/run",
+			permission: "settings.manage",
+			body: {},
+		},
 		{ method: "GET", path: "/settings", permission: "events.read" },
 		{
 			method: "PATCH",
@@ -227,6 +251,22 @@ describe("RBAC matrix (spec §6.2–6.3)", () => {
 				openedAt: now,
 				detailsJson: "{}",
 			});
+			const archiveBatch = await seedBatch(deps, {
+				status: "verified",
+				withFiles: true,
+			});
+			const archiveKey = `archive/2026/01/02/${archiveBatch.id}/part-0001.ndjson.gz`;
+			await deps.payloads.put(archiveKey, new Uint8Array([31, 139, 8]));
+			await deps.db.insert(archiveParts).values({
+				batchId: archiveBatch.id,
+				partNo: 1,
+				r2Key: archiveKey,
+				itemCount: 1,
+				bytes: 3,
+				sha256: null,
+				firstId: "evt_a",
+				lastId: "evt_a",
+			});
 			const api = await adminApp(deps, { role });
 			for (const k of cases({
 				project: p.project.id,
@@ -236,6 +276,7 @@ describe("RBAC matrix (spec §6.2–6.3)", () => {
 				delivery: deliveryId,
 				alert: alertId,
 				channel: channelId,
+				archive: archiveBatch.id,
 			})) {
 				const res = await api.request(k.method, k.path, k.body);
 				const allowed = ROLE_PERMISSIONS[role].includes(k.permission);

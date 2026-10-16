@@ -71,6 +71,7 @@ export const server = setupServer(
 		"/users",
 		"/audit-logs",
 		"/alerts",
+		"/archives",
 	].map((p) => http.get(apiUrl(p), () => HttpResponse.json(empty))),
 	http.get(apiUrl("/alert-channels"), () => HttpResponse.json({ data: [] })),
 	http.get(apiUrl("/destinations/stats"), () =>

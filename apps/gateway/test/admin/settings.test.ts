@@ -6,7 +6,9 @@ import {
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { clearAccessKeyCache } from "../../src/admin/auth/access";
+import { startArchiveRun } from "../../src/core/archive-run";
 import { auditLogs, settings } from "../../src/core/db/schema";
+import { createLogger } from "../../src/core/log";
 import {
 	ALERT_RULES_SETTING,
 	clearSettingsCache,
@@ -15,7 +17,7 @@ import {
 	upsertRetryDefaults,
 } from "../../src/core/settings";
 import { adminApp, auditRows, beforeNextBatch } from "../helpers/admin";
-import { testDeps, withFailingBatch } from "../helpers/deps";
+import { fakeArchive, testDeps, withFailingBatch } from "../helpers/deps";
 
 const next = {
 	timeout_ms: 5000,
@@ -203,5 +205,23 @@ describe("PATCH /settings", () => {
 			storage: { ...DEFAULT_STORAGE_SETTINGS, archive_enabled: false },
 		});
 		expect((await ok.json<Settings>()).storage.archive_enabled).toBe(false);
+	});
+
+	it("reports the last archive run", async () => {
+		const archive = fakeArchive("running");
+		const d = testDeps({ archive });
+		await startArchiveRun(
+			d,
+			"archive-2027-01-01",
+			"cron",
+			createLogger({ LOG_LEVEL: "error" }),
+		);
+		const body = await (
+			await (await adminApp(d)).request("GET", "/settings")
+		).json<Settings>();
+		expect(body.archive_last_run).toMatchObject({
+			instance_id: "archive-2027-01-01",
+			status: "running",
+		});
 	});
 });

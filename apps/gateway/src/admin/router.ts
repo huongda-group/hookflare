@@ -3,6 +3,7 @@ import type { AppBindings } from "../app";
 import { accessMiddleware } from "./auth/access";
 import { alertChannelRoutes } from "./routes/alert-channels";
 import { alertRoutes } from "./routes/alerts";
+import { archiveRoutes } from "./routes/archives";
 import { auditLogRoutes } from "./routes/audit-logs";
 import { destinationRoutes } from "./routes/destinations";
 import { eventRoutes } from "./routes/events";
@@ -29,6 +30,7 @@ export function adminRoutes(options: { accessFetch?: typeof fetch } = {}) {
 	routes.route("/alert-channels", alertChannelRoutes());
 	routes.route("/users", userRoutes());
 	routes.route("/audit-logs", auditLogRoutes());
+	routes.route("/archives", archiveRoutes());
 	routes.route("/settings", settingsRoutes());
 	return routes;
 }

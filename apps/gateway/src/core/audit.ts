@@ -26,7 +26,9 @@ export type AuditAction =
 	| "alert_channel.created"
 	| "alert_channel.updated"
 	| "alert_channel.deleted"
-	| "alert_channel.tested";
+	| "alert_channel.tested"
+	| "archive.downloaded"
+	| "archive.run_started";
 
 const SENSITIVE_KEY = /secret|token|password/i;
 

@@ -6,6 +6,7 @@ import {
 } from "@hookflare/shared";
 import { Hono } from "hono";
 import type { AppBindings } from "../../app";
+import { readLastRun } from "../../core/archive-run";
 import { auditInsertIfChanged } from "../../core/audit";
 import {
 	ALERT_RULES_SETTING,
@@ -53,7 +54,10 @@ export function settingsRoutes() {
 		if (s.alertRules.corrupt)
 			c.var.logger.warn("settings.alert_rules_invalid", {});
 		if (s.storage.corrupt) c.var.logger.warn("settings.storage_invalid", {});
-		return c.json({ ...toSettings(s), archive_last_run: null });
+		return c.json({
+			...toSettings(s),
+			archive_last_run: await readLastRun(c.var.deps),
+		});
 	});
 
 	routes.patch("/", requirePermission("settings.manage"), async (c) => {
@@ -120,7 +124,10 @@ export function settingsRoutes() {
 		);
 		if (conflict) return c.json({ error: "conflict" }, 409);
 		clearSettingsCache();
-		return c.json(toSettings(await readAll(db)));
+		return c.json({
+			...toSettings(await readAll(db)),
+			archive_last_run: await readLastRun(c.var.deps),
+		});
 	});
 
 	return routes;
