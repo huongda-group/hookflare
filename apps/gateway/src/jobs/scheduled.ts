@@ -1,6 +1,7 @@
 import { startArchiveRun } from "../core/archive-run";
 import { startBackupRun } from "../core/backup-run";
-import { createLogger } from "../core/log";
+import { beat, type JobName } from "../core/heartbeat";
+import { createLogger, type Logger } from "../core/log";
 import { readSetting, STORAGE_SETTING } from "../core/settings";
 import type { Deps } from "../deps";
 import { runAlerts } from "./alerts/job";
@@ -13,12 +14,26 @@ export const ROLLUP_CRON = "*/5 * * * *";
 export const ARCHIVE_CRON = "0 3 * * *";
 export const BACKUP_CRON = "0 20 * * *";
 
+/** A heartbeat must never fail the job: beat already swallows, this logs. */
+async function beatSafe(
+	deps: Deps,
+	logger: Logger,
+	job: JobName,
+): Promise<void> {
+	try {
+		await beat(deps.db, job, deps.now());
+	} catch (err) {
+		logger.error("heartbeat.failed", { job, error: String(err) });
+	}
+}
+
 /** Dispatches on controller.cron. */
 export async function runScheduled(cron: string, deps: Deps): Promise<void> {
 	const logger = createLogger(deps.env, { cron });
 	if (cron === RECONCILE_CRON) {
 		try {
 			logger.info("reconcile.run", await reconcile(deps));
+			await beatSafe(deps, logger, "reconcile");
 		} catch (err) {
 			// Idempotent: the next minute starts over.
 			logger.error("reconcile.failed", { error: String(err) });
@@ -26,6 +41,7 @@ export async function runScheduled(cron: string, deps: Deps): Promise<void> {
 		try {
 			const r = await runAlerts(deps, logger);
 			logger.info("alerts.run", r);
+			await beatSafe(deps, logger, "alerts");
 		} catch (err) {
 			logger.error("alerts.failed", { error: String(err) });
 		}
@@ -34,6 +50,7 @@ export async function runScheduled(cron: string, deps: Deps): Promise<void> {
 	if (cron === ROLLUP_CRON) {
 		try {
 			logger.info("rollup.run", await rollup(deps, logger));
+			await beatSafe(deps, logger, "rollup");
 		} catch (err) {
 			// Idempotent: the next run recomputes the same hours (spec M4-5).
 			logger.error("rollup.failed", { error: String(err) });
@@ -57,6 +74,7 @@ export async function runScheduled(cron: string, deps: Deps): Promise<void> {
 		const { value: storage } = await readSetting(deps.db, STORAGE_SETTING);
 		if (!storage.backup_enabled) {
 			logger.info("backup.disabled", {});
+			await beatSafe(deps, logger, "backup");
 			return;
 		}
 		try {
@@ -65,6 +83,7 @@ export async function runScheduled(cron: string, deps: Deps): Promise<void> {
 				{ instanceId: `backup-${dayOf(deps.now())}`, trigger: "cron" },
 				logger,
 			);
+			await beatSafe(deps, logger, "backup");
 		} catch (err) {
 			logger.error("backup.start_failed", { error: String(err) });
 		}
