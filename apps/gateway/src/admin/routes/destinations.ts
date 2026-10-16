@@ -45,13 +45,18 @@ import { DnsError } from "../../core/dns";
 import { enqueueThenMark } from "../../core/enqueue";
 import { newId } from "../../core/ids";
 import { failureOf, sendSigned } from "../../core/outbound";
-import { resolvePolicy } from "../../core/policy";
+import {
+	type Policy,
+	type PolicyFields,
+	resolvePolicy,
+} from "../../core/policy";
 import {
 	aad,
 	clearExpiredPrev,
 	destinationSigningSecrets,
 	rotationColumns,
 } from "../../core/secrets";
+import { loadRetryDefaults } from "../../core/settings";
 import { buildOutboundHeaders, signWebhookAll } from "../../core/sign";
 import { checkUrl } from "../../core/ssrf";
 import type { AppEnv } from "../../env";
@@ -113,13 +118,12 @@ export async function toDestination(
 /** backoff_max_s must not be below backoff_base_s once defaults apply (spec §8.4). */
 function backoffConflict(
 	c: Context<AppBindings>,
-	row: Pick<
-		DestinationRow,
-		"timeoutMs" | "maxAttempts" | "backoffBaseS" | "backoffMaxS"
-	>,
+	row: PolicyFields,
+	defaults: Policy,
 ): Response | null {
-	const policy = resolvePolicy(row);
-	return policy.backoffMaxS < policy.backoffBaseS
+	const base = row.backoffBaseS ?? defaults.backoffBaseS;
+	const max = row.backoffMaxS ?? defaults.backoffMaxS;
+	return max < base
 		? c.json(
 				{
 					error: "invalid_request",
@@ -127,7 +131,7 @@ function backoffConflict(
 						{
 							path: "backoff_max_s",
 							code: "too_small",
-							message: `backoff_max_s must be >= backoff_base_s (${policy.backoffBaseS})`,
+							message: `backoff_max_s must be >= backoff_base_s (${base})`,
 						},
 					],
 				},
@@ -196,7 +200,11 @@ export function destinationRoutes() {
 			createdAt: ts,
 			updatedAt: ts,
 		};
-		const conflict = backoffConflict(c, row);
+		const conflict = backoffConflict(
+			c,
+			row,
+			await loadRetryDefaults(c.var.deps),
+		);
 		if (conflict) return conflict;
 		await db.batch([
 			db.insert(destinations).values(row),
@@ -266,7 +274,11 @@ export function destinationRoutes() {
 				? { backoffMaxS: v.backoff_max_s }
 				: {}),
 		};
-		const conflict = backoffConflict(c, { ...existing, ...set });
+		const conflict = backoffConflict(
+			c,
+			{ ...existing, ...set },
+			await loadRetryDefaults(c.var.deps),
+		);
 		if (conflict) return conflict;
 		const ts = now();
 		const prev = clearExpiredPrev(
@@ -487,7 +499,10 @@ export function destinationRoutes() {
 					snippet: null,
 				};
 			} else {
-				const timeoutMs = resolvePolicy(destination).timeoutMs;
+				const timeoutMs = resolvePolicy(
+					destination,
+					await loadRetryDefaults(deps),
+				).timeoutMs;
 				const timestampSec = Math.floor(startedAt / 1000);
 				const secrets = await destinationSigningSecrets(
 					deps.env,

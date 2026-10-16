@@ -7,6 +7,7 @@ import { eventRoutes } from "./routes/events";
 import { failureRoutes } from "./routes/failures";
 import { meRoutes } from "./routes/me";
 import { projectRoutes } from "./routes/projects";
+import { settingsRoutes } from "./routes/settings";
 import { sourceRoutes } from "./routes/sources";
 import { userRoutes } from "./routes/users";
 
@@ -22,5 +23,6 @@ export function adminRoutes(options: { accessFetch?: typeof fetch } = {}) {
 	routes.route("/failures", failureRoutes());
 	routes.route("/users", userRoutes());
 	routes.route("/audit-logs", auditLogRoutes());
+	routes.route("/settings", settingsRoutes());
 	return routes;
 }
