@@ -70,5 +70,10 @@
 			// use local D1 and never contact it.
 			"database_id": "29d2c40d-c643-4a67-bba1-ccd2e5c04bc1"
 		}
-	]
+	],
+	// M5a: one limiter per destination (spec §5.2).
+	"durable_objects": {
+		"bindings": [{ "name": "LIMITER", "class_name": "DestinationLimiter" }]
+	},
+	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["DestinationLimiter"] }]
 }
