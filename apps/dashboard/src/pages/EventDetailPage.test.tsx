@@ -1,12 +1,14 @@
 import { screen, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { delivery, webhookEvent } from "@/test/fixtures";
 import { renderApp } from "@/test/render";
 import { apiUrl, server } from "@/test/server";
 
 const detail = (o = {}) =>
 	http.get(apiUrl("/events/evt_1"), () => HttpResponse.json(webhookEvent(o)));
+
+const { createObjectURL, revokeObjectURL } = URL;
 
 describe("Event Detail", () => {
 	it("lists deliveries newest first", async () => {
@@ -74,6 +76,55 @@ describe("Event Detail", () => {
 		);
 		expect(await screen.findByText("<b>hi</b>")).toBeInTheDocument();
 		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+	});
+
+	it("shows a binary payload as a notice and downloads the original bytes", async () => {
+		const blobs: Blob[] = [];
+		// jsdom has no object URLs; capture the Blob handed to Download.
+		Object.assign(URL, {
+			createObjectURL: (b: Blob) => {
+				blobs.push(b);
+				return "blob:x";
+			},
+			revokeObjectURL: () => {},
+		});
+		onTestFinished(() => {
+			Object.assign(URL, { createObjectURL, revokeObjectURL });
+		});
+		server.use(
+			detail({ content_type: "application/octet-stream" }),
+			http.get(
+				apiUrl("/events/evt_1/payload"),
+				() =>
+					new HttpResponse(new Uint8Array([0xff, 0xfe, 0x00]), {
+						headers: { "content-type": "application/octet-stream" },
+					}),
+			),
+		);
+		const { user } = renderApp("/events/evt_1", { role: "operator" });
+		await user.click(
+			await screen.findByRole("button", { name: "Show payload" }),
+		);
+		expect(
+			await screen.findByText(/binary payload \(3 bytes\)/i),
+		).toBeInTheDocument();
+		const payloadSection = screen
+			.getByText("Payload")
+			.closest("section") as HTMLElement;
+		expect(
+			within(payloadSection).queryByRole("list", { name: "JSON" }),
+		).toBeNull();
+		await user.click(
+			within(payloadSection).getByRole("button", { name: "Download" }),
+		);
+		expect(blobs).toHaveLength(1);
+		expect(blobs[0].type).toBe("application/octet-stream");
+		const bytes = await new Promise<ArrayBuffer>((resolve) => {
+			const r = new FileReader();
+			r.onload = () => resolve(r.result as ArrayBuffer);
+			r.readAsArrayBuffer(blobs[0]);
+		});
+		expect([...new Uint8Array(bytes)]).toEqual([0xff, 0xfe, 0x00]);
 	});
 
 	it("shows payload_missing as no longer available", async () => {

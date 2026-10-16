@@ -59,4 +59,44 @@ describe("JsonViewer", () => {
 			"false",
 		);
 	});
+
+	it("collapses by byte length, not character count", () => {
+		// 140k two-byte characters: under 256K chars, over 256 KB.
+		const big = JSON.stringify({ blob: { data: "é".repeat(140_000) } });
+		expect(big.length).toBeLessThan(256 * 1024);
+		render(<JsonViewer text={big} contentType="application/json" />);
+		expect(screen.getByRole("button", { name: /blob/ })).toHaveAttribute(
+			"aria-expanded",
+			"false",
+		);
+	});
+
+	it("flags unsafe integers and shows the exact text in Raw", async () => {
+		const text = '{"id":12345678901234567890,"note":"99999999999999999999"}';
+		render(<JsonViewer text={text} contentType="application/json" />);
+		expect(
+			screen.getByText(/large numbers may be rounded in tree view/i),
+		).toBeInTheDocument();
+		expect(screen.queryByText(text)).not.toBeInTheDocument();
+		await userEvent.click(screen.getByRole("button", { name: "Raw" }));
+		expect(screen.getByText(text)).toBeInTheDocument();
+		expect(
+			screen.queryByRole("list", { name: "JSON" }),
+		).not.toBeInTheDocument();
+		await userEvent.click(screen.getByRole("button", { name: "Tree" }));
+		expect(screen.getByRole("list", { name: "JSON" })).toBeInTheDocument();
+	});
+
+	it("does not flag safe integers or big numbers inside strings", () => {
+		render(
+			<JsonViewer
+				text={`{"n":9007199254740991,"s":"12345678901234567890","f":1.5e300,"d":0.12345678901234567890}`}
+				contentType="application/json"
+			/>,
+		);
+		expect(
+			screen.queryByText(/large numbers may be rounded/i),
+		).not.toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Raw" })).toBeInTheDocument();
+	});
 });

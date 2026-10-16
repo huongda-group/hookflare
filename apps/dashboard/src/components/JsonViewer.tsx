@@ -4,67 +4,131 @@ import { Button } from "@/components/ui/button";
 const BIG = 256 * 1024;
 
 type Props =
-	| { text: string; contentType: string | null; filename?: string }
+	| {
+			text: string;
+			contentType: string | null;
+			filename?: string;
+			/** The original bytes for Download; defaults to the text as UTF-8. */
+			download?: Blob;
+	  }
 	| { value: unknown };
 
-function parse(
-	props: Props,
-): { ok: true; value: unknown; size: number } | { ok: false; text: string } {
-	if ("value" in props) return { ok: true, value: props.value, size: 0 };
-	const isJson = /[/+]json\b/i.test(props.contentType ?? "");
-	if (isJson) {
-		try {
-			return {
-				ok: true,
-				value: JSON.parse(props.text),
-				size: props.text.length,
-			};
-		} catch {
-			// Fall through to text: a body labelled JSON may still be broken.
-		}
+type Parsed =
+	| { ok: true; value: unknown; size: number; unsafe: boolean }
+	| { ok: false };
+
+// A JSON string literal or a bare integer token; strings are matched first so
+// digits inside them are skipped. Fractions and exponents are not integers.
+const TOKEN = /"(?:[^"\\]|\\.)*"|(?<![\w.+-])-?\d+(?![\w.])/g;
+
+/** True when an integer literal outside strings exceeds MAX_SAFE_INTEGER. */
+function hasUnsafeInteger(text: string): boolean {
+	for (const [tok] of text.matchAll(TOKEN)) {
+		if (tok.startsWith('"')) continue;
+		const digits = tok.replace(/^-/, "");
+		if (digits.length < 16) continue;
+		if (BigInt(digits) > BigInt(Number.MAX_SAFE_INTEGER)) return true;
 	}
-	return { ok: false, text: props.text };
+	return false;
+}
+
+function parse(props: Props): Parsed {
+	if ("value" in props)
+		return { ok: true, value: props.value, size: 0, unsafe: false };
+	if (!/[/+]json\b/i.test(props.contentType ?? "")) return { ok: false };
+	try {
+		return {
+			ok: true,
+			value: JSON.parse(props.text),
+			size: new TextEncoder().encode(props.text).length,
+			unsafe: hasUnsafeInteger(props.text),
+		};
+	} catch {
+		// Fall through to text: a body labelled JSON may still be broken.
+		return { ok: false };
+	}
+}
+
+export function downloadBlob(blob: Blob, name: string) {
+	const url = URL.createObjectURL(blob);
+	const a = document.createElement("a");
+	a.href = url;
+	a.download = name;
+	a.click();
+	URL.revokeObjectURL(url);
 }
 
 /**
  * Nested lists with disclosure buttons (each button carries aria-expanded),
  * rather than an ARIA tree that would need roving-focus keyboard handling.
- * Text nodes only: values are never interpreted as markup (spec §11). */
+ * Text nodes only: values are never interpreted as markup (spec §11).
+ * A text payload that parses as JSON also offers Raw, the exact original text,
+ * since JSON.parse rounds integers beyond Number.MAX_SAFE_INTEGER. */
 export function JsonViewer(props: Props) {
 	const parsed = parse(props);
-	if (!parsed.ok) {
-		const name =
-			"filename" in props && props.filename ? props.filename : "payload.txt";
-		return (
-			<div>
-				<pre className="max-h-[480px] overflow-auto whitespace-pre-wrap break-all rounded bg-neutral-50 p-3 font-mono text-xs">
-					{parsed.text}
-				</pre>
-				<Button
-					variant="outline"
-					size="sm"
-					className="mt-2"
-					onClick={() => {
-						const url = URL.createObjectURL(new Blob([parsed.text]));
-						const a = document.createElement("a");
-						a.href = url;
-						a.download = name;
-						a.click();
-						URL.revokeObjectURL(url);
-					}}
-				>
-					Download
-				</Button>
-			</div>
-		);
+	const [raw, setRaw] = useState(false);
+	if (!("text" in props)) {
+		return parsed.ok ? <Tree value={parsed.value} size={0} /> : null;
 	}
-	const openDepth = parsed.size > BIG ? 1 : Number.POSITIVE_INFINITY;
+	const name = props.filename || "payload.txt";
+	const view = (
+		<pre className="max-h-[480px] overflow-auto whitespace-pre-wrap break-all rounded bg-neutral-50 p-3 font-mono text-xs">
+			{props.text}
+		</pre>
+	);
+	return (
+		<div>
+			{parsed.ok && (
+				<div className="mb-2 flex items-center gap-2">
+					{(["Tree", "Raw"] as const).map((mode) => (
+						<Button
+							key={mode}
+							variant={raw === (mode === "Raw") ? "secondary" : "ghost"}
+							size="sm"
+							aria-pressed={raw === (mode === "Raw")}
+							onClick={() => setRaw(mode === "Raw")}
+						>
+							{mode}
+						</Button>
+					))}
+					{parsed.unsafe && (
+						<span className="text-amber-700 text-xs">
+							Large numbers may be rounded in tree view — see Raw
+						</span>
+					)}
+				</div>
+			)}
+			{parsed.ok && !raw ? (
+				<Tree value={parsed.value} size={parsed.size} />
+			) : (
+				view
+			)}
+			<Button
+				variant="outline"
+				size="sm"
+				className="mt-2"
+				onClick={() =>
+					downloadBlob(
+						props.download ??
+							new Blob([props.text], { type: props.contentType ?? "" }),
+						name,
+					)
+				}
+			>
+				Download
+			</Button>
+		</div>
+	);
+}
+
+function Tree({ value, size }: { value: unknown; size: number }) {
+	const openDepth = size > BIG ? 1 : Number.POSITIVE_INFINITY;
 	return (
 		<ul
 			aria-label="JSON"
 			className="max-h-[480px] overflow-auto rounded bg-neutral-50 p-3 font-mono text-xs"
 		>
-			<Node name={null} value={parsed.value} depth={0} openDepth={openDepth} />
+			<Node name={null} value={value} depth={0} openDepth={openDepth} />
 		</ul>
 	);
 }
