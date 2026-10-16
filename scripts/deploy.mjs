@@ -62,14 +62,21 @@ const config = option(
 const { name: worker, d1Name } = readConfig(config);
 const smoke = smokeEnv();
 const plan = deployPlan({ smoke });
-/** @type {{ at: string, config: string, worker: string, version: string, bookmark: string }} */
+/** @type {{ at: string, config: string, worker: string, d1Name: string, version: string, bookmark: string }} */
 const record = {
 	at: recordAt(),
 	config,
 	worker,
+	d1Name,
 	version: "unknown",
 	bookmark: "unknown",
 };
+
+if (smoke === null) {
+	console.log(
+		"smoke skipped: set HOOKFLARE_URL, CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET, SINK_URL",
+	);
+}
 
 /**
  * Print the manual rollback commands and exit 1. Never runs them.
@@ -146,12 +153,6 @@ for (const step of plan) {
 		}
 		console.log(`deploy: version ${record.version}`);
 	} else if (step === "smoke") {
-		if (smoke === null) {
-			console.log(
-				"smoke skipped: set HOOKFLARE_URL, CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET, SINK_URL",
-			);
-			continue;
-		}
 		try {
 			const result = await runSmoke(httpSmokeApi(smoke), console.log);
 			console.log(`deploy: smoke ok ${JSON.stringify(result)}`);

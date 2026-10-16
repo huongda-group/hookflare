@@ -65,7 +65,25 @@ describe("deployPlan", () => {
 });
 
 describe("rollbackCommands", () => {
-	it("returns the exact wrangler rollback and restore commands", () => {
+	it("restores the D1 database named by d1Name", () => {
+		const record = {
+			at: "2026-10-16T00-00-00-000Z",
+			config: "apps/gateway/wrangler.staging.jsonc",
+			worker: "hookflare-staging",
+			d1Name: "hookflare-staging-db",
+			version: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+			bookmark: "018f2c4a-7b3d-4e5f-9a6b-2c1d3e4f5a6b",
+		};
+		assert.deepEqual(
+			rollbackCommands(record, "apps/gateway/wrangler.staging.jsonc"),
+			[
+				"wrangler rollback aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee --config apps/gateway/wrangler.staging.jsonc",
+				"wrangler d1 time-travel restore hookflare-staging-db --bookmark=018f2c4a-7b3d-4e5f-9a6b-2c1d3e4f5a6b --config apps/gateway/wrangler.staging.jsonc",
+			],
+		);
+	});
+
+	it("falls back to worker for records written before d1Name existed", () => {
 		const record = {
 			at: "2026-10-16T00-00-00-000Z",
 			config: "apps/gateway/wrangler.staging.jsonc",

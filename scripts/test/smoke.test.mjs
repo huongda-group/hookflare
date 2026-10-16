@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+	httpSmokeApi,
 	pollUntil,
 	runSmoke,
 	signStandardWebhook,
@@ -87,6 +88,83 @@ describe("runSmoke", () => {
 			runSmoke(api, () => {}, { sleep: async () => {} }),
 			/smoke: /,
 		);
+	});
+
+	it("throws when the sink unique count is not 1", async () => {
+		const { api } = happyApi();
+		api.sinkStats = async () => ({ unique: 2, received: 2 });
+		await assert.rejects(
+			runSmoke(api, () => {}, { sleep: async () => {} }),
+			/smoke: expected sink unique=1 received=2, got unique=2 received=2/,
+		);
+	});
+});
+
+describe("httpSmokeApi", () => {
+	it("creates an hmac source and signs ingress with the run secret", async () => {
+		const { createHmac } = await import("node:crypto");
+		const seen = {};
+		const fetchFn = async (url, init = {}) => {
+			if (url.endsWith("/api/admin/v1/projects?limit=200")) {
+				return new Response(
+					JSON.stringify({
+						data: [{ id: "prj_smoke", slug: "smoke", name: "smoke" }],
+					}),
+					{ status: 200 },
+				);
+			}
+			if (url.endsWith("/api/admin/v1/destinations")) {
+				return new Response(JSON.stringify({ id: "dst_smoke" }), {
+					status: 201,
+				});
+			}
+			if (url.endsWith("/api/admin/v1/sources")) {
+				seen.sourceBody = JSON.parse(init.body);
+				return new Response(
+					JSON.stringify({
+						id: "src_smoke",
+						ingress_url: "https://hooks.example.com/in/src_smoke",
+					}),
+					{ status: 201 },
+				);
+			}
+			if (url === "https://hooks.example.com/in/src_smoke") {
+				seen.ingressHeaders = init.headers;
+				seen.ingressBody = init.body;
+				return new Response(JSON.stringify({ event_id: "evt_smoke" }), {
+					status: 202,
+				});
+			}
+			throw new Error(`unexpected fetch ${url}`);
+		};
+		const api = httpSmokeApi(
+			{
+				url: "https://api.example.com",
+				clientId: "id",
+				clientSecret: "secret",
+				sinkUrl: "https://sink.example.com",
+			},
+			fetchFn,
+		);
+		await api.ensureProject("smoke");
+		await api.ensureDestination("https://sink.example.com/r/run/hook");
+		const source = await api.ensureSource();
+		assert.equal(source.id, "src_smoke");
+		assert.equal(seen.sourceBody.auth_type, "hmac");
+		assert.deepEqual(seen.sourceBody.auth_config, {
+			header: "x-smoke-signature",
+			algorithm: "sha256",
+			encoding: "hex",
+		});
+		assert.equal(typeof seen.sourceBody.secret, "string");
+		assert.ok(seen.sourceBody.secret.length >= 16);
+		const eventId = await api.send();
+		assert.equal(eventId, "evt_smoke");
+		// The ingress signature must verify as HMAC-SHA256(secret, body).
+		const expected = createHmac("sha256", seen.sourceBody.secret)
+			.update(seen.ingressBody)
+			.digest("hex");
+		assert.equal(seen.ingressHeaders["x-smoke-signature"], expected);
 	});
 });
 

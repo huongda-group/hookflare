@@ -234,8 +234,10 @@ export async function runSmoke(api, log = () => {}, { sleep } = {}) {
 		throw err;
 	}
 	const stats = await api.sinkStats(run);
-	if (stats.received !== 2) {
-		throw new Error(`smoke: expected sink received=2, got ${stats.received}`);
+	if (stats.received !== 2 || stats.unique !== 1) {
+		throw new Error(
+			`smoke: expected sink unique=1 received=2, got unique=${stats.unique} received=${stats.received}`,
+		);
 	}
 	log(
 		`smoke: sink run ${run} unique=${stats.unique} received=${stats.received}`,
@@ -279,6 +281,10 @@ export function httpSmokeApi(env, fetchFn = fetch) {
 	let projectId = null;
 	let destinationId = null;
 	let ingressUrl = null;
+	/** HMAC secret for the run's source: ingress verifies every send against it. */
+	let smokeSecret = null;
+	/** Header carrying the smoke HMAC (matches the source auth_config below). */
+	const smokeHeader = "x-smoke-signature";
 
 	/**
 	 * Parse a JSON response, throwing on non-2xx.
@@ -335,6 +341,14 @@ export function httpSmokeApi(env, fetchFn = fetch) {
 			if (projectId === null || destinationId === null) {
 				throw new Error("smoke: ensureDestination must run first");
 			}
+			// HMAC source: ingress verifies send() against this run secret,
+			// so smoke exercises the real ingress verification path.
+			const raw = crypto.getRandomValues(new Uint8Array(32));
+			let bin = "";
+			for (const b of raw) {
+				bin += String.fromCharCode(b);
+			}
+			smokeSecret = btoa(bin);
 			const created = await readJson(
 				"create source",
 				await fetchFn(`${base}/api/admin/v1/sources`, {
@@ -344,8 +358,13 @@ export function httpSmokeApi(env, fetchFn = fetch) {
 						project_id: projectId,
 						destination_id: destinationId,
 						name: "smoke",
-						auth_type: "none",
-						auth_config: {},
+						auth_type: "hmac",
+						auth_config: {
+							header: smokeHeader,
+							algorithm: "sha256",
+							encoding: "hex",
+						},
+						secret: smokeSecret,
 					}),
 				}),
 			);
@@ -353,30 +372,28 @@ export function httpSmokeApi(env, fetchFn = fetch) {
 			return { id: created.id, ingress_url: created.ingress_url };
 		},
 		async send() {
-			if (ingressUrl === null) {
+			if (ingressUrl === null || smokeSecret === null) {
 				throw new Error("smoke: ensureSource must run first");
 			}
-			const id = `smoke-${runId()}`;
-			const ts = Math.floor(Date.now() / 1000);
-			const body = JSON.stringify({ smoke: true, sent_at: ts });
-			const secretBytes = crypto.getRandomValues(new Uint8Array(32));
-			let bin = "";
-			for (const b of secretBytes) {
-				bin += String.fromCharCode(b);
-			}
-			const signature = await signStandardWebhook(
-				`whsec_${btoa(bin)}`,
-				id,
-				ts,
-				body,
+			const body = JSON.stringify({ smoke: true, sent_at: Date.now() });
+			const key = await crypto.subtle.importKey(
+				"raw",
+				new TextEncoder().encode(smokeSecret),
+				{ name: "HMAC", hash: "SHA-256" },
+				false,
+				["sign"],
 			);
+			const sig = new Uint8Array(
+				await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body)),
+			);
+			const signature = [...sig]
+				.map((b) => b.toString(16).padStart(2, "0"))
+				.join("");
 			const res = await fetchFn(ingressUrl, {
 				method: "POST",
 				headers: {
 					"content-type": "application/json",
-					"webhook-id": id,
-					"webhook-timestamp": String(ts),
-					"webhook-signature": signature,
+					[smokeHeader]: signature,
 				},
 				body,
 			});

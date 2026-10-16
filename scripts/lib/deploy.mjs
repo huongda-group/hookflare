@@ -6,9 +6,11 @@
 
 /**
  * A recorded deploy: the restore point plus the rollback target.
- * `worker` doubles as the D1 database name (true for both gateway
- * configs: `hookflare` and `hookflare-staging`).
- * @typedef {{ at: string, config: string, worker: string, version: string, bookmark: string }} DeployRecord
+ * `d1Name` is the D1 database name for the time-travel restore; `worker`
+ * is kept as the fallback for records written before `d1Name` existed
+ * (both gateway configs name them identically today: `hookflare` and
+ * `hookflare-staging`).
+ * @typedef {{ at: string, config: string, worker: string, d1Name?: string, version: string, bookmark: string }} DeployRecord
  */
 
 /**
@@ -160,8 +162,9 @@ export function deployPlan({ smoke }) {
  * @returns {string[]}
  */
 export function rollbackCommands(record, config) {
+	const d1Name = record.d1Name ?? record.worker;
 	return [
 		`wrangler rollback ${record.version} --config ${config}`,
-		`wrangler d1 time-travel restore ${record.worker} --bookmark=${record.bookmark} --config ${config}`,
+		`wrangler d1 time-travel restore ${d1Name} --bookmark=${record.bookmark} --config ${config}`,
 	];
 }
