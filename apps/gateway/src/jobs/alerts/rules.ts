@@ -228,15 +228,23 @@ export type Evaluation = {
 
 export const ARCHIVE_STUCK_AFTER_MS = 48 * 3_600_000;
 
-/** Spec §7.4 monitoring: a failed batch needs an operator; one stuck in building is a dead run. */
+/**
+ * Spec §7.4 monitoring: a failed batch needs an operator until a later batch of
+ * the same kind and day succeeds (failed days are retried); one stuck in
+ * building is a dead run.
+ */
 export async function archiveStuck(
 	db: Db,
 	now: number,
 ): Promise<ActiveAlert[]> {
 	const rows = await db.all<{ id: string }>(sql`
-		SELECT id FROM archive_batches
-		WHERE status = 'failed' OR (status = 'building' AND created_at < ${now - ARCHIVE_STUCK_AFTER_MS})
-		ORDER BY created_at DESC LIMIT 20`);
+		SELECT b.id FROM archive_batches b
+		WHERE (b.status = 'failed' AND NOT EXISTS (
+				SELECT 1 FROM archive_batches r
+				WHERE r.kind = b.kind AND r.day = b.day AND r.created_at > b.created_at
+					AND r.status IN ('verified', 'purged', 'expired')))
+			OR (b.status = 'building' AND b.created_at < ${now - ARCHIVE_STUCK_AFTER_MS})
+		ORDER BY b.created_at DESC LIMIT 20`);
 	if (rows.length === 0) return [];
 	return [
 		{

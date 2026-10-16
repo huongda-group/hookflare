@@ -219,4 +219,18 @@ describe("archive_stuck", () => {
 		});
 		expect(a.details.batch_ids).toEqual([failed.id]);
 	});
+	it("ignores a failed batch once a later batch of the same day succeeds", async () => {
+		const { archiveStuck } = await import("../../src/jobs/alerts/rules");
+		const { isolateArchive, seedBatch } = await import("../helpers/archive");
+		await isolateArchive(deps);
+		await seedBatch(deps, { status: "failed", createdAt: NOW - 3_600_000 });
+		await seedBatch(deps, {
+			kind: "audit",
+			status: "purged",
+			createdAt: NOW,
+		});
+		expect(await archiveStuck(deps.db, NOW)).toHaveLength(1);
+		await seedBatch(deps, { status: "purged", createdAt: NOW });
+		expect(await archiveStuck(deps.db, NOW)).toEqual([]);
+	});
 });

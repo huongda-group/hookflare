@@ -77,6 +77,20 @@
 | §6.5 channel delete marks notifications `failed` | Deletes the channel's notifications | `alert_notifications.channel_id` is an FK |
 | §7.4 one `purge` step | `purge` (D1, returns keys) + `purge-r2` (deletes them) | Only a finished step's result survives a retry (M5-20) |
 | §7.6 download | `404` unless `verified`/`purged` with files | A building or failed batch can hold an incomplete part |
+| §5.3 step order (limiter after payload, SSRF, signing) | Step 7a runs right after the paused/disabled checks; payload load, SSRF, and signing run inside the slot's `try/finally` | A rejection repeats no R2/DoH/HMAC work, and every exit after acquire releases the slot |
+| §5.3 "nothing in D1 changes on a rejection" | A rejection sets `enqueued_at = now` (no attempt, status, or `attempt_count` change) | Otherwise reconcile rules (c)/(d) resend a long-limited delivery every run |
+| §5.2 in-flight `retryAfterMs` = earliest slot expiry, clamped 5–30 s | `min(earliest expiry − now, 5 s)`; rate rejections get a reservation hint that advances one token interval per rejected caller, capped at 30 s | Expiry is timeout + 30 s, so every rejection waited the maximum; a backlog no longer returns all at once |
+| §6.3 sequential sends, settle by `id` | Sends 10 at a time, starts none after 30 s, returns unsent claims to `pending` without a try; every settle is fenced by `status = 'sending' AND claimed_at` | A slow channel made a run outlive `CLAIM_STALE_MS`, so overlapping runs sent twice |
+| §6.3 send to every matched channel | A notification for a disabled channel settles `failed` (`channel_disabled`) without sending | Disabling a noisy channel must stop it immediately |
+| §6.2 unbounded `new_dead` scan and incident writes | At most 1000 rows / 100 destinations per scan, cursor advances only past processed rows and never backwards; opens, resolves, and reminders capped at 100 per run | Bounded per-minute work; overlapping runs cannot double-count |
+| §6.2 `consecutive_failures` reset only on success | Also reset on resume, a URL change, or a PATCH back to `active` | Resuming re-opened the incident before any new attempt |
+| §6.5 channel "Send test" | `{ ok: false, error: "config_unreadable" }` when the config cannot be decrypted | Was a 500 |
+| §6.5 overview `open_alerts` | With `project_id`, counts that project's alerts plus project-less ones (`d1_storage`, `archive_stuck`) | Every other overview figure is project-scoped |
+| §7.4 retention by batch `day` | Expires `purged` batches by `purged_at` | A batch is created only after its day passes hot/failed/audit retention, so a day-based cutoff could delete a fresh archive in the same run |
+| §7.4 `purge` + `purge-r2` | Per chunk: `purge-select` (persists `{id, r2_key}`), `purge` (D1, same re-checks), `purge-r2` (keys of selected IDs gone from D1) | A crash after the D1 commit no longer orphans payloads (M5-20) |
+| §7.4 failed batch "needs an operator" | A failed verify clears the batch's marks in the same batch as the status change; retention removes its files (`with_files = 0`); the day is archived again; `archive_stuck` ignores a failed batch once a later batch of the same kind and day succeeds | Marks pinned the events in D1 forever |
+| §7.4 one batch per day | A batch holds at most `min(200, step budget)` parts, estimated from items and bytes; the rest of the day goes to later batches | A very large day blocked every later day |
+| §7.3 audit day eligible when any row is past the cutoff | Only once the whole UTC day is past `audit_retention_days` | Rows were purged up to ~21 h early |
 
 ## 4. Layout
 
