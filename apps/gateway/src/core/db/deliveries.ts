@@ -142,13 +142,26 @@ export async function recordLeasedAttempt(
 	const now = deps.now();
 	const { outcome } = a;
 	const retrying = outcome.status === "retrying";
-	const [, update] = await deps.db.batch([
+	const [, , update] = await deps.db.batch([
 		deps.db.insert(deliveryAttempts).select(sql`
 			SELECT ${newId("att", a.startedAt)}, ${deliveryId}, ${a.attemptNo},
 				${a.startedAt}, ${a.durationMs}, ${outcome.httpStatus},
 				${outcome.errorKind}, ${outcome.error}, ${a.snippet}
 			WHERE EXISTS (SELECT 1 FROM deliveries WHERE id = ${deliveryId}
 				AND status = 'in_flight' AND lease_until = ${a.leaseUntil})`),
+		// M5-12: same fence as the other two statements; a stale worker changes nothing.
+		deps.db
+			.update(destinations)
+			.set({
+				consecutiveFailures:
+					outcome.status === "delivered"
+						? 0
+						: sql`${destinations.consecutiveFailures} + 1`,
+			})
+			.where(
+				sql`${destinations.id} = (SELECT destination_id FROM deliveries WHERE id = ${deliveryId}
+					AND status = 'in_flight' AND lease_until = ${a.leaseUntil})`,
+			),
 		deps.db
 			.update(deliveries)
 			.set({

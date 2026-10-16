@@ -1,4 +1,5 @@
 import type {
+	Alert,
 	Delivery,
 	DeliveryAttempt,
 	Destination,
@@ -30,6 +31,8 @@ export const destination = (o: Partial<Destination> = {}): Destination => ({
 	max_attempts: null,
 	backoff_base_s: null,
 	backoff_max_s: null,
+	max_in_flight: null,
+	rate_limit_per_s: null,
 	signing_secret_fingerprint: "ab12cd34",
 	previous_secret_fingerprint: null,
 	previous_secret_expires_at: null,
@@ -131,3 +134,17 @@ export const failure = (o: Partial<Failure> = {}): Failure => {
 		...o,
 	};
 };
+export const alert = (o: Partial<Alert> = {}): Alert => ({
+	id: "alr_1",
+	rule: "consecutive_failures",
+	resource_type: "destination",
+	resource_id: "dst_1",
+	resource_name: "Billing API",
+	project_id: "prj_1",
+	status: "open",
+	opened_at: T - 3_600_000,
+	last_notified_at: T - 3_600_000,
+	resolved_at: null,
+	details: { consecutive_failures: 5 },
+	...o,
+});

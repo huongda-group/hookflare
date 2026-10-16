@@ -1,3 +1,4 @@
+import { and, eq, inArray } from "drizzle-orm";
 import {
 	acquireLease,
 	type DeliveryContext,
@@ -7,6 +8,7 @@ import {
 	loadDeliveryContext,
 	recordLeasedAttempt,
 } from "../core/db/deliveries";
+import { deliveries } from "../core/db/schema";
 import { DnsError } from "../core/dns";
 import { createLogger, type Logger } from "../core/log";
 import { readSnippet, SNIPPET_BYTES, sendSigned } from "../core/outbound";
@@ -16,13 +18,27 @@ import { destinationSigningSecrets } from "../core/secrets";
 import { loadRetryDefaults } from "../core/settings";
 import { buildOutboundHeaders, signWebhookAll } from "../core/sign";
 import { checkUrl } from "../core/ssrf";
+import { withTimeout } from "../core/timeout";
 import type { DeliveryMessage, Deps } from "../deps";
 import { infraDelaySeconds } from "./backoff";
 import { classifyAttempt, type SendResult } from "./classify";
+import type { AcquireResult, LimiterStub } from "./limiter";
 
 export { readSnippet, SNIPPET_BYTES };
 /** The lease outlives the request timeout by this much (spec §7 step 7). */
 export const LEASE_GRACE_MS = 30_000;
+
+/** M5-7: a limiter that does not answer in time is an infra error. */
+export const LIMITER_TIMEOUT_MS = 2_000;
+
+/** Spec §5.3: retryAfter plus 0–3 s of jitter, so rejected messages do not return together. */
+export function limitedDelaySeconds(
+	retryAfterMs: number,
+	random: () => number,
+): number {
+	const s = Math.ceil(retryAfterMs / 1000) + Math.floor(random() * 4);
+	return Math.min(30, Math.max(1, s));
+}
 
 export type Disposition =
 	| { action: "ack" }
@@ -133,7 +149,7 @@ export async function processDelivery(
 		return ACK;
 	}
 	const policy = resolvePolicy(ctx.destination, defaults);
-	const finish = async (lastError: string) => {
+	const finish = async (lastError: string): Promise<Disposition> => {
 		await finishWithoutAttempt(deps, deliveryId, lastError);
 		logger.warn("delivery.failed_without_attempt", {
 			delivery_id: deliveryId,
@@ -142,8 +158,7 @@ export async function processDelivery(
 		return ACK;
 	};
 
-	// 3–6. Checks before the lease (spec M2-2): none of them counts as an attempt.
-	let request: SignedRequest;
+	// 3–4. Destination state (spec M2-2): none of the pre-lease exits counts as an attempt.
 	try {
 		if (ctx.destination.status === "paused") {
 			await holdDelivery(deps, deliveryId);
@@ -153,6 +168,122 @@ export async function processDelivery(
 		if (ctx.destination.status === "disabled") {
 			return await finish("destination_disabled");
 		}
+	} catch (err) {
+		return infra("d1", err);
+	}
+
+	// 4a. Limiter (spec §5.3), before the R2 read, DoH lookup, and signing, so a
+	// rejection repeats none of them. A rejection changes only enqueued_at, so no attempt counts.
+	const { maxInFlight, rateLimitPerS } = ctx.destination;
+	if (maxInFlight === null && rateLimitPerS === null) {
+		return prepareAndSend(deps, deliveryId, ctx, policy, logger, infra, finish);
+	}
+	let stub: LimiterStub;
+	let slot: AcquireResult;
+	try {
+		stub = deps.limiter(ctx.destination.id);
+		const acquiring = stub.acquire({
+			maxInFlight,
+			ratePerS: rateLimitPerS,
+			leaseMs: policy.timeoutMs + LEASE_GRACE_MS,
+		});
+		try {
+			slot = await withTimeout(acquiring, LIMITER_TIMEOUT_MS);
+		} catch (err) {
+			// A slot granted after we gave up would stay taken until its lease expired.
+			acquiring.then(
+				(late) => {
+					if (late.ok) void release(stub, late.slotId, deliveryId, logger);
+				},
+				() => {},
+			);
+			throw err;
+		}
+	} catch (err) {
+		return infra("limiter", err);
+	}
+	if (!slot.ok) {
+		const delaySeconds = limitedDelaySeconds(slot.retryAfterMs, Math.random);
+		logger.info("delivery.limited", {
+			delivery_id: deliveryId,
+			destination_id: ctx.destination.id,
+			reason: slot.reason,
+			delay_s: delaySeconds,
+		});
+		// M5-5: msg.retry() would burn msg.attempts toward the DLQ without a real attempt.
+		try {
+			await deps.queue.send({ deliveryId }, { delaySeconds });
+		} catch (err) {
+			logger.error("delivery.reschedule_failed", {
+				delivery_id: deliveryId,
+				error: String(err),
+			});
+			return { action: "retry", delaySeconds };
+		}
+		// The message is in flight again: without this, reconcile rules (c) and (d)
+		// would resend a delivery that stays limited for long, one copy per run.
+		try {
+			await deps.db
+				.update(deliveries)
+				.set({ enqueuedAt: deps.now() })
+				.where(
+					and(
+						eq(deliveries.id, deliveryId),
+						inArray(deliveries.status, ["queued", "retrying"]),
+					),
+				);
+		} catch (err) {
+			logger.warn("delivery.limited_touch_failed", {
+				delivery_id: deliveryId,
+				error: String(err),
+			});
+		}
+		return ACK;
+	}
+	try {
+		return await prepareAndSend(
+			deps,
+			deliveryId,
+			ctx,
+			policy,
+			logger,
+			infra,
+			finish,
+		);
+	} finally {
+		await release(stub, slot.slotId, deliveryId, logger);
+	}
+}
+
+/** A lost release expires with the lease (M5-3), so failures are only logged. */
+async function release(
+	stub: LimiterStub,
+	slotId: string,
+	deliveryId: string,
+	logger: Logger,
+): Promise<void> {
+	try {
+		await withTimeout(stub.release(slotId), LIMITER_TIMEOUT_MS);
+	} catch (err) {
+		logger.warn("delivery.limiter_release_failed", {
+			delivery_id: deliveryId,
+			error: String(err),
+		});
+	}
+}
+
+/** Steps 5–6 (payload, SSRF check, signing), then the lease and send. */
+async function prepareAndSend(
+	deps: Deps,
+	deliveryId: string,
+	ctx: DeliveryContext,
+	policy: Policy,
+	logger: Logger,
+	infra: (stage: string, err: unknown) => Disposition,
+	finish: (lastError: string) => Promise<Disposition>,
+): Promise<Disposition> {
+	let request: SignedRequest;
+	try {
 		let body: Uint8Array<ArrayBuffer> | null;
 		try {
 			body = await loadPayload(deps, ctx.event);
@@ -182,7 +313,19 @@ export async function processDelivery(
 	} catch (err) {
 		return infra("d1", err);
 	}
+	return leaseAndSend(deps, deliveryId, ctx, request, policy, logger, infra);
+}
 
+/** Steps 7–10: lease, send, record, reschedule. */
+async function leaseAndSend(
+	deps: Deps,
+	deliveryId: string,
+	ctx: DeliveryContext,
+	request: SignedRequest,
+	policy: Policy,
+	logger: Logger,
+	infra: (stage: string, err: unknown) => Disposition,
+): Promise<Disposition> {
 	// 7. Lease.
 	const leaseUntil = deps.now() + policy.timeoutMs + LEASE_GRACE_MS;
 	let attemptCount: number | null;

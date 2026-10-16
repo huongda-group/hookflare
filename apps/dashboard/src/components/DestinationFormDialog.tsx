@@ -37,6 +37,11 @@ const POLICY = [
 	["backoff_max_s", "Backoff max (s)"],
 ] as const;
 
+const LIMITS = [
+	["max_in_flight", "Max in flight"],
+	["rate_limit_per_s", "Rate limit (per s)"],
+] as const;
+
 type Values = {
 	project_id?: string;
 	name?: string;
@@ -45,6 +50,8 @@ type Values = {
 	max_attempts?: number | null;
 	backoff_base_s?: number | null;
 	backoff_max_s?: number | null;
+	max_in_flight?: number | null;
+	rate_limit_per_s?: number | null;
 };
 
 /** Empty policy fields mean "use the default"; on edit, emptying sends null (spec §10). */
@@ -75,6 +82,8 @@ export function DestinationFormDialog({
 					max_attempts: destination.max_attempts,
 					backoff_base_s: destination.backoff_base_s,
 					backoff_max_s: destination.backoff_max_s,
+					max_in_flight: destination.max_in_flight,
+					rate_limit_per_s: destination.rate_limit_per_s,
 				}
 			: { name: "", url: "" },
 	});
@@ -170,6 +179,26 @@ export function DestinationFormDialog({
 								</div>
 							);
 						})}
+					</fieldset>
+					<fieldset className="grid grid-cols-2 gap-3">
+						<legend className="mb-1 text-sm font-medium">
+							Delivery limits (empty = unlimited)
+						</legend>
+						{LIMITS.map(([key, label]) => (
+							<div key={key}>
+								<Label htmlFor={`dst-${key}`}>{label}</Label>
+								<Input
+									id={`dst-${key}`}
+									type="number"
+									placeholder="Unlimited"
+									{...form.register(
+										key,
+										editing ? nullableNumber : optionalNumber,
+									)}
+								/>
+								<FieldError message={e[key]?.message} />
+							</div>
+						))}
 					</fieldset>
 					<FieldError message={e.root?.message} />
 					<DialogFooter>

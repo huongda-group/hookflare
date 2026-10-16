@@ -20,6 +20,8 @@ type Dest = {
 	max_attempts: number | null;
 	backoff_base_s: number | null;
 	backoff_max_s: number | null;
+	max_in_flight: number | null;
+	rate_limit_per_s: number | null;
 	signing_secret?: string;
 	signing_secret_fingerprint: string;
 };
@@ -113,6 +115,41 @@ describe("admin destinations", () => {
 			["destination.paused", "backend deploy"],
 			["destination.resumed", null],
 		]);
+	});
+
+	it("resets consecutive failures on resume and on a URL change only", async () => {
+		const deps = testDeps();
+		const { destination } = await seedPipeline(deps);
+		const api = await adminApp(deps, { role: "admin" });
+		const failures = async () =>
+			(
+				await deps.db
+					.select({ n: destinations.consecutiveFailures })
+					.from(destinations)
+					.where(eq(destinations.id, destination.id))
+			)[0]?.n;
+		const fail = (n: number) =>
+			deps.db
+				.update(destinations)
+				.set({ consecutiveFailures: n })
+				.where(eq(destinations.id, destination.id));
+
+		await fail(7);
+		await api.request("POST", `/destinations/${destination.id}/pause`);
+		expect(await failures()).toBe(7);
+		await api.request("POST", `/destinations/${destination.id}/resume`);
+		expect(await failures()).toBe(0);
+
+		await fail(4);
+		await api.request("PATCH", `/destinations/${destination.id}`, {
+			name: "renamed",
+		});
+		expect(await failures()).toBe(4);
+		const res = await api.request("PATCH", `/destinations/${destination.id}`, {
+			url: "https://hooks.example.com/services/moved",
+		});
+		expect(res.status).toBe(200);
+		expect(await failures()).toBe(0);
 	});
 
 	it("does not audit a pause of an already paused destination", async () => {
@@ -463,5 +500,49 @@ describe("admin destinations", () => {
 			{ status: "active" },
 		);
 		expect((await res.json<Dest>()).status).toBe("active");
+	});
+
+	it("creates, reads, and clears limits, and audits the change", async () => {
+		const deps = testDeps();
+		const { project } = await seedPipeline(deps);
+		const api = await adminApp(deps);
+		const created = await api.request("POST", "/destinations", {
+			project_id: project.id,
+			name: "limited",
+			url: "https://example.com/hook",
+			max_in_flight: 4,
+			rate_limit_per_s: 10,
+		});
+		expect(created.status).toBe(201);
+		const dst = await created.json<Dest>();
+		expect(dst.max_in_flight).toBe(4);
+		expect(dst.rate_limit_per_s).toBe(10);
+
+		const patched = await api.request("PATCH", `/destinations/${dst.id}`, {
+			max_in_flight: null,
+		});
+		expect(patched.status).toBe(200);
+		const after = await patched.json<Dest>();
+		expect(after.max_in_flight).toBeNull();
+		expect(after.rate_limit_per_s).toBe(10);
+
+		const audits = await auditRows(deps, dst.id);
+		const update = audits.find((a) => a.action === "destination.updated");
+		expect(update?.diffJson).toMatchObject({ max_in_flight: null });
+	});
+
+	it("rejects out-of-range limits", async () => {
+		const deps = testDeps();
+		const { project } = await seedPipeline(deps);
+		const res = await (await adminApp(deps)).request("POST", "/destinations", {
+			project_id: project.id,
+			name: "bad",
+			url: "https://example.com/hook",
+			rate_limit_per_s: 0,
+		});
+		expect(res.status).toBe(400);
+		expect(
+			(await res.json<{ issues: { path: string }[] }>()).issues[0].path,
+		).toBe("rate_limit_per_s");
 	});
 });

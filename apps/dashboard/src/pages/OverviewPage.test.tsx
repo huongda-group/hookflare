@@ -30,6 +30,7 @@ const overview = (o: Partial<Overview> = {}): Overview => ({
 	failing_destinations: [
 		{ destination_id: "dst_1", name: "Billing API", failed: 5, delivered: 50 },
 	],
+	open_alerts: { count: 0, by_rule: {} },
 	...o,
 });
 
@@ -95,5 +96,31 @@ describe("Overview", () => {
 		await screen.findByText("Received");
 		expect(seen).toContain("range=7d");
 		expect(seen).toContain("project_id=prj_1");
+	});
+
+	it("shows a banner linking to open alerts only when some are open", async () => {
+		server.use(
+			http.get(apiUrl("/overview"), () =>
+				HttpResponse.json(
+					overview({ open_alerts: { count: 2, by_rule: { new_dead: 2 } } }),
+				),
+			),
+		);
+		renderApp("/");
+		const banner = await screen.findByRole("alert");
+		expect(banner).toHaveTextContent("2 open alerts");
+		expect(within(banner).getByRole("link")).toHaveAttribute(
+			"href",
+			"/alerts?status=open",
+		);
+	});
+
+	it("shows no banner when nothing is open", async () => {
+		server.use(
+			http.get(apiUrl("/overview"), () => HttpResponse.json(overview())),
+		);
+		renderApp("/");
+		await screen.findByText("Billing API");
+		expect(screen.queryByRole("alert")).toBeNull();
 	});
 });

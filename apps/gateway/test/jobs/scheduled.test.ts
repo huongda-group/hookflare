@@ -4,7 +4,7 @@ import {
 	ROLLUP_CRON,
 	runScheduled,
 } from "../../src/jobs/scheduled";
-import { testDeps } from "../helpers/deps";
+import { fakeArchive, testDeps, withFailingBatch } from "../helpers/deps";
 import { faultyDeps } from "../helpers/faults";
 
 const lines = (
@@ -37,5 +37,27 @@ describe("runScheduled", () => {
 		const deps = faultyDeps(testDeps(), { d1: [{ match: /settings/ }] });
 		await expect(runScheduled(ROLLUP_CRON, deps)).resolves.toBeUndefined();
 		expect(lines(err)).toContain("rollup.failed");
+	});
+
+	it("runs the alerts job on the minute cron even when the reconciler fails", async () => {
+		const log = vi.spyOn(console, "log").mockImplementation(() => {});
+		const err = vi.spyOn(console, "error").mockImplementation(() => {});
+		const deps = testDeps({ db: withFailingBatch(testDeps().db) });
+		await expect(runScheduled(RECONCILE_CRON, deps)).resolves.toBeUndefined();
+		expect(
+			[...lines(log), ...lines(err)].some(
+				(m) => m === "alerts.run" || m === "alerts.failed",
+			),
+		).toBe(true);
+		log.mockRestore();
+		err.mockRestore();
+	});
+
+	it("starts today's archive instance once on 0 3 * * *", async () => {
+		const archive = fakeArchive();
+		const deps = testDeps({ archive, now: () => Date.UTC(2027, 0, 5, 3) });
+		await runScheduled("0 3 * * *", deps);
+		await runScheduled("0 3 * * *", deps);
+		expect(archive.created).toEqual(["archive-2027-01-05"]);
 	});
 });

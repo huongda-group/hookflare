@@ -2,20 +2,27 @@ import type { Permission, Role } from "@hookflare/shared";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { clearAccessKeyCache } from "../../src/admin/auth/access";
-import { settings } from "../../src/core/db/schema";
+import {
+	alertChannels,
+	alerts,
+	archiveParts,
+	settings,
+} from "../../src/core/db/schema";
+import { newId } from "../../src/core/ids";
 import { ROLE_PERMISSIONS } from "../../src/core/rbac";
 import {
-	clearRetryDefaultsCache,
+	clearSettingsCache,
 	RETRY_DEFAULTS_KEY,
 } from "../../src/core/settings";
 import { adminApp } from "../helpers/admin";
+import { seedBatch } from "../helpers/archive";
 import { testDeps } from "../helpers/deps";
 import { seedDelivery, seedPipeline } from "../helpers/seed";
 
 // Each adminApp mints fresh keys under the same kid.
 beforeEach(async () => {
 	clearAccessKeyCache();
-	clearRetryDefaultsCache();
+	clearSettingsCache();
 	const deps = testDeps();
 	await deps.db.delete(settings).where(eq(settings.key, RETRY_DEFAULTS_KEY));
 });
@@ -34,6 +41,9 @@ function cases(ids: {
 	destination: string;
 	event: string;
 	delivery: string;
+	alert: string;
+	channel: string;
+	archive: string;
 }): Case[] {
 	return [
 		{ method: "GET", path: "/projects", permission: "events.read" },
@@ -145,7 +155,55 @@ function cases(ids: {
 		},
 		{ method: "GET", path: "/audit-logs", permission: "audit.read" },
 		{ method: "GET", path: "/overview", permission: "events.read" },
+		{ method: "GET", path: "/alerts", permission: "events.read" },
+		{ method: "GET", path: `/alerts/${ids.alert}`, permission: "events.read" },
+		{ method: "GET", path: "/alert-channels", permission: "settings.manage" },
+		{
+			method: "POST",
+			path: "/alert-channels",
+			permission: "settings.manage",
+			body: {
+				name: "x",
+				config: {
+					type: "discord",
+					url: "https://discord.com/api/webhooks/1/a",
+				},
+			},
+		},
+		{
+			method: "PATCH",
+			path: `/alert-channels/${ids.channel}`,
+			permission: "settings.manage",
+			body: { enabled: false },
+		},
+		{
+			method: "POST",
+			path: `/alert-channels/${ids.channel}/test`,
+			permission: "settings.manage",
+		},
+		{
+			method: "DELETE",
+			path: `/alert-channels/${ids.channel}`,
+			permission: "settings.manage",
+		},
 		{ method: "GET", path: "/destinations/stats", permission: "events.read" },
+		{ method: "GET", path: "/archives", permission: "events.read" },
+		{
+			method: "GET",
+			path: "/archives/preview?hot_retention_days=30&failed_retention_days=90",
+			permission: "settings.manage",
+		},
+		{
+			method: "GET",
+			path: `/archives/${ids.archive}/parts/1`,
+			permission: "payload.read",
+		},
+		{
+			method: "POST",
+			path: "/archives/run",
+			permission: "settings.manage",
+			body: {},
+		},
 		{ method: "GET", path: "/settings", permission: "events.read" },
 		{
 			method: "PATCH",
@@ -171,6 +229,44 @@ describe("RBAC matrix (spec §6.2–6.3)", () => {
 			const { eventId, deliveryId } = await seedDelivery(deps, p, {
 				status: "dead",
 			});
+			const now = deps.now();
+			const channelId = newId("ach", now);
+			await deps.db.insert(alertChannels).values({
+				id: channelId,
+				name: "rbac",
+				type: "discord",
+				configEnc: "enc",
+				configFingerprint: "deadbeef",
+				createdAt: now,
+				updatedAt: now,
+			});
+			const alertId = newId("alr", now);
+			await deps.db.insert(alerts).values({
+				id: alertId,
+				rule: "new_dead",
+				resourceType: "destination",
+				resourceId: p.destination.id,
+				projectId: p.project.id,
+				status: "open",
+				openedAt: now,
+				detailsJson: "{}",
+			});
+			const archiveBatch = await seedBatch(deps, {
+				status: "verified",
+				withFiles: true,
+			});
+			const archiveKey = `archive/2026/01/02/${archiveBatch.id}/part-0001.ndjson.gz`;
+			await deps.payloads.put(archiveKey, new Uint8Array([31, 139, 8]));
+			await deps.db.insert(archiveParts).values({
+				batchId: archiveBatch.id,
+				partNo: 1,
+				r2Key: archiveKey,
+				itemCount: 1,
+				bytes: 3,
+				sha256: null,
+				firstId: "evt_a",
+				lastId: "evt_a",
+			});
 			const api = await adminApp(deps, { role });
 			for (const k of cases({
 				project: p.project.id,
@@ -178,6 +274,9 @@ describe("RBAC matrix (spec §6.2–6.3)", () => {
 				destination: p.destination.id,
 				event: eventId,
 				delivery: deliveryId,
+				alert: alertId,
+				channel: channelId,
+				archive: archiveBatch.id,
 			})) {
 				const res = await api.request(k.method, k.path, k.body);
 				const allowed = ROLE_PERMISSIONS[role].includes(k.permission);

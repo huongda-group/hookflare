@@ -102,6 +102,8 @@ export async function toDestination(
 		max_attempts: row.maxAttempts,
 		backoff_base_s: row.backoffBaseS,
 		backoff_max_s: row.backoffMaxS,
+		max_in_flight: row.maxInFlight,
+		rate_limit_per_s: row.rateLimitPerS,
 		signing_secret_fingerprint: await secretFingerprint(
 			await decryptSecret(env, row.signingSecretEnc, aad.destination(row.id)),
 		),
@@ -202,6 +204,9 @@ export function destinationRoutes() {
 			maxAttempts: fields.max_attempts ?? null,
 			backoffBaseS: fields.backoff_base_s ?? null,
 			backoffMaxS: fields.backoff_max_s ?? null,
+			maxInFlight: fields.max_in_flight ?? null,
+			rateLimitPerS: fields.rate_limit_per_s ?? null,
+			consecutiveFailures: 0,
 			createdAt: ts,
 			updatedAt: ts,
 		};
@@ -300,6 +305,17 @@ export function destinationRoutes() {
 				: {}),
 			...(v.backoff_max_s !== undefined
 				? { backoffMaxS: v.backoff_max_s }
+				: {}),
+			...(v.max_in_flight !== undefined
+				? { maxInFlight: v.max_in_flight }
+				: {}),
+			...(v.rate_limit_per_s !== undefined
+				? { rateLimitPerS: v.rate_limit_per_s }
+				: {}),
+			// A new URL or a resume starts the failure streak over.
+			...((v.url !== undefined && v.url !== existing.url) ||
+			(v.status === "active" && existing.status !== "active")
+				? { consecutiveFailures: 0 }
 				: {}),
 		};
 		// Only a patch that touches backoff is validated: raised defaults must not
@@ -451,7 +467,15 @@ export function destinationRoutes() {
 			if (existing.status === "paused") {
 				const ts = deps.now();
 				const [[transitioned]] = await deps.db.batch([
-					transitionDestinationStmt(deps.db, id, "paused", "active", ts),
+					// A fresh start: failures from before the pause must not re-trigger
+					// consecutive_failures on the first post-resume error.
+					deps.db
+						.update(destinations)
+						.set({ status: "active", consecutiveFailures: 0, updatedAt: ts })
+						.where(
+							and(eq(destinations.id, id), eq(destinations.status, "paused")),
+						)
+						.returning(),
 					auditInsertIfChanged(deps.db, {
 						actor: c.var.actor?.email ?? "",
 						at: ts,

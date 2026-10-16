@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+	alertChannelConfigSchema,
+	alertRulesSchema,
 	bulkReplayRequest,
 	createDestinationRequest,
 	createProjectRequest,
 	createSourceRequest,
 	createUserRequest,
+	DEFAULT_ALERT_RULES,
+	DEFAULT_STORAGE_SETTINGS,
 	eventIdConfigError,
 	eventSearchQuery,
+	isAllowedAlertUrl,
 	listQuery,
 	PERMISSIONS,
 	patchDestinationRequest,
@@ -18,6 +23,7 @@ import {
 	rotateDestinationSecretRequest,
 	rotateSourceSecretRequest,
 	statsQuery,
+	storageSettingsSchema,
 } from "../src/admin";
 
 const base = { project_id: "prj_1", destination_id: "dst_1", name: "Stripe" };
@@ -326,5 +332,155 @@ describe("M4 contracts", () => {
 		expect(eventSearchQuery.safeParse({ http_status: "600" }).success).toBe(
 			false,
 		);
+	});
+});
+
+describe("destination limits", () => {
+	const base = {
+		project_id: "prj_1",
+		name: "a",
+		url: "https://example.com/h",
+	};
+	it("accepts 1–1000 and null on patch", () => {
+		expect(
+			createDestinationRequest.safeParse({
+				...base,
+				max_in_flight: 1,
+				rate_limit_per_s: 1000,
+			}).success,
+		).toBe(true);
+		expect(
+			patchDestinationRequest.safeParse({
+				max_in_flight: null,
+				rate_limit_per_s: null,
+			}).success,
+		).toBe(true);
+	});
+	it("rejects 0, 1001, and fractions", () => {
+		for (const v of [0, 1001, 1.5]) {
+			expect(
+				createDestinationRequest.safeParse({ ...base, max_in_flight: v })
+					.success,
+			).toBe(false);
+			expect(
+				patchDestinationRequest.safeParse({ rate_limit_per_s: v }).success,
+			).toBe(false);
+		}
+	});
+});
+
+describe("alert schemas", () => {
+	it("alert_rules defaults are valid and bounds hold", () => {
+		expect(alertRulesSchema.safeParse(DEFAULT_ALERT_RULES).success).toBe(true);
+		expect(
+			alertRulesSchema.safeParse({ ...DEFAULT_ALERT_RULES, reminder_s: 0 })
+				.success,
+		).toBe(true);
+		expect(
+			alertRulesSchema.safeParse({ ...DEFAULT_ALERT_RULES, reminder_s: 300 })
+				.success,
+		).toBe(false);
+		expect(
+			alertRulesSchema.safeParse({
+				...DEFAULT_ALERT_RULES,
+				failure_threshold: 1,
+			}).success,
+		).toBe(false);
+		expect(
+			alertRulesSchema.safeParse({ ...DEFAULT_ALERT_RULES, d1_warn_pct: 96 })
+				.success,
+		).toBe(false);
+	});
+
+	it("allowlists webhook hosts and paths (M5-10)", () => {
+		expect(
+			isAllowedAlertUrl("discord", "https://discord.com/api/webhooks/1/abc"),
+		).toBe(true);
+		expect(
+			isAllowedAlertUrl("discord", "https://discordapp.com/api/webhooks/1/abc"),
+		).toBe(true);
+		expect(
+			isAllowedAlertUrl("discord", "http://discord.com/api/webhooks/1/abc"),
+		).toBe(false);
+		expect(
+			isAllowedAlertUrl(
+				"discord",
+				"https://discord.com.evil.io/api/webhooks/1",
+			),
+		).toBe(false);
+		expect(isAllowedAlertUrl("discord", "https://discord.com/api/other")).toBe(
+			false,
+		);
+		expect(
+			isAllowedAlertUrl(
+				"discord",
+				"https://user:pw@discord.com/api/webhooks/1",
+			),
+		).toBe(false);
+		expect(
+			isAllowedAlertUrl("slack", "https://hooks.slack.com/services/T/B/x"),
+		).toBe(true);
+		expect(
+			isAllowedAlertUrl("slack", "https://hooks.slack.com:8443/services/T/B/x"),
+		).toBe(false);
+	});
+
+	it("validates channel configs by type", () => {
+		const tg = {
+			type: "telegram",
+			bot_token: `123456:${"a".repeat(35)}`,
+			chat_id: "-100123",
+		};
+		expect(alertChannelConfigSchema.safeParse(tg).success).toBe(true);
+		expect(
+			alertChannelConfigSchema.safeParse({ ...tg, bot_token: "nope" }).success,
+		).toBe(false);
+		expect(
+			alertChannelConfigSchema.safeParse({ ...tg, chat_id: "abc" }).success,
+		).toBe(false);
+		expect(
+			alertChannelConfigSchema.safeParse({
+				type: "slack",
+				url: "https://discord.com/api/webhooks/1/a",
+			}).success,
+		).toBe(false);
+	});
+
+	it("requires at least one settings section", () => {
+		expect(patchSettingsRequest.safeParse({}).success).toBe(false);
+		expect(
+			patchSettingsRequest.safeParse({ alert_rules: DEFAULT_ALERT_RULES })
+				.success,
+		).toBe(true);
+	});
+});
+
+describe("storage settings", () => {
+	it("accepts the defaults and enforces failed ≥ hot", () => {
+		expect(
+			storageSettingsSchema.safeParse(DEFAULT_STORAGE_SETTINGS).success,
+		).toBe(true);
+		const bad = storageSettingsSchema.safeParse({
+			...DEFAULT_STORAGE_SETTINGS,
+			hot_retention_days: 40,
+			failed_retention_days: 30,
+		});
+		expect(bad.success).toBe(false);
+		if (!bad.success)
+			expect(bad.error.issues[0].path).toEqual(["failed_retention_days"]);
+	});
+	it("allows null archive retention (forever) but not below 30 days", () => {
+		expect(
+			storageSettingsSchema.safeParse({
+				...DEFAULT_STORAGE_SETTINGS,
+				archive_retention_days: null,
+			}).success,
+		).toBe(true);
+		expect(
+			storageSettingsSchema.safeParse({
+				...DEFAULT_STORAGE_SETTINGS,
+				archive_retention_days: 29,
+			}).success,
+		).toBe(false);
 	});
 });

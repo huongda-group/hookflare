@@ -5,6 +5,9 @@ import { createDeps, type DeliveryMessage } from "./deps";
 import type { AppEnv } from "./env";
 import { runScheduled } from "./jobs/scheduled";
 
+export { DestinationLimiter } from "./delivery/limiter";
+export { ArchiveWorkflow } from "./jobs/archive/workflow";
+
 const app = createApp();
 
 export default {

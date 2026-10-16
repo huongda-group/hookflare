@@ -102,4 +102,7 @@ export const api = {
 		json<T>(`${path}${qs(query)}`),
 	post: <T>(path: string, body?: unknown) => send<T>("POST", path, body),
 	patch: <T>(path: string, body?: unknown) => send<T>("PATCH", path, body),
+	/** DELETE answers 204 with an empty body, so there is nothing to parse. */
+	delete: (path: string) =>
+		apiRaw(path, { method: "DELETE" }).then(() => undefined),
 };

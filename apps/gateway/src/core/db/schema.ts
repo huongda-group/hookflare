@@ -39,6 +39,24 @@ export const ERROR_KINDS = [
 export const ROLES = ["admin", "operator", "viewer"] as const;
 /** Test deliveries also record an SSRF block, which never reaches the backend. */
 export const TEST_ERROR_KINDS = [...ERROR_KINDS, "ssrf_blocked"] as const;
+export const ALERT_CHANNEL_TYPES = ["discord", "slack", "telegram"] as const;
+export const ALERT_RESOURCE_TYPES = ["destination", "system"] as const;
+export const ALERT_STATUSES = ["open", "resolved"] as const;
+export const NOTIFICATION_KINDS = ["opened", "reminder", "resolved"] as const;
+export const NOTIFICATION_STATUSES = [
+	"pending",
+	"sending",
+	"sent",
+	"failed",
+] as const;
+export const ARCHIVE_KINDS = ["events", "audit"] as const;
+export const ARCHIVE_STATUSES = [
+	"building",
+	"verified",
+	"purged",
+	"failed",
+	"expired",
+] as const;
 
 export type AuthType = (typeof AUTH_TYPES)[number];
 export type EventIdFrom = (typeof EVENT_ID_FROM)[number];
@@ -112,11 +130,18 @@ export const destinations = sqliteTable(
 		maxAttempts: integer("max_attempts"),
 		backoffBaseS: integer("backoff_base_s"),
 		backoffMaxS: integer("backoff_max_s"),
+		// M5a limits (spec §5.1). Bounds 1–1000 are enforced by the API only:
+		// a table-level CHECK would make drizzle-kit rebuild this FK target.
+		maxInFlight: integer("max_in_flight"),
+		rateLimitPerS: integer("rate_limit_per_s"),
+		/** M5-12: 0 after a delivered attempt, +1 after any other; written in the fenced record batch. */
+		consecutiveFailures: integer("consecutive_failures").notNull().default(0),
 		createdAt: integer("created_at").notNull(),
 		updatedAt: integer("updated_at").notNull(),
 	},
-	() => [
+	(t) => [
 		check("destinations_status_check", inList("status", DESTINATION_STATUSES)),
+		index("destinations_consecutive_failures_idx").on(t.consecutiveFailures),
 	],
 );
 
@@ -187,11 +212,18 @@ export const webhookEvents = sqliteTable(
 		bodyInline: bytes("body_inline").notNull(),
 		/** Set when the body is in R2 (> 64 KiB); body_inline is then empty. */
 		r2Key: text("r2_key"),
+		/** M5-17 mark: the batch and part this event is being archived in. Replay clears it. */
+		archiveBatchId: text("archive_batch_id"),
+		archivePart: integer("archive_part"),
 	},
 	(t) => [
 		index("webhook_events_source_received_idx").on(t.sourceId, t.receivedAt),
 		index("webhook_events_project_received_idx").on(t.projectId, t.receivedAt),
 		index("webhook_events_received_idx").on(t.receivedAt),
+		index("webhook_events_archive_mark_idx").on(
+			t.archiveBatchId,
+			t.archivePart,
+		),
 		uniqueIndex("webhook_events_source_provider_uq")
 			.on(t.sourceId, t.providerEventId)
 			.where(sql`provider_event_id IS NOT NULL`),
@@ -368,3 +400,141 @@ export const statsHourly = sqliteTable(
 );
 
 export type StatsHourlyRow = typeof statsHourly.$inferSelect;
+
+/** M5b channels (spec §6.1). config_enc holds the whole config (M5-9). */
+export const alertChannels = sqliteTable(
+	"alert_channels",
+	{
+		id: text("id").primaryKey(),
+		name: text("name").notNull(),
+		type: text("type", { enum: ALERT_CHANNEL_TYPES }).notNull(),
+		configEnc: text("config_enc").notNull(),
+		configFingerprint: text("config_fingerprint").notNull(),
+		chatId: text("chat_id"),
+		enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+		/** JSON array of rules; [] = every rule. */
+		rulesJson: text("rules_json").notNull().default("[]"),
+		/** JSON array of project IDs; [] = every project and system incidents. */
+		projectIdsJson: text("project_ids_json").notNull().default("[]"),
+		createdAt: integer("created_at").notNull(),
+		updatedAt: integer("updated_at").notNull(),
+	},
+	() => [
+		check("alert_channels_type_check", inList("type", ALERT_CHANNEL_TYPES)),
+	],
+);
+
+/** M5-11: at most one open incident per (rule, resource). */
+export const alerts = sqliteTable(
+	"alerts",
+	{
+		id: text("id").primaryKey(),
+		rule: text("rule").notNull(),
+		resourceType: text("resource_type", {
+			enum: ALERT_RESOURCE_TYPES,
+		}).notNull(),
+		resourceId: text("resource_id").notNull(),
+		projectId: text("project_id"),
+		status: text("status", { enum: ALERT_STATUSES }).notNull(),
+		openedAt: integer("opened_at").notNull(),
+		lastNotifiedAt: integer("last_notified_at"),
+		resolvedAt: integer("resolved_at"),
+		detailsJson: text("details_json").notNull().default("{}"),
+	},
+	(t) => [
+		check(
+			"alerts_resource_type_check",
+			inList("resource_type", ALERT_RESOURCE_TYPES),
+		),
+		check("alerts_status_check", inList("status", ALERT_STATUSES)),
+		uniqueIndex("alerts_open_key_uq")
+			.on(t.rule, t.resourceType, t.resourceId)
+			.where(sql`status = 'open'`),
+		index("alerts_status_opened_idx").on(t.status, t.openedAt),
+	],
+);
+
+/** M5-14 outbox: one row per (state change, channel). */
+export const alertNotifications = sqliteTable(
+	"alert_notifications",
+	{
+		id: text("id").primaryKey(),
+		alertId: text("alert_id")
+			.notNull()
+			.references(() => alerts.id),
+		channelId: text("channel_id")
+			.notNull()
+			.references(() => alertChannels.id),
+		kind: text("kind", { enum: NOTIFICATION_KINDS }).notNull(),
+		status: text("status", { enum: NOTIFICATION_STATUSES })
+			.notNull()
+			.default("pending"),
+		tries: integer("tries").notNull().default(0),
+		lastError: text("last_error"),
+		createdAt: integer("created_at").notNull(),
+		/** When the current `sending` claim started; a claim older than 60 s is reclaimed. */
+		claimedAt: integer("claimed_at"),
+		sentAt: integer("sent_at"),
+	},
+	(t) => [
+		check("alert_notifications_kind_check", inList("kind", NOTIFICATION_KINDS)),
+		check(
+			"alert_notifications_status_check",
+			inList("status", NOTIFICATION_STATUSES),
+		),
+		index("alert_notifications_status_created_idx").on(t.status, t.createdAt),
+		index("alert_notifications_alert_idx").on(t.alertId),
+	],
+);
+
+export type AlertChannelRow = typeof alertChannels.$inferSelect;
+export type AlertRow = typeof alerts.$inferSelect;
+export type AlertNotificationRow = typeof alertNotifications.$inferSelect;
+
+/** M5-18: one day is archived more than once, so batches are keyed by ID. */
+export const archiveBatches = sqliteTable(
+	"archive_batches",
+	{
+		id: text("id").primaryKey(),
+		kind: text("kind", { enum: ARCHIVE_KINDS }).notNull(),
+		/** UTC day, YYYY-MM-DD. */
+		day: text("day").notNull(),
+		status: text("status", { enum: ARCHIVE_STATUSES }).notNull(),
+		withFiles: integer("with_files", { mode: "boolean" }).notNull(),
+		partCount: integer("part_count").notNull().default(0),
+		itemCount: integer("item_count").notNull().default(0),
+		bytes: integer("bytes").notNull().default(0),
+		workflowInstanceId: text("workflow_instance_id").notNull(),
+		error: text("error"),
+		createdAt: integer("created_at").notNull(),
+		verifiedAt: integer("verified_at"),
+		purgedAt: integer("purged_at"),
+	},
+	(t) => [
+		check("archive_batches_kind_check", inList("kind", ARCHIVE_KINDS)),
+		check("archive_batches_status_check", inList("status", ARCHIVE_STATUSES)),
+		index("archive_batches_status_idx").on(t.status),
+		index("archive_batches_day_idx").on(t.day),
+	],
+);
+
+export const archiveParts = sqliteTable(
+	"archive_parts",
+	{
+		batchId: text("batch_id")
+			.notNull()
+			.references(() => archiveBatches.id),
+		partNo: integer("part_no").notNull(),
+		/** NULL when the batch has no files (archive_enabled = false, M5-21). */
+		r2Key: text("r2_key"),
+		itemCount: integer("item_count").notNull(),
+		bytes: integer("bytes").notNull(),
+		sha256: text("sha256"),
+		firstId: text("first_id").notNull(),
+		lastId: text("last_id").notNull(),
+	},
+	(t) => [primaryKey({ columns: [t.batchId, t.partNo] })],
+);
+
+export type ArchiveBatchRow = typeof archiveBatches.$inferSelect;
+export type ArchivePartRow = typeof archiveParts.$inferSelect;

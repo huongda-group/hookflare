@@ -67,6 +67,18 @@ test("exit criteria: configure everything from the UI, then see the DLQ", async 
 	const timeline = page.locator("section").filter({ hasText: deliveryId });
 	await expect(timeline.locator('li[data-step="dead"]')).toBeVisible();
 
+	// M5c smoke: the new pages render their headings.
+	await page.goto("/alerts");
+	await expect(page.getByRole("heading", { name: "Alerts" })).toBeVisible();
+	await page.goto("/archives");
+	await expect(page.getByRole("heading", { name: "Archives" })).toBeVisible();
+	await page.goto("/settings?tab=alerts");
+	await expect(page.getByRole("heading", { name: "Channels" })).toBeVisible();
+	await page.goto("/settings?tab=storage");
+	await expect(
+		page.getByRole("heading", { name: "Archive runs" }),
+	).toBeVisible();
+
 	// run_worker_first: an unknown API path is the Worker's JSON 404, not index.html.
 	const nope = await page.request.get("/api/admin/v1/nope");
 	expect(nope.status()).toBe(404);

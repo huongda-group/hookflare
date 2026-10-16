@@ -20,6 +20,8 @@ const backoffBaseS = z.number().int().min(1).max(3600);
 /** Queues cap delaySeconds at 12 h. ≥ backoff_base_s is checked by the route after defaults. */
 const backoffMaxS = z.number().int().min(1).max(43_200);
 const maxBodyBytes = z.number().int().min(1).max(10_485_760);
+/** M5a: NULL = unlimited. Not part of retry_defaults (limits describe one backend). */
+export const destinationLimit = z.number().int().min(1).max(1000);
 const secret = z.string().min(16).max(512);
 
 export const reasonSchema = z.string().trim().min(1).max(500);
@@ -126,6 +128,8 @@ export const createDestinationRequest = z.strictObject({
 	max_attempts: maxAttempts.optional(),
 	backoff_base_s: backoffBaseS.optional(),
 	backoff_max_s: backoffMaxS.optional(),
+	max_in_flight: destinationLimit.nullable().optional(),
+	rate_limit_per_s: destinationLimit.nullable().optional(),
 	...optionalReason,
 });
 export const patchDestinationRequest = z.strictObject({
@@ -136,6 +140,8 @@ export const patchDestinationRequest = z.strictObject({
 	max_attempts: maxAttempts.nullable().optional(),
 	backoff_base_s: backoffBaseS.nullable().optional(),
 	backoff_max_s: backoffMaxS.nullable().optional(),
+	max_in_flight: destinationLimit.nullable().optional(),
+	rate_limit_per_s: destinationLimit.nullable().optional(),
 	...optionalReason,
 });
 
@@ -209,6 +215,8 @@ export type Destination = {
 	max_attempts: number | null;
 	backoff_base_s: number | null;
 	backoff_max_s: number | null;
+	max_in_flight: number | null;
+	rate_limit_per_s: number | null;
 	signing_secret_fingerprint: string;
 	previous_secret_fingerprint: string | null;
 	previous_secret_expires_at: number | null;
@@ -495,13 +503,273 @@ export const retryDefaultsSchema = z
 	});
 export type RetryDefaults = z.infer<typeof retryDefaultsSchema>;
 
-export const patchSettingsRequest = z.strictObject({
-	retry_defaults: retryDefaultsSchema,
+export const ALERT_RULES = [
+	"consecutive_failures",
+	"new_dead",
+	"stuck_pending",
+	"d1_storage",
+	"archive_stuck",
+] as const;
+export type AlertRule = (typeof ALERT_RULES)[number];
+
+/** Spec §6.2. reminder_s = 0 means "never remind". */
+export const alertRulesSchema = z.strictObject({
+	failure_threshold: z.number().int().min(2).max(100),
+	stuck_after_s: z.number().int().min(60).max(86_400),
+	dead_quiet_s: z.number().int().min(300).max(86_400),
+	d1_warn_pct: z.number().int().min(50).max(95),
+	reminder_s: z
+		.number()
+		.int()
+		.refine((v) => v === 0 || (v >= 600 && v <= 86_400), {
+			message: "Use 0 (never) or 600–86400",
+		}),
+});
+export type AlertRules = z.infer<typeof alertRulesSchema>;
+export const DEFAULT_ALERT_RULES: AlertRules = {
+	failure_threshold: 5,
+	stuck_after_s: 300,
+	dead_quiet_s: 1_800,
+	d1_warn_pct: 80,
+	reminder_s: 3_600,
+};
+
+export const ALERT_CHANNEL_TYPES = ["discord", "slack", "telegram"] as const;
+export type AlertChannelType = (typeof ALERT_CHANNEL_TYPES)[number];
+
+/** M5-10: alerts only ever go to these endpoints. */
+interface ParsedAlertUrl {
+	protocol: string;
+	username: string;
+	password: string;
+	port: string;
+	hostname: string;
+	pathname: string;
+}
+/** The shared package typechecks without the DOM lib; at runtime this is the global URL. */
+declare const URL: new (url: string) => ParsedAlertUrl;
+export function isAllowedAlertUrl(
+	type: "discord" | "slack",
+	raw: string,
+): boolean {
+	let u: ParsedAlertUrl;
+	try {
+		u = new URL(raw);
+	} catch {
+		return false;
+	}
+	if (u.protocol !== "https:" || u.username || u.password || u.port)
+		return false;
+	if (type === "discord") {
+		return (
+			(u.hostname === "discord.com" || u.hostname === "discordapp.com") &&
+			u.pathname.startsWith("/api/webhooks/")
+		);
+	}
+	return (
+		u.hostname === "hooks.slack.com" && u.pathname.startsWith("/services/")
+	);
+}
+
+export const TELEGRAM_TOKEN_RE = /^\d+:[A-Za-z0-9_-]{30,}$/;
+
+const webhookUrl = (type: "discord" | "slack") =>
+	z
+		.string()
+		.max(2048)
+		.refine((v) => isAllowedAlertUrl(type, v), {
+			message:
+				type === "discord"
+					? "Use a https://discord.com/api/webhooks/… URL"
+					: "Use a https://hooks.slack.com/services/… URL",
+		});
+
+export const alertChannelConfigSchema = z.discriminatedUnion("type", [
+	z.strictObject({ type: z.literal("discord"), url: webhookUrl("discord") }),
+	z.strictObject({ type: z.literal("slack"), url: webhookUrl("slack") }),
+	z.strictObject({
+		type: z.literal("telegram"),
+		bot_token: z.string().regex(TELEGRAM_TOKEN_RE, "Not a Telegram bot token"),
+		chat_id: z
+			.string()
+			.regex(
+				/^(-?\d{1,20}|@[A-Za-z0-9_]{5,32})$/,
+				"Use a numeric chat ID or @channel",
+			),
+	}),
+]);
+export type AlertChannelConfig = z.infer<typeof alertChannelConfigSchema>;
+
+const channelRoutes = {
+	rules: z.array(z.enum(ALERT_RULES)).max(ALERT_RULES.length),
+	project_ids: z.array(projectId).max(50),
+};
+
+export const createAlertChannelRequest = z.strictObject({
+	name,
+	config: alertChannelConfigSchema,
+	enabled: z.boolean().default(true),
+	rules: channelRoutes.rules.default([]),
+	project_ids: channelRoutes.project_ids.default([]),
 	...optionalReason,
 });
+/** `config` replaces the stored one; its type must match the channel's. */
+export const patchAlertChannelRequest = z.strictObject({
+	name: name.optional(),
+	enabled: z.boolean().optional(),
+	rules: channelRoutes.rules.optional(),
+	project_ids: channelRoutes.project_ids.optional(),
+	config: alertChannelConfigSchema.optional(),
+	...optionalReason,
+});
+
+export const alertsQuery = listQuery.extend({
+	status: z.enum(["open", "resolved"]).optional(),
+	rule: z.enum(ALERT_RULES).optional(),
+});
+
+export type AlertChannel = {
+	id: string;
+	name: string;
+	type: AlertChannelType;
+	enabled: boolean;
+	rules: AlertRule[];
+	project_ids: string[];
+	config_fingerprint: string;
+	chat_id: string | null;
+	created_at: number;
+	updated_at: number;
+};
+export type Alert = {
+	id: string;
+	rule: AlertRule;
+	resource_type: "destination" | "system";
+	resource_id: string;
+	/** Destination name, or null for system incidents and deleted destinations. */
+	resource_name: string | null;
+	project_id: string | null;
+	status: "open" | "resolved";
+	opened_at: number;
+	last_notified_at: number | null;
+	resolved_at: number | null;
+	details: Record<string, unknown>;
+};
+export type AlertNotification = {
+	id: string;
+	channel_id: string;
+	channel_name: string | null;
+	kind: "opened" | "reminder" | "resolved";
+	status: "pending" | "sending" | "sent" | "failed";
+	tries: number;
+	last_error: string | null;
+	created_at: number;
+	sent_at: number | null;
+};
+export type AlertDetail = Alert & { notifications: AlertNotification[] };
+export type ChannelTestResult = { ok: boolean; error: string | null };
+
+/** Spec §7.2. */
+export const storageSettingsSchema = z
+	.strictObject({
+		archive_enabled: z.boolean(),
+		hot_retention_days: z.number().int().min(1).max(3_650),
+		failed_retention_days: z.number().int().min(1).max(3_650),
+		archive_retention_days: z.number().int().min(30).max(36_500).nullable(),
+		audit_retention_days: z.number().int().min(30).max(36_500),
+	})
+	.refine((v) => v.failed_retention_days >= v.hot_retention_days, {
+		path: ["failed_retention_days"],
+		message: "Must be at least the hot retention",
+	});
+export type StorageSettings = z.infer<typeof storageSettingsSchema>;
+export const DEFAULT_STORAGE_SETTINGS: StorageSettings = {
+	archive_enabled: true,
+	hot_retention_days: 30,
+	failed_retention_days: 90,
+	archive_retention_days: null,
+	audit_retention_days: 365,
+};
+
+export const ARCHIVE_KINDS = ["events", "audit"] as const;
+export const ARCHIVE_STATUSES = [
+	"building",
+	"verified",
+	"purged",
+	"failed",
+	"expired",
+] as const;
+const archiveDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+export const archivesQuery = z.object({
+	limit: z.coerce.number().int().min(1).max(50).default(20),
+	cursor: z.string().max(64).optional(),
+	kind: z.enum(ARCHIVE_KINDS).optional(),
+	status: z.enum(ARCHIVE_STATUSES).optional(),
+	from_day: archiveDay.optional(),
+	to_day: archiveDay.optional(),
+});
+export const archivePreviewQuery = z.object({
+	hot_retention_days: z.coerce.number().int().min(1).max(3_650),
+	failed_retention_days: z.coerce.number().int().min(1).max(3_650),
+});
+export type ArchivePreview = { eligible: number; currently_eligible: number };
+
+export type ArchivePart = {
+	part_no: number;
+	item_count: number;
+	bytes: number;
+	sha256: string | null;
+	first_id: string;
+	last_id: string;
+	downloadable: boolean;
+};
+export type ArchiveBatch = {
+	id: string;
+	kind: (typeof ARCHIVE_KINDS)[number];
+	day: string;
+	status: (typeof ARCHIVE_STATUSES)[number];
+	with_files: boolean;
+	part_count: number;
+	item_count: number;
+	bytes: number;
+	workflow_instance_id: string;
+	error: string | null;
+	created_at: number;
+	verified_at: number | null;
+	purged_at: number | null;
+	parts: ArchivePart[];
+};
+export type ArchiveLastRun = {
+	instance_id: string;
+	status: string;
+	started_at: number;
+};
+
+export const patchSettingsRequest = z
+	.strictObject({
+		retry_defaults: retryDefaultsSchema.optional(),
+		alert_rules: alertRulesSchema.optional(),
+		storage: storageSettingsSchema.optional(),
+		...optionalReason,
+	})
+	.refine(
+		(v) =>
+			v.retry_defaults !== undefined ||
+			v.alert_rules !== undefined ||
+			v.storage !== undefined,
+		{
+			message: "Send at least one settings section",
+		},
+	);
 export type Settings = {
 	retry_defaults: RetryDefaults;
+	/** retry_defaults' version (kept for M4 clients). */
 	updated_at: number | null;
+	alert_rules: AlertRules;
+	alert_rules_updated_at: number | null;
+	storage: StorageSettings;
+	storage_updated_at: number | null;
+	archive_last_run: ArchiveLastRun | null;
 };
 
 /** Non-terminal statuses counted live by the Overview. */
@@ -542,6 +810,7 @@ export type Overview = {
 	live: Record<LiveStatus, number>;
 	trend: TrendPoint[];
 	failing_destinations: FailingDestination[];
+	open_alerts: { count: number; by_rule: Partial<Record<AlertRule, number>> };
 };
 export type DestinationStats = {
 	destination_id: string;

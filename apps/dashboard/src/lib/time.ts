@@ -58,6 +58,18 @@ export function formatBytes(n: number): string {
 	return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+/** "45 s", "12 min", "3 h 5 min", "2 d 4 h". */
+export function formatDuration(ms: number): string {
+	const s = Math.max(0, Math.round(ms / 1000));
+	if (s < 60) return `${s} s`;
+	const m = Math.floor(s / 60);
+	if (m < 60) return `${m} min`;
+	const h = Math.floor(m / 60);
+	if (h < 24) return m % 60 ? `${h} h ${m % 60} min` : `${h} h`;
+	const d = Math.floor(h / 24);
+	return h % 24 ? `${d} d ${h % 24} h` : `${d} d`;
+}
+
 /** `datetime-local` wants local "YYYY-MM-DDTHH:mm". */
 export function toLocalInput(ms: number) {
 	const d = new Date(ms - new Date(ms).getTimezoneOffset() * 60_000);

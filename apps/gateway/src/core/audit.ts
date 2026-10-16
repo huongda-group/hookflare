@@ -22,7 +22,13 @@ export type AuditAction =
 	| "user.role_changed"
 	| "user.disabled"
 	| "user.enabled"
-	| "settings.updated";
+	| "settings.updated"
+	| "alert_channel.created"
+	| "alert_channel.updated"
+	| "alert_channel.deleted"
+	| "alert_channel.tested"
+	| "archive.downloaded"
+	| "archive.run_started";
 
 const SENSITIVE_KEY = /secret|token|password/i;
 

@@ -37,6 +37,23 @@ export const DEFAULT_SETTINGS: Settings = {
 		backoff_max_s: 21_600,
 	},
 	updated_at: null,
+	alert_rules: {
+		failure_threshold: 5,
+		stuck_after_s: 300,
+		dead_quiet_s: 1800,
+		d1_warn_pct: 80,
+		reminder_s: 3600,
+	},
+	alert_rules_updated_at: null,
+	storage: {
+		archive_enabled: true,
+		hot_retention_days: 30,
+		failed_retention_days: 90,
+		archive_retention_days: null,
+		audit_retention_days: 365,
+	},
+	storage_updated_at: null,
+	archive_last_run: null,
 };
 
 const empty = { data: [], next_cursor: null };
@@ -53,7 +70,10 @@ export const server = setupServer(
 		"/failures",
 		"/users",
 		"/audit-logs",
+		"/alerts",
+		"/archives",
 	].map((p) => http.get(apiUrl(p), () => HttpResponse.json(empty))),
+	http.get(apiUrl("/alert-channels"), () => HttpResponse.json({ data: [] })),
 	http.get(apiUrl("/destinations/stats"), () =>
 		HttpResponse.json({ data: [] }),
 	),
