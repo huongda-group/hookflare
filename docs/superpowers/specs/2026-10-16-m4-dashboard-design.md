@@ -28,6 +28,7 @@
 - `DestinationLimiter` and editing `max_in_flight` / `rate_limit_per_s` (M5).
 - Dark mode, i18n, mobile layouts below 1024 px (backlog). The dashboard targets desktop browsers.
 - Live updates over WebSockets/SSE. Polling is enough for an internal tool (§9.2).
+- Typed create/edit forms for destinations and sources (backlog). `DestinationFormDialog` and `SourceFormDialog` each switch between a create and a patch schema at runtime and pass the resolver through an `as never` cast; removing it means splitting each into separate create and edit forms. Server-side validation is unaffected.
 
 ## 3. Decisions taken in this spec
 
@@ -160,12 +161,12 @@ Response:
 
 ### 7.2 `GET /destinations/stats` — `events.read`
 
-Query: `project_id` (optional), `range` (as above, default `24h`). One item per destination in scope: `destination_id`, `delivered`, `failed`, `success_rate` (from `stats_hourly`, `null` when nothing completed), and `last_delivery_at`, `last_http_status`, `last_error` from the newest terminal delivery of that destination (through `deliveries(destination_id, created_at)`), all `null` when none exists.
+Query: `project_id` (optional), `range` (as above, default `24h`). One item per destination in scope: `destination_id`, `delivered`, `failed`, `success_rate` (from `stats_hourly`, `null` when nothing completed), and `last_delivery_at`, `last_http_status`, `last_error` from the newest terminal delivery of that destination, all `null` when none exists. "Newest" means newest by `created_at`, through the `deliveries(destination_id, created_at)` index, not newest by `completed_at`: an older delivery that retried for hours and then died is not shown if a newer one finished first. This is accepted for M4 because no index covers `(destination_id, completed_at)`; the Failures page is where every recent failure is listed.
 
 ### 7.3 `GET /settings` and `PATCH /settings`
 
 - `GET /settings` (`events.read`) → `{retry_defaults: {timeout_ms, max_attempts, backoff_base_s, backoff_max_s}, updated_at}`. When no row exists, `retry_defaults` is `DEFAULT_POLICY` and `updated_at` is `null`.
-- `PATCH /settings` (`settings.manage`): `{retry_defaults: {...}, reason?}`. All four fields are required, with the same bounds as the destination policy fields (`backoff_max_s` ≤ 43200, `backoff_base_s` ≤ `backoff_max_s`). One `db.batch`: upsert `settings` + audit `settings.updated` with `{before, after}`. Response: the `GET` shape.
+- `PATCH /settings` (`settings.manage`): `{retry_defaults: {...}, reason?}`. All four fields are required, with the same bounds as the destination policy fields (`backoff_max_s` ≤ 43200, `backoff_base_s` ≤ `backoff_max_s`). One `db.batch`: upsert `settings` + audit `settings.updated` with `{before, after}`. The upsert only lands if `updated_at` still matches the value read for `before`, and the audit row is written only if it did; a concurrent update answers `409 conflict` with nothing written, so `before` is never stale. A stored row that fails validation is served as the defaults and logs `settings.retry_defaults_invalid`. Response: the `GET` shape.
 - **Effective policy:** `resolvePolicy(dest, defaults)`. A field set on the destination always wins. `core/settings.ts` caches the defaults per isolate for 30 s, like the source cache. A D1 error while loading the defaults is an infra error (`msg.retry`, no attempt counted).
 
 ### 7.4 `GET /events` changes (additive)
@@ -200,7 +201,7 @@ Query: `project_id` (optional), `range` (as above, default `24h`). One item per 
 ### 9.2 Queries
 - TanStack Query, with a key factory per resource in `lib/queries/`. Lists use `useInfiniteQuery` over `next_cursor`, with a "Load more" button (no page numbers, cursors only).
 - Mutations invalidate the keys they affect: replay invalidates the event, its deliveries, and failures; pause/resume invalidates the destination and its stats.
-- The Overview and Event Detail refetch every 15 s while the tab is visible (`refetchInterval` + `refetchIntervalInBackground: false`). Other pages refresh on demand, through a refresh button and on window focus.
+- The Overview refetches every 15 s while the tab is visible (`refetchInterval` + `refetchIntervalInBackground: false`). Event Detail uses the same interval, but only while at least one of its deliveries is non-terminal; once every delivery is terminal nothing on the page can change, so polling stops. Other pages refresh on demand, through a refresh button and on window focus.
 
 ### 9.3 Permissions
 - `useMe()` loads `/me` once (`staleTime: Infinity`) and is refetched after any `403`.
