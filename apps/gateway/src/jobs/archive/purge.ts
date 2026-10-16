@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { type Cutoffs, DAY_MS, eligibleSql } from "../../core/db/archive";
 import {
 	archiveBatches,
@@ -52,9 +52,23 @@ export async function purgeEventChunk(
 		deps.db.delete(deliveries).where(sql`event_id IN (${target})`),
 		deps.db.delete(webhookEvents).where(sql`id IN (${target})`),
 	]);
+	// The keys above came from the pre-delete SELECT, but the D1 delete
+	// re-checks mark + eligibility: an event unmarked (replay) or newly
+	// ineligible between SELECT and delete survives in D1, so only return
+	// keys for IDs confirmed gone. IN slices stay under D1's 100-param cap.
+	const ids = rows.map((r) => r.id);
+	const alive = new Set<string>();
+	for (let i = 0; i < ids.length; i += 90) {
+		const kept = await deps.db
+			.select({ id: webhookEvents.id })
+			.from(webhookEvents)
+			.where(inArray(webhookEvents.id, ids.slice(i, i + 90)));
+		for (const k of kept) alive.add(k.id);
+	}
+	const gone = rows.filter((r) => !alive.has(r.id));
 	return {
-		deleted: rows.length,
-		r2Keys: rows.flatMap((r) => (r.r2_key ? [r.r2_key] : [])),
+		deleted: gone.length,
+		r2Keys: gone.flatMap((r) => (r.r2_key ? [r.r2_key] : [])),
 		done: rows.length < PURGE_CHUNK,
 	};
 }

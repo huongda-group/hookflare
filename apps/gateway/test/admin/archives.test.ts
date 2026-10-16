@@ -14,7 +14,7 @@ describe("archives API (spec §7.6)", () => {
 	});
 
 	async function batchWithPart(
-		status: "verified" | "building" | "expired",
+		status: "verified" | "building" | "expired" | "failed" | "purged",
 		withFiles = true,
 	) {
 		const b = await seedBatch(deps, { status, withFiles });
@@ -80,9 +80,23 @@ describe("archives API (spec §7.6)", () => {
 		).toBe(403);
 	});
 
+	it("streams a purged batch with files to operators", async () => {
+		const b = await batchWithPart("purged");
+		const res = await (await adminApp(deps, { role: "operator" })).request(
+			"GET",
+			`/archives/${b.id}/parts/1`,
+		);
+		expect(res.status).toBe(200);
+		expect(res.headers.get("content-type")).toBe("application/gzip");
+		expect(new Uint8Array(await res.arrayBuffer())).toEqual(
+			new Uint8Array([31, 139, 8]),
+		);
+	});
+
 	it.each([
 		["building", true],
 		["expired", true],
+		["failed", true],
 		["verified", false],
 	] as const)(
 		"returns 404 for a %s batch (files: %s)",

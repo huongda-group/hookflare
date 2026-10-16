@@ -116,6 +116,14 @@ export function openAlertStatements(
 	return { alertId, stmts };
 }
 
+/**
+ * Resolve/remind carry the same conditional-insert pattern as the open path:
+ * the notification only lands when this run's own state change is visible
+ * (resolved_at / last_notified_at = now), and the per-channel NOT EXISTS
+ * clause drops the duplicate when two runs share a timestamp. The remind
+ * update additionally compares-and-swaps on the observed last_notified_at so
+ * only the first overlapping run's update takes effect.
+ */
 export function resolveAlertStatements(
 	db: Db,
 	alert: OpenAlertRow,
@@ -130,7 +138,8 @@ export function resolveAlertStatements(
 		...notificationRows(alert.id, "resolved", now, channelIds).map((n) =>
 			db.insert(alertNotifications).select(sql`
 				SELECT ${n.id}, ${n.alertId}, ${n.channelId}, ${n.kind}, 'pending', 0, NULL, ${n.createdAt}, NULL, NULL
-				WHERE EXISTS (SELECT 1 FROM alerts WHERE id = ${alert.id} AND resolved_at = ${now})`),
+				WHERE EXISTS (SELECT 1 FROM alerts WHERE id = ${alert.id} AND resolved_at = ${now})
+				AND NOT EXISTS (SELECT 1 FROM alert_notifications WHERE alert_id = ${alert.id} AND channel_id = ${n.channelId} AND kind = 'resolved' AND created_at = ${now})`),
 		),
 	];
 }
@@ -145,9 +154,20 @@ export function remindAlertStatements(
 		db
 			.update(alerts)
 			.set({ lastNotifiedAt: now })
-			.where(and(eq(alerts.id, alert.id), eq(alerts.status, "open"))),
+			.where(
+				and(
+					eq(alerts.id, alert.id),
+					eq(alerts.status, "open"),
+					alert.lastNotifiedAt === null
+						? sql`last_notified_at IS NULL`
+						: eq(alerts.lastNotifiedAt, alert.lastNotifiedAt),
+				),
+			),
 		...notificationRows(alert.id, "reminder", now, channelIds).map((n) =>
-			db.insert(alertNotifications).values(n),
+			db.insert(alertNotifications).select(sql`
+				SELECT ${n.id}, ${n.alertId}, ${n.channelId}, ${n.kind}, 'pending', 0, NULL, ${n.createdAt}, NULL, NULL
+				WHERE EXISTS (SELECT 1 FROM alerts WHERE id = ${alert.id} AND status = 'open' AND last_notified_at = ${now})
+				AND NOT EXISTS (SELECT 1 FROM alert_notifications WHERE alert_id = ${alert.id} AND channel_id = ${n.channelId} AND kind = 'reminder' AND created_at = ${now})`),
 		),
 	];
 }

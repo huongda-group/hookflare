@@ -14,6 +14,7 @@ import {
 	purgeEventChunk,
 } from "../../src/jobs/archive/purge";
 import { verifyBatch } from "../../src/jobs/archive/verify";
+import { beforeNextBatch } from "../helpers/admin";
 import { isolateArchive, listKeys, seedBatch } from "../helpers/archive";
 import { testDeps } from "../helpers/deps";
 import { seedDelivery, seedPipeline } from "../helpers/seed";
@@ -170,5 +171,34 @@ describe("purge", () => {
 		);
 		expect((await purgeEventChunk(deps, batch.id, 1, cut)).deleted).toBe(1);
 		expect(await eventExists(events[1].eventId)).toBe(true);
+	});
+
+	it("returns R2 keys only for events the D1 delete actually removed (SELECT-vs-delete race)", async () => {
+		const { batch, events } = await built();
+		await verifyBatch(deps, batch.id);
+		const [victim] = await deps.db
+			.select({ id: webhookEvents.id, r2Key: webhookEvents.r2Key })
+			.from(webhookEvents)
+			.where(eq(webhookEvents.id, events[0].eventId));
+		if (!victim?.r2Key) throw new Error("test setup: victim has no r2 key");
+		const victimKey = victim.r2Key;
+		// A replay lands between the pre-delete SELECT and the D1 delete and
+		// clears the victim's mark, so the delete skips it.
+		beforeNextBatch(deps, () =>
+			deps.db
+				.update(webhookEvents)
+				.set({ archiveBatchId: null, archivePart: null })
+				.where(eq(webhookEvents.id, victim.id)),
+		);
+		const chunk = await purgeEventChunk(deps, batch.id, 1, cut);
+		expect(chunk.deleted).toBe(1);
+		expect(chunk.r2Keys).toHaveLength(1);
+		expect(chunk.r2Keys).not.toContain(victimKey);
+		expect(await eventExists(victim.id)).toBe(true);
+		expect(await deps.payloads.head(victimKey)).not.toBeNull();
+		await deletePayloadObjects(deps, chunk.r2Keys);
+		// The skipped event's payload object survives; the others are gone.
+		expect(await deps.payloads.head(victimKey)).not.toBeNull();
+		expect(await deps.payloads.head(chunk.r2Keys[0])).toBeNull();
 	});
 });

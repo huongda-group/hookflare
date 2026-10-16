@@ -3,6 +3,11 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { sealChannelConfig } from "../../src/core/alert-channels";
 import {
+	type BatchItem,
+	remindAlertStatements,
+	resolveAlertStatements,
+} from "../../src/core/db/alerts";
+import {
 	alertChannels,
 	alertNotifications,
 	alerts,
@@ -129,6 +134,49 @@ describe("runAlerts", () => {
 		const rows = await incidents(deps, p.destination.id);
 		expect(rows).toHaveLength(1);
 		expect(await notes(deps, rows[0].id)).toHaveLength(1);
+	});
+
+	it("overlapping remind runs insert a single reminder", async () => {
+		const { deps } = clockDeps(T);
+		await addChannel(deps, "ach_a");
+		const p = await seedPipeline(deps, {
+			destination: { consecutiveFailures: 5 },
+		});
+		await runAlerts(deps, logger);
+		const [alert] = await incidents(deps, p.destination.id);
+		// Two runs read the same snapshot at the same timestamp.
+		const later = T + 3_601_000;
+		const first = remindAlertStatements(deps.db, alert, later, ["ach_a"]);
+		const second = remindAlertStatements(deps.db, alert, later, ["ach_a"]);
+		await deps.db.batch(first as [BatchItem, ...BatchItem[]]);
+		await deps.db.batch(second as [BatchItem, ...BatchItem[]]);
+		expect((await notes(deps, alert.id)).map((n) => n.kind)).toEqual([
+			"opened",
+			"reminder",
+		]);
+	});
+
+	it("overlapping resolve runs insert a single resolved notification", async () => {
+		const { deps } = clockDeps(T);
+		await addChannel(deps, "ach_a");
+		const p = await seedPipeline(deps, {
+			destination: { consecutiveFailures: 5 },
+		});
+		await runAlerts(deps, logger);
+		await failing(deps, p.destination.id, 0);
+		const [alert] = await incidents(deps, p.destination.id);
+		// Two runs read the same open snapshot at the same timestamp.
+		const later = T + 60_000;
+		const first = resolveAlertStatements(deps.db, alert, later, ["ach_a"]);
+		const second = resolveAlertStatements(deps.db, alert, later, ["ach_a"]);
+		await deps.db.batch(first as [BatchItem, ...BatchItem[]]);
+		await deps.db.batch(second as [BatchItem, ...BatchItem[]]);
+		const [resolved] = await incidents(deps, p.destination.id);
+		expect(resolved.status).toBe("resolved");
+		expect((await notes(deps, alert.id)).map((n) => n.kind)).toEqual([
+			"opened",
+			"resolved",
+		]);
 	});
 
 	it("reminds after reminder_s and never when reminder_s = 0", async () => {

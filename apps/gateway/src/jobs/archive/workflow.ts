@@ -7,8 +7,7 @@ import { eq } from "drizzle-orm";
 import { type ArchiveParams, isArchiveRunning } from "../../core/archive-run";
 import { archiveParts } from "../../core/db/schema";
 import { createLogger } from "../../core/log";
-import { createDeps } from "../../deps";
-import type { AppEnv } from "../../env";
+import { createDeps, type Deps } from "../../deps";
 import { buildAuditPart, buildEventPart } from "./part";
 import { planRun } from "./plan";
 import {
@@ -30,7 +29,10 @@ const STEP = {
  * Code outside step.do() must be deterministic (Workflows replays it), so
  * time and settings come from the persisted `plan` result.
  */
-export class ArchiveWorkflow extends WorkflowEntrypoint<AppEnv, ArchiveParams> {
+export class ArchiveWorkflow extends WorkflowEntrypoint<
+	Deps["env"],
+	ArchiveParams
+> {
 	async run(event: WorkflowEvent<ArchiveParams>, step: WorkflowStep) {
 		const deps = () => createDeps(this.env);
 		const logger = createLogger(this.env, {
