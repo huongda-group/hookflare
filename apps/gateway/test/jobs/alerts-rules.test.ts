@@ -1,7 +1,6 @@
-import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { matchChannels } from "../../src/core/db/alerts";
-import { deliveries, destinations, settings } from "../../src/core/db/schema";
+import { settings } from "../../src/core/db/schema";
 import {
 	consecutiveFailures,
 	DEAD_CURSOR_KEY,
