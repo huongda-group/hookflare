@@ -35,4 +35,19 @@ describe("rollup backfill", () => {
 		// A fourth run does no backfill work.
 		expect((await run()).backfill_before).toBe("done");
 	});
+
+	it("restarts the backfill from a corrupt cursor instead of failing", async () => {
+		const deps = { ...testDeps(), now: () => T + 60_000 };
+		await deps.db
+			.insert(settings)
+			.values({ key: BACKFILL_KEY, valueJson: "{not json", updatedAt: 0 })
+			.onConflictDoUpdate({
+				target: settings.key,
+				set: { valueJson: "{not json" },
+			});
+		const report = await rollup(deps, logger);
+		expect(report.failed_hours).toEqual([]);
+		expect(report.backfill_before).not.toBeNull();
+		expect(report.rows[T]).toBeTypeOf("number");
+	});
 });

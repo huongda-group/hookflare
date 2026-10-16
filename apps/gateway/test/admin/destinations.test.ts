@@ -1,8 +1,12 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { clearAccessKeyCache } from "../../src/admin/auth/access";
-import { deliveries, destinations } from "../../src/core/db/schema";
+import { deliveries, destinations, settings } from "../../src/core/db/schema";
 import { DnsError } from "../../src/core/dns";
+import {
+	clearRetryDefaultsCache,
+	RETRY_DEFAULTS_KEY,
+} from "../../src/core/settings";
 import { clearSsrfCache } from "../../src/core/ssrf";
 import { adminApp, auditRows, beforeNextBatch } from "../helpers/admin";
 import { recordingQueue, testDeps } from "../helpers/deps";
@@ -349,6 +353,47 @@ describe("admin destinations", () => {
 			await api.request("GET", `/destinations/${d.id}`)
 		).json<Dest>();
 		expect(after.backoff_base_s).toBe(5);
+	});
+
+	it("accepts unrelated patches after raised defaults exceed the own max", async () => {
+		const deps = testDeps();
+		const { project } = await seedPipeline(deps);
+		const api = await adminApp(deps);
+		const d = await (
+			await create(api, project.id, { backoff_max_s: 60 })
+		).json<Dest>();
+		try {
+			expect(
+				(
+					await api.request("PATCH", "/settings", {
+						retry_defaults: {
+							timeout_ms: 10_000,
+							max_attempts: 8,
+							backoff_base_s: 120,
+							backoff_max_s: 3600,
+						},
+					})
+				).status,
+			).toBe(200);
+			const renamed = await api.request("PATCH", `/destinations/${d.id}`, {
+				name: "renamed",
+			});
+			expect(renamed.status).toBe(200);
+			const disabled = await api.request("PATCH", `/destinations/${d.id}`, {
+				status: "disabled",
+			});
+			expect(disabled.status).toBe(200);
+			// Touching the backoff fields still validates against the defaults.
+			const touched = await api.request("PATCH", `/destinations/${d.id}`, {
+				backoff_max_s: 90,
+			});
+			expect(touched.status).toBe(400);
+		} finally {
+			await deps.db
+				.delete(settings)
+				.where(eq(settings.key, RETRY_DEFAULTS_KEY));
+			clearRetryDefaultsCache();
+		}
 	});
 
 	it("pauses idempotently, refuses a disabled destination, and resumes", async () => {

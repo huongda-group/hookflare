@@ -302,11 +302,17 @@ export function destinationRoutes() {
 				? { backoffMaxS: v.backoff_max_s }
 				: {}),
 		};
-		const conflict = backoffConflict(
-			c,
-			{ ...existing, ...set },
-			await loadRetryDefaults(c.var.deps),
-		);
+		// Only a patch that touches backoff is validated: raised defaults must not
+		// block unrelated edits (the delivery path clamps via resolvePolicy).
+		const touchesBackoff =
+			v.backoff_base_s !== undefined || v.backoff_max_s !== undefined;
+		const conflict = touchesBackoff
+			? backoffConflict(
+					c,
+					{ ...existing, ...set },
+					await loadRetryDefaults(c.var.deps),
+				)
+			: null;
 		if (conflict) return conflict;
 		const ts = now();
 		const prev = clearExpiredPrev(

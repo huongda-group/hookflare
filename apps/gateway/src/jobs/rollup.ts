@@ -1,5 +1,5 @@
-import { eq } from "drizzle-orm";
-import { settings } from "../core/db/schema";
+import { count, eq } from "drizzle-orm";
+import { settings, statsHourly } from "../core/db/schema";
 import {
 	floorHour,
 	HOUR_MS,
@@ -17,6 +17,8 @@ export const BACKFILL_KEY = "rollup.backfill_before";
 export type RollupReport = {
 	hours: number[];
 	failed_hours: number[];
+	/** stats_hourly rows written per recomputed hour (spec §6.2 step 3). */
+	rows: Record<number, number>;
 	backfill_before: number | "done";
 };
 
@@ -27,7 +29,13 @@ async function readCursor(deps: Deps): Promise<number | "done" | null> {
 		.where(eq(settings.key, BACKFILL_KEY))
 		.get();
 	if (!row) return null;
-	const value: unknown = JSON.parse(row.valueJson);
+	let value: unknown;
+	try {
+		value = JSON.parse(row.valueJson);
+	} catch {
+		// A corrupt cursor restarts the backfill instead of failing every run.
+		return null;
+	}
 	return value === "done" || typeof value === "number" ? value : null;
 }
 
@@ -51,11 +59,20 @@ export async function rollup(
 	const current = floorHour(deps.now());
 	const hours: number[] = [];
 	const failed: number[] = [];
+	const rows: Record<number, number> = {};
 
 	const recompute = async (hour: number): Promise<boolean> => {
 		hours.push(hour);
 		try {
-			await deps.db.batch(rollupHourStatements(deps.db, hour));
+			const results = await deps.db.batch([
+				...rollupHourStatements(deps.db, hour),
+				deps.db
+					.select({ n: count() })
+					.from(statsHourly)
+					.where(eq(statsHourly.hour, hour)),
+			]);
+			const [written] = results[results.length - 1] as { n: number }[];
+			rows[hour] = written?.n ?? 0;
 			return true;
 		} catch (err) {
 			failed.push(hour);
@@ -87,5 +104,5 @@ export async function rollup(
 		await writeCursor(deps, cursor);
 	}
 
-	return { hours, failed_hours: failed, backfill_before: cursor };
+	return { hours, failed_hours: failed, rows, backfill_before: cursor };
 }
