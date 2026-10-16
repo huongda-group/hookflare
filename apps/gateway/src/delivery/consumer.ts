@@ -16,13 +16,27 @@ import { destinationSigningSecrets } from "../core/secrets";
 import { loadRetryDefaults } from "../core/settings";
 import { buildOutboundHeaders, signWebhookAll } from "../core/sign";
 import { checkUrl } from "../core/ssrf";
+import { withTimeout } from "../core/timeout";
 import type { DeliveryMessage, Deps } from "../deps";
 import { infraDelaySeconds } from "./backoff";
 import { classifyAttempt, type SendResult } from "./classify";
+import type { AcquireResult, LimiterStub } from "./limiter";
 
 export { readSnippet, SNIPPET_BYTES };
 /** The lease outlives the request timeout by this much (spec §7 step 7). */
 export const LEASE_GRACE_MS = 30_000;
+
+/** M5-7: a limiter that does not answer in time is an infra error. */
+export const LIMITER_TIMEOUT_MS = 2_000;
+
+/** Spec §5.3: retryAfter plus 0–3 s of jitter, so rejected messages do not return together. */
+export function limitedDelaySeconds(
+	retryAfterMs: number,
+	random: () => number,
+): number {
+	const s = Math.ceil(retryAfterMs / 1000) + Math.floor(random() * 4);
+	return Math.min(30, Math.max(1, s));
+}
 
 export type Disposition =
 	| { action: "ack" }
@@ -183,6 +197,77 @@ export async function processDelivery(
 		return infra("d1", err);
 	}
 
+	// 7a. Limiter (spec §5.3). Nothing in D1 changes on a rejection, so no attempt counts.
+	const { maxInFlight, rateLimitPerS } = ctx.destination;
+	if (maxInFlight === null && rateLimitPerS === null) {
+		return leaseAndSend(deps, deliveryId, ctx, request, policy, logger, infra);
+	}
+	let stub: LimiterStub;
+	let slot: AcquireResult;
+	try {
+		stub = deps.limiter(ctx.destination.id);
+		slot = await withTimeout(
+			stub.acquire({
+				maxInFlight,
+				ratePerS: rateLimitPerS,
+				leaseMs: policy.timeoutMs + LEASE_GRACE_MS,
+			}),
+			LIMITER_TIMEOUT_MS,
+		);
+	} catch (err) {
+		return infra("limiter", err);
+	}
+	if (!slot.ok) {
+		const delaySeconds = limitedDelaySeconds(slot.retryAfterMs, Math.random);
+		logger.info("delivery.limited", {
+			delivery_id: deliveryId,
+			destination_id: ctx.destination.id,
+			reason: slot.reason,
+			delay_s: delaySeconds,
+		});
+		// M5-5: msg.retry() would burn msg.attempts toward the DLQ without a real attempt.
+		try {
+			await deps.queue.send({ deliveryId }, { delaySeconds });
+			return ACK;
+		} catch (err) {
+			logger.error("delivery.reschedule_failed", {
+				delivery_id: deliveryId,
+				error: String(err),
+			});
+			return { action: "retry", delaySeconds };
+		}
+	}
+	try {
+		return await leaseAndSend(
+			deps,
+			deliveryId,
+			ctx,
+			request,
+			policy,
+			logger,
+			infra,
+		);
+	} finally {
+		// A lost release expires with the lease (M5-3).
+		await stub.release(slot.slotId).catch((err: unknown) =>
+			logger.warn("delivery.limiter_release_failed", {
+				delivery_id: deliveryId,
+				error: String(err),
+			}),
+		);
+	}
+}
+
+/** Steps 7–10: lease, send, record, reschedule. */
+async function leaseAndSend(
+	deps: Deps,
+	deliveryId: string,
+	ctx: DeliveryContext,
+	request: SignedRequest,
+	policy: Policy,
+	logger: Logger,
+	infra: (stage: string, err: unknown) => Disposition,
+): Promise<Disposition> {
 	// 7. Lease.
 	const leaseUntil = deps.now() + policy.timeoutMs + LEASE_GRACE_MS;
 	let attemptCount: number | null;

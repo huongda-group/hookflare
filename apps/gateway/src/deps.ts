@@ -1,6 +1,7 @@
 import { type DrizzleD1Database, drizzle } from "drizzle-orm/d1";
 import * as schema from "./core/db/schema";
 import { createDohResolver, type ResolveDns } from "./core/dns";
+import type { LimiterStub } from "./delivery/limiter";
 import type { AppEnv } from "./env";
 
 export type DeliveryMessage = { deliveryId: string };
@@ -21,6 +22,8 @@ export type Deps = {
 	resolveDns: ResolveDns;
 	/** Epoch ms. */
 	now: () => number;
+	/** M5a: the destination's DestinationLimiter (spec §5.3). */
+	limiter: (destinationId: string) => LimiterStub;
 	env: AppEnv;
 };
 
@@ -33,6 +36,10 @@ export function createDeps(env: AppEnv): Deps {
 		fetch: globalFetch,
 		resolveDns: createDohResolver(globalFetch),
 		now: () => Date.now(),
+		limiter: (destinationId) =>
+			env.LIMITER.get(
+				env.LIMITER.idFromName(destinationId),
+			) as unknown as LimiterStub,
 		env,
 	};
 }

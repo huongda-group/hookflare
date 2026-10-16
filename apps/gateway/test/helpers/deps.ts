@@ -48,6 +48,10 @@ export function testDeps(overrides: Partial<Deps> = {}): Deps {
 		) as unknown as typeof fetch,
 		resolveDns: vi.fn(async () => [PUBLIC_IP]),
 		now: () => Date.now(),
+		// Unlimited destinations never call it (M5-6); a test that sets limits injects fakeLimiter().
+		limiter: () => {
+			throw new Error("limiter not stubbed: use fakeLimiter()");
+		},
 		env,
 		...overrides,
 	};
