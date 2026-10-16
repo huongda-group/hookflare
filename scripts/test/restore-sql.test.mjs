@@ -183,4 +183,39 @@ describe("createOrphanFilter", () => {
 		assert.equal(report.deliveries.count, 1);
 		assert.equal(report.delivery_attempts.count, 1);
 	});
+
+	it("admits a forward self-reference after preloading keys", () => {
+		const manifest = {
+			version: 1,
+			backup_id: "b1",
+			prefix: "p/",
+			started_at: 1,
+			finished_at: 2,
+			d1_migrations: [],
+			tables: [
+				table("nodes", {
+					columns: ["id", "parent_id"],
+					fks: [{ column: "parent_id", table: "nodes", to: "id" }],
+				}),
+			],
+		};
+		const filter = createOrphanFilter(manifest);
+		const rows = [
+			{ id: "child", parent_id: "parent" },
+			{ id: "parent", parent_id: null },
+		];
+		filter.preload("nodes", rows);
+		assert.equal(
+			filter.admit("nodes", { id: "child", parent_id: "parent" }),
+			true,
+		);
+		assert.equal(
+			filter.admit("nodes", { id: "parent", parent_id: null }),
+			true,
+		);
+		assert.equal(
+			filter.admit("nodes", { id: "stray", parent_id: "missing" }),
+			false,
+		);
+	});
 });

@@ -160,6 +160,7 @@ const orphans = {};
 let restored = 0;
 for (const name of tableOrder(manifest)) {
 	const table = manifest.tables.find((t) => t.name === name);
+	const batches = [];
 	for (const part of table.parts) {
 		const dest = join(outDir, part.key);
 		if (!existsSync(dest)) {
@@ -167,7 +168,14 @@ for (const name of tableOrder(manifest)) {
 			r2Get(args.bucket, part.key, dest);
 		}
 		checkSha256(dest, part.sha256, part.key);
-		for (const row of readPartRows(dest)) {
+		batches.push(readPartRows(dest));
+	}
+	// Pre-collect this table's own keys so forward self-references admit.
+	for (const rows of batches) {
+		filter.preload(table, rows);
+	}
+	for (const rows of batches) {
+		for (const row of rows) {
 			if (!filter.admit(table, row)) {
 				let entry = orphans[name];
 				if (!entry) {

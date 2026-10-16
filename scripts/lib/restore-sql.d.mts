@@ -26,7 +26,10 @@ export type Manifest = {
 	tables: ManifestTable[];
 };
 
-export type OrphanReport = Record<string, { count: number; sample: unknown[] }>;
+export type OrphanReport = Record<
+	string,
+	{ count: number; sample: unknown[]; blob_bytes?: Record<string, number> }
+>;
 
 export function valueLiteral(value: unknown): string;
 
@@ -43,6 +46,10 @@ export function createOrphanFilter(manifest: Manifest): {
 		table: string | ManifestTable,
 		row: Record<string, unknown>,
 	) => boolean;
+	preload: (
+		table: string | ManifestTable,
+		rows: Iterable<Record<string, unknown>>,
+	) => void;
 	report: () => OrphanReport;
 };
 

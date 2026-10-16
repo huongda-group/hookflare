@@ -271,17 +271,20 @@ export function rowStatements(table, row, maxStmt = 90000) {
 
 /**
  * Orphan report: dropped rows per table with a small sample.
- * @typedef {Record<string, { count: number, sample: unknown[] }>} OrphanReport
+ * @typedef {Record<string, { count: number, sample: unknown[], blob_bytes?: Record<string, number> }>} OrphanReport
  */
 
 /**
  * Admits rows whose non-null FK parents were already admitted, so a
  * missing parent drops its whole subtree (deliveries, then attempts).
- * Tables must be fed in `tableOrder`. A self-referencing FK is checked
- * against the keys seen so far in the same table (own key included),
- * since the full key set is only known once the table is streamed.
+ * Tables must be fed in `tableOrder`. Before streaming a table's rows
+ * through `admit`, call `preload` with that table's rows: a
+ * self-referencing FK is then checked against the pre-collected key set,
+ * so forward self-references (child streamed before its parent) admit.
+ * Without a prior `preload`, self-references fall back to the keys seen
+ * so far in the same table.
  * @param {Manifest} manifest
- * @returns {{ admit: (table: string | ManifestTable, row: Record<string, unknown>) => boolean, report: () => OrphanReport }}
+ * @returns {{ admit: (table: string | ManifestTable, row: Record<string, unknown>) => boolean, preload: (table: string | ManifestTable, rows: Iterable<Record<string, unknown>>) => void, report: () => OrphanReport }}
  */
 export function createOrphanFilter(manifest) {
 	const byName = new Map(manifest.tables.map((t) => [t.name, t]));
@@ -289,11 +292,54 @@ export function createOrphanFilter(manifest) {
 	const admitted = new Map();
 	/** Table -> key values seen so far (for self-referencing FKs). */
 	const seen = new Map();
+	/** Table -> pre-collected own key values (via `preload`). */
+	const preloaded = new Map();
 	/** Table -> { count, sample }. */
 	const orphans = new Map();
 	for (const t of manifest.tables) {
 		admitted.set(t.name, new Set());
 		seen.set(t.name, new Set());
+		preloaded.set(t.name, new Set());
+	}
+	/**
+	 * Resolve a table name or table object to its manifest entry.
+	 * @param {string | ManifestTable} table
+	 * @returns {ManifestTable}
+	 */
+	function resolve(table) {
+		const info = typeof table === "string" ? byName.get(table) : table;
+		if (!info) {
+			throw new Error(
+				`restore: unknown table ${typeof table === "string" ? table : "?"}`,
+			);
+		}
+		return info;
+	}
+	/**
+	 * The table's own key for a row.
+	 * @param {ManifestTable} info
+	 * @param {Record<string, unknown>} row
+	 * @returns {unknown}
+	 */
+	function ownKeyOf(info, row) {
+		return "column" in info.key
+			? (row[info.key.column] ?? null)
+			: JSON.stringify(row);
+	}
+	/**
+	 * Pre-collect a table's own keys before streaming its rows through
+	 * `admit`, so forward self-references admit. Additive: safe to call
+	 * once per part batch.
+	 * @param {string | ManifestTable} table
+	 * @param {Iterable<Record<string, unknown>>} rows
+	 * @returns {void}
+	 */
+	function preload(table, rows) {
+		const info = resolve(table);
+		const keys = preloaded.get(info.name);
+		for (const row of rows) {
+			keys.add(ownKeyOf(info, row));
+		}
 	}
 	/**
 	 * @param {string | ManifestTable} table
@@ -301,41 +347,39 @@ export function createOrphanFilter(manifest) {
 	 * @returns {boolean}
 	 */
 	function admit(table, row) {
-		const info = typeof table === "string" ? byName.get(table) : table;
-		if (!info) {
-			throw new Error(
-				`restore: unknown table ${typeof table === "string" ? table : "?"}`,
-			);
-		}
-		const ownKey =
-			"column" in info.key
-				? (row[info.key.column] ?? null)
-				: JSON.stringify(row);
+		const info = resolve(table);
+		const ownKey = ownKeyOf(info, row);
 		seen.get(info.name).add(ownKey);
 		for (const fk of info.foreign_keys) {
 			const value = row[fk.column] ?? null;
 			if (value === null || value === undefined) {
 				continue;
 			}
-			const keys =
-				fk.table === info.name ? seen.get(info.name) : admitted.get(fk.table);
-			// A self-reference to the row itself (or an earlier sibling) is
-			// fine: the key was just added to `seen` above.
-			if (fk.table === info.name && value === ownKey) {
+			if (fk.table === info.name) {
+				// Self-reference: admit against the pre-collected key set
+				// (forward references OK), falling back to keys seen so
+				// far when `preload` was not called. The row itself was
+				// just added to `seen` above.
+				if (
+					value === ownKey ||
+					preloaded.get(info.name).has(value) ||
+					seen.get(info.name).has(value)
+				) {
+					continue;
+				}
+			} else if (admitted.get(fk.table)?.has(value)) {
 				continue;
 			}
-			if (!keys?.has(value)) {
-				let entry = orphans.get(info.name);
-				if (!entry) {
-					entry = { count: 0, sample: [] };
-					orphans.set(info.name, entry);
-				}
-				entry.count += 1;
-				if (entry.sample.length < 5) {
-					entry.sample.push(row);
-				}
-				return false;
+			let entry = orphans.get(info.name);
+			if (!entry) {
+				entry = { count: 0, sample: [] };
+				orphans.set(info.name, entry);
 			}
+			entry.count += 1;
+			if (entry.sample.length < 5) {
+				entry.sample.push(row);
+			}
+			return false;
 		}
 		admitted.get(info.name).add(ownKey);
 		return true;
@@ -343,7 +387,7 @@ export function createOrphanFilter(manifest) {
 	function report() {
 		return Object.fromEntries(orphans);
 	}
-	return { admit, report };
+	return { admit, preload, report };
 }
 
 /**
