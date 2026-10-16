@@ -1,5 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { EventsPage, eventsSearch } from "@/pages/EventsPage";
 
 export const Route = createFileRoute("/events/")({
-	component: () => <h1 className="p-6 text-xl font-semibold">Events</h1>,
+	validateSearch: eventsSearch,
+	component: function EventsRoute() {
+		const search = Route.useSearch();
+		const navigate = Route.useNavigate();
+		return (
+			<EventsPage
+				search={search}
+				setSearch={(s) => navigate({ search: (prev) => ({ ...prev, ...s }) })}
+			/>
+		);
+	},
 });
