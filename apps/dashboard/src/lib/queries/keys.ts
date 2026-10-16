@@ -29,6 +29,12 @@ export const qk = {
 		all: ["failures"] as const,
 		list: (q: object) => ["failures", "list", q] as const,
 	},
+	alerts: {
+		all: ["alerts"] as const,
+		list: (q: object) => ["alerts", "list", q] as const,
+		one: (id: string) => ["alerts", id] as const,
+	},
+	alertChannels: { all: ["alert-channels"] as const },
 	users: { all: ["users"] as const },
 	audit: { list: (q: object) => ["audit", q] as const },
 };

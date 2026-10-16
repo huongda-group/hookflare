@@ -15,6 +15,7 @@ const NAV: { to: string; label: string; permission?: Permission }[] = [
 	{ to: "/endpoints", label: "Endpoints" },
 	{ to: "/events", label: "Events" },
 	{ to: "/failures", label: "Failures" },
+	{ to: "/alerts", label: "Alerts" },
 	{ to: "/audit", label: "Audit", permission: "audit.read" },
 	{ to: "/settings", label: "Settings" },
 ];

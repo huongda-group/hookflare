@@ -12,6 +12,7 @@ import { IdText } from "@/components/IdText";
 import { ProjectSelect } from "@/components/ProjectSelect";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TimeText } from "@/components/TimeText";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { qk } from "@/lib/queries/keys";
@@ -75,6 +76,23 @@ export function OverviewContent({
 	});
 	return (
 		<div className="space-y-6">
+			{o.data && o.data.open_alerts.count > 0 && (
+				<Alert variant="destructive">
+					<AlertDescription>
+						<Link
+							to="/alerts"
+							search={{
+								status: "open",
+								...(projectId ? { project_id: projectId } : {}),
+							}}
+							className="underline"
+						>
+							{o.data.open_alerts.count} open{" "}
+							{o.data.open_alerts.count === 1 ? "alert" : "alerts"}
+						</Link>
+					</AlertDescription>
+				</Alert>
+			)}
 			<Tabs value={range} onValueChange={(v) => onRangeChange(v as StatsRange)}>
 				<TabsList>
 					{STATS_RANGES.map((r) => (

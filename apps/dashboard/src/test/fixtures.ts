@@ -1,4 +1,5 @@
 import type {
+	Alert,
 	Delivery,
 	DeliveryAttempt,
 	Destination,
@@ -133,3 +134,17 @@ export const failure = (o: Partial<Failure> = {}): Failure => {
 		...o,
 	};
 };
+export const alert = (o: Partial<Alert> = {}): Alert => ({
+	id: "alr_1",
+	rule: "consecutive_failures",
+	resource_type: "destination",
+	resource_id: "dst_1",
+	resource_name: "Billing API",
+	project_id: "prj_1",
+	status: "open",
+	opened_at: T - 3_600_000,
+	last_notified_at: T - 3_600_000,
+	resolved_at: null,
+	details: { consecutive_failures: 5 },
+	...o,
+});

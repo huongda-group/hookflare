@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatBytes, formatRelative, groupByDay } from "./time";
+import {
+	formatBytes,
+	formatDuration,
+	formatRelative,
+	groupByDay,
+} from "./time";
 
 const H = 3_600_000;
 // 2026-10-15T17:00Z is local midnight of Oct 16 in Asia/Ho_Chi_Minh (UTC+7).
@@ -32,5 +37,12 @@ describe("time", () => {
 		expect(formatBytes(17)).toBe("17 B");
 		expect(formatBytes(65_536)).toBe("64.0 KB");
 		expect(formatBytes(3 * 1024 * 1024)).toBe("3.0 MB");
+	});
+
+	it("formats durations", () => {
+		expect(formatDuration(45_000)).toBe("45 s");
+		expect(formatDuration(12 * 60_000)).toBe("12 min");
+		expect(formatDuration(185 * 60_000)).toBe("3 h 5 min");
+		expect(formatDuration(52 * 3_600_000)).toBe("2 d 4 h");
 	});
 });

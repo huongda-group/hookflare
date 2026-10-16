@@ -13,6 +13,8 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuditRouteImport } from './routes/audit'
 import { Route as FailuresRouteImport } from './routes/failures'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as AlertsIndexRouteImport } from './routes/alerts/index'
+import { Route as AlertsAlertIdRouteImport } from './routes/alerts/$alertId'
 import { Route as EndpointsIndexRouteImport } from './routes/endpoints/index'
 import { Route as EventsIndexRouteImport } from './routes/events/index'
 import { Route as EventsEventIdRouteImport } from './routes/events/$eventId'
@@ -39,6 +41,16 @@ const FailuresRoute = FailuresRouteImport.update({
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AlertsIndexRoute = AlertsIndexRouteImport.update({
+  id: '/alerts/',
+  path: '/alerts/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AlertsAlertIdRoute = AlertsAlertIdRouteImport.update({
+  id: '/alerts/$alertId',
+  path: '/alerts/$alertId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const EndpointsIndexRoute = EndpointsIndexRouteImport.update({
@@ -84,8 +96,10 @@ export interface FileRoutesByFullPath {
   '/audit': typeof AuditRoute
   '/failures': typeof FailuresRoute
   '/settings': typeof SettingsRoute
+  '/alerts/$alertId': typeof AlertsAlertIdRoute
   '/events/$eventId': typeof EventsEventIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
+  '/alerts/': typeof AlertsIndexRoute
   '/endpoints/': typeof EndpointsIndexRoute
   '/events/': typeof EventsIndexRoute
   '/projects/': typeof ProjectsIndexRoute
@@ -97,8 +111,10 @@ export interface FileRoutesByTo {
   '/audit': typeof AuditRoute
   '/failures': typeof FailuresRoute
   '/settings': typeof SettingsRoute
+  '/alerts/$alertId': typeof AlertsAlertIdRoute
   '/events/$eventId': typeof EventsEventIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
+  '/alerts': typeof AlertsIndexRoute
   '/endpoints': typeof EndpointsIndexRoute
   '/events': typeof EventsIndexRoute
   '/projects': typeof ProjectsIndexRoute
@@ -111,8 +127,10 @@ export interface FileRoutesById {
   '/audit': typeof AuditRoute
   '/failures': typeof FailuresRoute
   '/settings': typeof SettingsRoute
+  '/alerts/$alertId': typeof AlertsAlertIdRoute
   '/events/$eventId': typeof EventsEventIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
+  '/alerts/': typeof AlertsIndexRoute
   '/endpoints/': typeof EndpointsIndexRoute
   '/events/': typeof EventsIndexRoute
   '/projects/': typeof ProjectsIndexRoute
@@ -126,8 +144,10 @@ export interface FileRouteTypes {
     | '/audit'
     | '/failures'
     | '/settings'
+    | '/alerts/$alertId'
     | '/events/$eventId'
     | '/projects/$projectId'
+    | '/alerts/'
     | '/endpoints/'
     | '/events/'
     | '/projects/'
@@ -139,8 +159,10 @@ export interface FileRouteTypes {
     | '/audit'
     | '/failures'
     | '/settings'
+    | '/alerts/$alertId'
     | '/events/$eventId'
     | '/projects/$projectId'
+    | '/alerts'
     | '/endpoints'
     | '/events'
     | '/projects'
@@ -152,8 +174,10 @@ export interface FileRouteTypes {
     | '/audit'
     | '/failures'
     | '/settings'
+    | '/alerts/$alertId'
     | '/events/$eventId'
     | '/projects/$projectId'
+    | '/alerts/'
     | '/endpoints/'
     | '/events/'
     | '/projects/'
@@ -166,8 +190,10 @@ export interface RootRouteChildren {
   AuditRoute: typeof AuditRoute
   FailuresRoute: typeof FailuresRoute
   SettingsRoute: typeof SettingsRoute
+  AlertsAlertIdRoute: typeof AlertsAlertIdRoute
   EventsEventIdRoute: typeof EventsEventIdRoute
   ProjectsProjectIdRoute: typeof ProjectsProjectIdRoute
+  AlertsIndexRoute: typeof AlertsIndexRoute
   EndpointsIndexRoute: typeof EndpointsIndexRoute
   EventsIndexRoute: typeof EventsIndexRoute
   ProjectsIndexRoute: typeof ProjectsIndexRoute
@@ -203,6 +229,20 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/alerts/': {
+      id: '/alerts/'
+      path: '/alerts'
+      fullPath: '/alerts/'
+      preLoaderRoute: typeof AlertsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/alerts/$alertId': {
+      id: '/alerts/$alertId'
+      path: '/alerts/$alertId'
+      fullPath: '/alerts/$alertId'
+      preLoaderRoute: typeof AlertsAlertIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/endpoints/': {
@@ -262,8 +302,10 @@ const rootRouteChildren: RootRouteChildren = {
   AuditRoute: AuditRoute,
   FailuresRoute: FailuresRoute,
   SettingsRoute: SettingsRoute,
+  AlertsAlertIdRoute: AlertsAlertIdRoute,
   EventsEventIdRoute: EventsEventIdRoute,
   ProjectsProjectIdRoute: ProjectsProjectIdRoute,
+  AlertsIndexRoute: AlertsIndexRoute,
   EndpointsIndexRoute: EndpointsIndexRoute,
   EventsIndexRoute: EventsIndexRoute,
   ProjectsIndexRoute: ProjectsIndexRoute,
