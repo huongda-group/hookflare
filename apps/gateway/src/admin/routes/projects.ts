@@ -12,7 +12,8 @@ import { isUniqueViolation } from "../../core/db/errors";
 import { getProject, listProjects } from "../../core/db/projects";
 import { type ProjectRow, projects } from "../../core/db/schema";
 import { newId } from "../../core/ids";
-import { audit, paginate, readJson, readQuery } from "../http";
+import { requirePermission } from "../auth/permission";
+import { auditStmt, paginate, readJson, readQuery } from "../http";
 
 export function toProject(row: ProjectRow): Project {
 	return {
@@ -28,29 +29,38 @@ export function toProject(row: ProjectRow): Project {
 export function projectRoutes() {
 	const routes = new Hono<AppBindings>();
 
-	routes.post("/", async (c) => {
+	routes.post("/", requirePermission("config.write"), async (c) => {
 		const body = await readJson(c, createProjectRequest);
 		if (!body.ok) return body.response;
+		const { reason, ...fields } = body.value;
 		const { db, now } = c.var.deps;
 		const ts = now();
 		const row: ProjectRow = {
 			id: newId("prj", ts),
-			...body.value,
+			...fields,
 			status: "active",
 			createdAt: ts,
 			updatedAt: ts,
 		};
 		try {
-			await db.insert(projects).values(row);
+			await db.batch([
+				db.insert(projects).values(row),
+				auditStmt(c, {
+					action: "project.created",
+					resourceType: "project",
+					resourceId: row.id,
+					diff: fields,
+					reason,
+				}),
+			]);
 		} catch (err) {
 			if (isUniqueViolation(err)) return c.json({ error: "conflict" }, 409);
 			throw err;
 		}
-		audit(c, "project", "created", row.id, body.value);
 		return c.json(toProject(row), 201);
 	});
 
-	routes.get("/", async (c) => {
+	routes.get("/", requirePermission("events.read"), async (c) => {
 		const q = readQuery(c, listQuery);
 		if (!q.ok) return q.response;
 		const { rows, nextCursor } = paginate(
@@ -63,22 +73,32 @@ export function projectRoutes() {
 		} satisfies Page<Project>);
 	});
 
-	routes.get("/:id", async (c) => {
+	routes.get("/:id", requirePermission("events.read"), async (c) => {
 		const row = await getProject(c.var.deps.db, c.req.param("id"));
 		return row ? c.json(toProject(row)) : c.json({ error: "not_found" }, 404);
 	});
 
-	routes.patch("/:id", async (c) => {
+	routes.patch("/:id", requirePermission("config.write"), async (c) => {
 		const body = await readJson(c, patchProjectRequest);
 		if (!body.ok) return body.response;
+		const { reason, ...fields } = body.value;
 		const { db, now } = c.var.deps;
-		const [row] = await db
-			.update(projects)
-			.set({ ...body.value, updatedAt: now() })
-			.where(eq(projects.id, c.req.param("id")))
-			.returning();
-		if (!row) return c.json({ error: "not_found" }, 404);
-		audit(c, "project", "updated", row.id, body.value);
+		const id = c.req.param("id");
+		if (!(await getProject(db, id))) return c.json({ error: "not_found" }, 404);
+		const [[row]] = await db.batch([
+			db
+				.update(projects)
+				.set({ ...fields, updatedAt: now() })
+				.where(eq(projects.id, id))
+				.returning(),
+			auditStmt(c, {
+				action: "project.updated",
+				resourceType: "project",
+				resourceId: id,
+				diff: fields,
+				reason,
+			}),
+		]);
 		return c.json(toProject(row));
 	});
 

@@ -22,6 +22,9 @@ const backoffMaxS = z.number().int().min(1).max(43_200);
 const maxBodyBytes = z.number().int().min(1).max(10_485_760);
 const secret = z.string().min(16).max(512);
 
+export const reasonSchema = z.string().trim().min(1).max(500);
+export const optionalReason = { reason: reasonSchema.optional() };
+
 export const hmacAuthConfig = z.strictObject({
 	header: z.string().regex(HEADER_NAME),
 	algorithm: z.enum(["sha1", "sha256", "sha512"]),
@@ -107,10 +110,12 @@ export const listQuery = z.object({
 export const createProjectRequest = z.strictObject({
 	name,
 	slug: z.string().regex(/^[a-z0-9][a-z0-9-]{1,62}$/),
+	...optionalReason,
 });
 export const patchProjectRequest = z.strictObject({
 	name: name.optional(),
 	status: z.enum(PROJECT_STATUSES).optional(),
+	...optionalReason,
 });
 
 export const createDestinationRequest = z.strictObject({
@@ -121,6 +126,7 @@ export const createDestinationRequest = z.strictObject({
 	max_attempts: maxAttempts.optional(),
 	backoff_base_s: backoffBaseS.optional(),
 	backoff_max_s: backoffMaxS.optional(),
+	...optionalReason,
 });
 export const patchDestinationRequest = z.strictObject({
 	name: name.optional(),
@@ -130,6 +136,7 @@ export const patchDestinationRequest = z.strictObject({
 	max_attempts: maxAttempts.nullable().optional(),
 	backoff_base_s: backoffBaseS.nullable().optional(),
 	backoff_max_s: backoffMaxS.nullable().optional(),
+	...optionalReason,
 });
 
 const sourceFields = {
@@ -139,6 +146,7 @@ const sourceFields = {
 	event_id_from: z.enum(EVENT_ID_FROM).default("none"),
 	event_id_selector: z.string().min(1).max(256).optional(),
 	max_body_bytes: maxBodyBytes.optional(),
+	...optionalReason,
 };
 
 export const createSourceRequest = z
@@ -175,6 +183,7 @@ export const patchSourceRequest = z.strictObject({
 	event_id_from: z.enum(EVENT_ID_FROM).optional(),
 	event_id_selector: z.string().min(1).max(256).nullable().optional(),
 	max_body_bytes: maxBodyBytes.nullable().optional(),
+	...optionalReason,
 });
 
 export type CreateSourceRequest = z.infer<typeof createSourceRequest>;
@@ -201,6 +210,8 @@ export type Destination = {
 	backoff_base_s: number | null;
 	backoff_max_s: number | null;
 	signing_secret_fingerprint: string;
+	previous_secret_fingerprint: string | null;
+	previous_secret_expires_at: number | null;
 	created_at: number;
 	updated_at: number;
 };
@@ -213,6 +224,8 @@ export type Source = {
 	auth_type: (typeof AUTH_TYPES)[number];
 	auth_config: AuthConfig;
 	secret_fingerprint: string | null;
+	previous_secret_fingerprint: string | null;
+	previous_secret_expires_at: number | null;
 	event_id_from: (typeof EVENT_ID_FROM)[number];
 	event_id_selector: string | null;
 	max_body_bytes: number | null;
@@ -255,4 +268,193 @@ export type WebhookEvent = {
 	size_bytes: number;
 	payload_sha256: string;
 	deliveries: Delivery[];
+};
+
+// ---- M3: roles, permissions, and the new endpoints (spec §6–§12) ----
+
+export const ROLES = ["admin", "operator", "viewer"] as const;
+export type Role = (typeof ROLES)[number];
+export const PERMISSIONS = [
+	"events.read",
+	"payload.read",
+	"deliveries.replay",
+	"destinations.operate",
+	"config.write",
+	"users.manage",
+	"audit.read",
+] as const;
+export type Permission = (typeof PERMISSIONS)[number];
+
+const DELIVERY_STATUS_VALUES = [
+	"pending",
+	"queued",
+	"in_flight",
+	"retrying",
+	"paused",
+	"delivered",
+	"failed_final",
+	"dead",
+] as const;
+const FAILURE_STATUSES = ["failed_final", "dead"] as const;
+
+const sourceId = z.string().startsWith("src_").max(64);
+const deliveryId = z.string().startsWith("dlv_").max(64);
+const epochMs = z.coerce.number().int().min(0);
+const pageLimit = z.coerce.number().int().min(1).max(100).default(50);
+const cursor = z.string().max(512).optional();
+/** Query flags arrive as strings. */
+const queryBool = z.enum(["true", "false"]).transform((v) => v === "true");
+const email = z.string().trim().toLowerCase().pipe(z.email().max(254));
+const graceHours = z.number().int().min(0).max(168).default(24);
+
+/** `status` and `destination_id`-style filters may repeat (`?status=a&status=b`). */
+export const eventSearchQuery = z
+	.object({
+		project_id: projectId.optional(),
+		source_id: sourceId.optional(),
+		destination_id: destinationId.optional(),
+		status: z.array(z.enum(DELIVERY_STATUS_VALUES)).optional(),
+		provider_event_id: z.string().min(1).max(256).optional(),
+		from: epochMs.optional(),
+		to: epochMs.optional(),
+		limit: pageLimit,
+		cursor,
+	})
+	.refine((q) => q.provider_event_id === undefined || q.source_id, {
+		path: ["provider_event_id"],
+		message: "provider_event_id requires source_id",
+	});
+
+export const failuresQuery = z.object({
+	status: z.array(z.enum(FAILURE_STATUSES)).optional(),
+	project_id: projectId.optional(),
+	destination_id: destinationId.optional(),
+	from: epochMs.optional(),
+	to: epochMs.optional(),
+	unresolved: queryBool.default(true),
+	limit: pageLimit,
+	cursor,
+});
+
+export const auditLogQuery = z.object({
+	actor_email: email.optional(),
+	resource_type: z.string().min(1).max(50).optional(),
+	resource_id: z.string().min(1).max(64).optional(),
+	action: z.string().min(1).max(100).optional(),
+	from: epochMs.optional(),
+	to: epochMs.optional(),
+	limit: pageLimit,
+	cursor,
+});
+
+export const pageQuery = z.object({ limit: pageLimit, cursor });
+
+export const replayRequest = z.strictObject({ reason: reasonSchema });
+export const bulkReplayRequest = z.strictObject({
+	delivery_ids: z
+		.array(deliveryId)
+		.min(1)
+		.max(100)
+		.transform((ids) => [...new Set(ids)]),
+	reason: reasonSchema,
+});
+
+export const testDeliveryRequest = z.strictObject({
+	/** Any JSON; the 64 KiB admin body cap bounds its serialized size. */
+	payload: z.unknown().optional(),
+	...optionalReason,
+});
+
+export const rotateSourceSecretRequest = z.strictObject({
+	grace_hours: graceHours,
+	secret: secret.optional(),
+	...optionalReason,
+});
+export const rotateDestinationSecretRequest = z.strictObject({
+	grace_hours: graceHours,
+	...optionalReason,
+});
+
+/** Pause/Resume take an optional body. */
+export const operateRequest = z.strictObject({ ...optionalReason });
+
+export const createUserRequest = z.strictObject({
+	email,
+	role: z.enum(ROLES),
+	...optionalReason,
+});
+export const patchUserRequest = z
+	.strictObject({
+		role: z.enum(ROLES).optional(),
+		disabled: z.boolean().optional(),
+		...optionalReason,
+	})
+	.refine((v) => v.role !== undefined || v.disabled !== undefined, {
+		message: "role or disabled is required",
+	});
+
+export type DeliveryStatusValue = (typeof DELIVERY_STATUS_VALUES)[number];
+export type EventSummary = {
+	id: string;
+	project_id: string;
+	source_id: string;
+	provider_event_id: string | null;
+	received_at: number;
+	content_type: string | null;
+	size_bytes: number;
+	latest_delivery: {
+		id: string;
+		kind: string;
+		status: string;
+		attempt_count: number;
+	} | null;
+};
+export type Failure = Omit<Delivery, "attempts"> & {
+	event_id: string;
+	project_id: string;
+	source_id: string;
+	received_at: number;
+	latest_replay: { id: string; status: string } | null;
+};
+export type ReplayResult = {
+	delivery_id: string;
+	status: string;
+	enqueued: boolean;
+};
+export type BulkReplayResult = {
+	replayed: {
+		delivery_id: string;
+		new_delivery_id: string;
+		enqueued: boolean;
+	}[];
+	skipped: { delivery_id: string; reason: string }[];
+};
+export type TestDelivery = {
+	id: string;
+	destination_id: string;
+	actor_email: string;
+	started_at: number;
+	duration_ms: number;
+	http_status: number | null;
+	error_kind: string | null;
+	error_message: string | null;
+	response_snippet: string | null;
+};
+export type User = {
+	email: string;
+	role: Role;
+	created_at: number;
+	updated_at: number;
+	disabled_at: number | null;
+};
+export type Me = { email: string; role: Role; permissions: Permission[] };
+export type AuditLog = {
+	id: string;
+	actor_email: string;
+	action: string;
+	resource_type: string;
+	resource_id: string | null;
+	reason: string | null;
+	diff: Record<string, unknown> | null;
+	at: number;
 };

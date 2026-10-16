@@ -35,10 +35,16 @@ export const ERROR_KINDS = [
 	"network",
 ] as const;
 
+export const ROLES = ["admin", "operator", "viewer"] as const;
+/** Test deliveries also record an SSRF block, which never reaches the backend. */
+export const TEST_ERROR_KINDS = [...ERROR_KINDS, "ssrf_blocked"] as const;
+
 export type AuthType = (typeof AUTH_TYPES)[number];
 export type EventIdFrom = (typeof EVENT_ID_FROM)[number];
 export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
 export type ErrorKind = (typeof ERROR_KINDS)[number];
+export type Role = (typeof ROLES)[number];
+export type TestErrorKind = (typeof TEST_ERROR_KINDS)[number];
 
 /** `"<column>" IN ('a', 'b')` from a constant list (never user input). */
 function inList(column: string, values: readonly string[]) {
@@ -97,6 +103,9 @@ export const destinations = sqliteTable(
 			.notNull()
 			.default("active"),
 		signingSecretEnc: text("signing_secret_enc").notNull(),
+		/** Previous secret during a rotation grace window (spec §11); both or neither set. */
+		signingSecretPrevEnc: text("signing_secret_prev_enc"),
+		signingSecretPrevExpiresAt: integer("signing_secret_prev_expires_at"),
 		timeoutMs: integer("timeout_ms"),
 		// NULL means the global default (core/policy.ts).
 		maxAttempts: integer("max_attempts"),
@@ -129,6 +138,9 @@ export const sources = sqliteTable(
 			.$type<Record<string, unknown>>()
 			.notNull(),
 		secretEnc: text("secret_enc"),
+		/** Previous secret during a rotation grace window (spec §11); both or neither set. */
+		secretPrevEnc: text("secret_prev_enc"),
+		secretPrevExpiresAt: integer("secret_prev_expires_at"),
 		eventIdFrom: text("event_id_from", { enum: EVENT_ID_FROM })
 			.notNull()
 			.default("none"),
@@ -219,6 +231,7 @@ export const deliveries = sqliteTable(
 		),
 		index("deliveries_status_next_attempt_idx").on(t.status, t.nextAttemptAt),
 		index("deliveries_status_enqueued_idx").on(t.status, t.enqueuedAt),
+		index("deliveries_status_completed_idx").on(t.status, t.completedAt),
 	],
 );
 
@@ -251,9 +264,77 @@ export const deliveryAttempts = sqliteTable(
 	],
 );
 
+export const users = sqliteTable(
+	"users",
+	{
+		/** Always lowercased. */
+		email: text("email").primaryKey(),
+		role: text("role", { enum: ROLES }).notNull(),
+		createdAt: integer("created_at").notNull(),
+		updatedAt: integer("updated_at").notNull(),
+		disabledAt: integer("disabled_at"),
+	},
+	() => [check("users_role_check", inList("role", ROLES))],
+);
+
+export const auditLogs = sqliteTable(
+	"audit_logs",
+	{
+		id: text("id").primaryKey(),
+		actorEmail: text("actor_email").notNull(),
+		action: text("action").notNull(),
+		resourceType: text("resource_type").notNull(),
+		/** NULL for actions over many resources (bulk replay). */
+		resourceId: text("resource_id"),
+		reason: text("reason"),
+		diffJson: text("diff_json", { mode: "json" }).$type<
+			Record<string, unknown>
+		>(),
+		at: integer("at").notNull(),
+	},
+	(t) => [
+		index("audit_logs_at_idx").on(t.at),
+		index("audit_logs_resource_idx").on(t.resourceType, t.resourceId, t.at),
+		index("audit_logs_actor_idx").on(t.actorEmail, t.at),
+	],
+);
+
+export const testDeliveries = sqliteTable(
+	"test_deliveries",
+	{
+		id: text("id").primaryKey(),
+		destinationId: text("destination_id")
+			.notNull()
+			.references(() => destinations.id),
+		projectId: text("project_id").notNull(),
+		actorEmail: text("actor_email").notNull(),
+		startedAt: integer("started_at").notNull(),
+		durationMs: integer("duration_ms").notNull(),
+		httpStatus: integer("http_status"),
+		errorKind: text("error_kind", { enum: TEST_ERROR_KINDS }),
+		errorMessage: text("error_message"),
+		responseSnippet: text("response_snippet"),
+	},
+	(t) => [
+		index("test_deliveries_destination_started_idx").on(
+			t.destinationId,
+			t.startedAt,
+		),
+		check(
+			"test_deliveries_error_kind_check",
+			sql.raw(
+				`"error_kind" IS NULL OR "error_kind" IN (${TEST_ERROR_KINDS.map((v) => `'${v}'`).join(", ")})`,
+			),
+		),
+	],
+);
+
 export type ProjectRow = typeof projects.$inferSelect;
 export type DestinationRow = typeof destinations.$inferSelect;
 export type SourceRow = typeof sources.$inferSelect;
 export type WebhookEventRow = typeof webhookEvents.$inferSelect;
 export type DeliveryRow = typeof deliveries.$inferSelect;
 export type DeliveryAttemptRow = typeof deliveryAttempts.$inferSelect;
+export type UserRow = typeof users.$inferSelect;
+export type AuditLogRow = typeof auditLogs.$inferSelect;
+export type TestDeliveryRow = typeof testDeliveries.$inferSelect;

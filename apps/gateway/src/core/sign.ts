@@ -1,4 +1,4 @@
-import { CREDENTIAL_HEADERS, isDroppedHeader } from "../core/headers";
+import { CREDENTIAL_HEADERS, isDroppedHeader } from "./headers";
 
 const REDACTED = "[REDACTED]";
 
@@ -40,6 +40,19 @@ export async function signWebhook(input: {
 	return `v1,${base64(new Uint8Array(await crypto.subtle.sign("HMAC", key, message)))}`;
 }
 
+/** Spec M3-3: during a grace window both signatures are sent, current first. */
+export async function signWebhookAll(input: {
+	id: string;
+	timestampSec: number;
+	body: Uint8Array<ArrayBufferLike>;
+	secrets: string[];
+}): Promise<string> {
+	const sigs = await Promise.all(
+		input.secrets.map((secret) => signWebhook({ ...input, secret })),
+	);
+	return sigs.join(" ");
+}
+
 function isDenied(name: string, value: string): boolean {
 	return (
 		isDroppedHeader(name) ||
@@ -54,7 +67,7 @@ export function buildOutboundHeaders(input: {
 	storedHeaders: Record<string, string>;
 	contentType: string | null;
 	deliveryId: string;
-	eventId: string;
+	eventId?: string;
 	timestampSec: number;
 	signature: string;
 }): Headers {
@@ -70,7 +83,7 @@ export function buildOutboundHeaders(input: {
 	headers.set("webhook-id", input.deliveryId);
 	headers.set("webhook-timestamp", String(input.timestampSec));
 	headers.set("webhook-signature", input.signature);
-	headers.set("x-webhook-event-id", input.eventId);
+	if (input.eventId) headers.set("x-webhook-event-id", input.eventId);
 	headers.set("user-agent", "Hookflare/1");
 	return headers;
 }

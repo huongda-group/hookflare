@@ -8,7 +8,9 @@ import {
 	vi,
 } from "vitest";
 import { createApp } from "../../src/app";
-import { deliveries, webhookEvents } from "../../src/core/db/schema";
+import { encryptSecret } from "../../src/core/crypto";
+import { deliveries, sources, webhookEvents } from "../../src/core/db/schema";
+import { aad } from "../../src/core/secrets";
 import { clearSourceCache } from "../../src/core/source-cache";
 import type { Deps } from "../../src/deps";
 import {
@@ -45,10 +47,13 @@ async function eventsOf(deps: Deps, sourceId: string) {
 		.where(eq(webhookEvents.sourceId, sourceId));
 }
 
-async function hmacHex(data: Uint8Array): Promise<string> {
+async function hmacHex(
+	data: Uint8Array,
+	secret = TEST_SOURCE_SECRET,
+): Promise<string> {
 	const key = await crypto.subtle.importKey(
 		"raw",
-		new TextEncoder().encode(TEST_SOURCE_SECRET),
+		new TextEncoder().encode(secret),
 		{ name: "HMAC", hash: "SHA-256" },
 		false,
 		["sign"],
@@ -470,5 +475,65 @@ describe("POST /in/:sourceId", () => {
 		const [delivery] = await deliveriesOf(deps, event_id);
 		expect(delivery.status).toBe("paused");
 		expect(queue.sent).toHaveLength(0);
+	});
+});
+
+describe("previous source secret", () => {
+	const prev = "previous-source-secret-0123456789";
+
+	async function seedWithPrev(deps: Deps, expiresAt: number) {
+		const p = await seedPipeline(deps, { source: hmacSource });
+		await deps.db
+			.update(sources)
+			.set({
+				secretPrevEnc: await encryptSecret(
+					deps.env,
+					prev,
+					aad.sourcePrev(p.source.id),
+				),
+				secretPrevExpiresAt: expiresAt,
+			})
+			.where(eq(sources.id, p.source.id));
+		clearSourceCache();
+		return p;
+	}
+
+	it("accepts it during grace and logs the match", async () => {
+		const deps = testDeps({ queue: recordingQueue() });
+		const p = await seedWithPrev(deps, deps.now() + 3_600_000);
+		const body = new TextEncoder().encode('{"a":1}');
+		const res = await post(deps, `/in/${p.source.id}`, body, {
+			"content-type": "application/json",
+			"x-sig": await hmacHex(body, prev),
+		});
+		expect(res.status).toBe(202);
+		expect(
+			loggedLines().some((l) => l.msg === "ingress.verified_with_prev_secret"),
+		).toBe(true);
+	});
+
+	it("rejects it after grace", async () => {
+		const deps = testDeps({ queue: recordingQueue() });
+		const p = await seedWithPrev(deps, deps.now() - 1);
+		const body = new TextEncoder().encode('{"a":1}');
+		const res = await post(deps, `/in/${p.source.id}`, body, {
+			"content-type": "application/json",
+			"x-sig": await hmacHex(body, prev),
+		});
+		expect(res.status).toBe(401);
+	});
+
+	it("still accepts the current secret", async () => {
+		const deps = testDeps({ queue: recordingQueue() });
+		const p = await seedWithPrev(deps, deps.now() + 3_600_000);
+		const body = new TextEncoder().encode('{"a":1}');
+		const res = await post(deps, `/in/${p.source.id}`, body, {
+			"content-type": "application/json",
+			"x-sig": await hmacHex(body),
+		});
+		expect(res.status).toBe(202);
+		expect(
+			loggedLines().some((l) => l.msg === "ingress.verified_with_prev_secret"),
+		).toBe(false);
 	});
 });

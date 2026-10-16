@@ -38,7 +38,7 @@
 
 | # | Topic | Decision | Why |
 |---|---|---|---|
-| M2-1 | Retry scheduling | After recording a retryable attempt, the consumer **acks the message and sends a new one** with `delaySeconds`. `msg.retry()` is used only for infra errors, as a fallback when that send fails, and to re-delay a duplicate message that arrives before `next_attempt_at` (§7 step 2). | One message serves one attempt, so `msg.attempts` counts only consecutive infra failures. The native DLQ then catches only poison messages, and M5 limiter rejections can never push a delivery into the DLQ while its D1 budget remains. |
+| M2-1 | Retry scheduling | After recording a retryable attempt, the consumer **acks the message and sends a new one** with `delaySeconds`. `msg.retry()` is used only for infra errors and as a fallback when that send fails. A duplicate message that arrives before `next_attempt_at` is acked (§7 step 2): the due message is sent after `next_attempt_at` is recorded, and the reconciler resends it if lost. | One message serves one attempt, so `msg.attempts` counts only consecutive infra failures. The native DLQ then catches only poison messages, and M5 limiter rejections can never push a delivery into the DLQ while its D1 budget remains. |
 | M2-2 | Lease placement | All checks (destination status, payload load, SSRF, signing) run **before** the lease, as in M1. The lease covers only send + record. | Errors before the lease need no lease release, so an infra error never strands a delivery in `in_flight`. |
 | M2-3 | Large payloads | Add `webhook_events.r2_key`. `body_inline` stays `NOT NULL` and holds an empty blob when the payload is in R2. Code enforces "exactly one location holds the payload". | Making a column nullable or adding a `CHECK` requires a SQLite table rebuild of the largest table, which `deliveries` references by FK; D1 migrations cannot turn `foreign_keys` off the way drizzle-kit's rebuild expects. |
 | M2-4 | Body size ceiling | `max_body_bytes` default 1 MB, allowed 1 B–10 MB. | Covers providers with large payloads while the buffered body stays far below the 128 MB isolate limit. Streaming verification is not needed. |
@@ -168,7 +168,7 @@ Messages in a batch are processed concurrently. `index.ts` routes a batch to the
 | Step | Behavior | Message outcome |
 |---|---|---|
 | 1. Load | Delivery + event + destination. Not found → log `delivery.not_found` | not found: `ack`. D1 error: infra retry |
-| 2. Claimable? | Not claimable → log `delivery.skipped`. `retrying` with `next_attempt_at > now` (a duplicate message) → log `delivery.not_due`, no attempt | skipped: `ack`. Not due: `retry` with the remaining delay |
+| 2. Claimable? | Not claimable → log `delivery.skipped`. `retrying` with `next_attempt_at > now` (a duplicate message) → log `delivery.not_due`, no attempt | `ack` (not due: never re-delayed, so a duplicate cannot reach the DLQ) |
 | 3. Destination | `paused` → conditional update to `paused` (`lease_until`/`next_attempt_at` NULL). `disabled` → `failed_final (destination_disabled)`. No attempt | `ack` |
 | 4. Payload | `r2_key` NULL → `body_inline`; else `payloads.get(r2_key)`. Object missing → `failed_final (payload_missing)`, no attempt | `ack`. R2 error: infra retry |
 | 5. SSRF | `checkUrl` (M1 §8). Blocked → `failed_final (ssrf_blocked: <reason>)`, no attempt | blocked: `ack`. `DnsError`: **infra retry** |

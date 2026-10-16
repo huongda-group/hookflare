@@ -81,3 +81,46 @@ describe("0003 + 0004", () => {
 		await expect(seedDelivery(deps, p)).resolves.toBeDefined();
 	});
 });
+
+describe("0005_admin_security", () => {
+	it("creates the M3 tables and columns without rebuilding a table", async () => {
+		const m = migration("0005");
+		const sqlText = m.queries.join("\n");
+		expect(sqlText).not.toMatch(/__new_|DROP TABLE|INSERT INTO/);
+		const tables = await env.DB.prepare(
+			"SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('users','audit_logs','test_deliveries') ORDER BY name",
+		).all<{ name: string }>();
+		expect(tables.results.map((r) => r.name)).toEqual([
+			"audit_logs",
+			"test_deliveries",
+			"users",
+		]);
+		const cols = async (table: string) =>
+			(
+				await env.DB.prepare(`PRAGMA table_info(${table})`).all<{
+					name: string;
+				}>()
+			).results.map((c) => c.name);
+		expect(await cols("sources")).toEqual(
+			expect.arrayContaining(["secret_prev_enc", "secret_prev_expires_at"]),
+		);
+		expect(await cols("destinations")).toEqual(
+			expect.arrayContaining([
+				"signing_secret_prev_enc",
+				"signing_secret_prev_expires_at",
+			]),
+		);
+		const idx = await env.DB.prepare(
+			"SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'deliveries_status_completed_idx'",
+		).first();
+		expect(idx).not.toBeNull();
+	});
+
+	it("rejects an unknown role", async () => {
+		await expect(
+			env.DB.prepare(
+				"INSERT INTO users (email, role, created_at, updated_at) VALUES ('x@example.com', 'root', 1, 1)",
+			).run(),
+		).rejects.toThrow(/CHECK/);
+	});
+});

@@ -1,4 +1,3 @@
-import { decryptSecret } from "../core/crypto";
 import {
 	acquireLease,
 	type DeliveryContext,
@@ -10,15 +9,17 @@ import {
 } from "../core/db/deliveries";
 import { DnsError } from "../core/dns";
 import { createLogger, type Logger } from "../core/log";
+import { readSnippet, SNIPPET_BYTES, sendSigned } from "../core/outbound";
 import { loadPayload } from "../core/payloads";
 import { resolvePolicy } from "../core/policy";
+import { destinationSigningSecrets } from "../core/secrets";
+import { buildOutboundHeaders, signWebhookAll } from "../core/sign";
 import { checkUrl } from "../core/ssrf";
 import type { DeliveryMessage, Deps } from "../deps";
 import { infraDelaySeconds } from "./backoff";
 import { classifyAttempt, type SendResult } from "./classify";
-import { buildOutboundHeaders, signWebhook } from "./sign";
 
-export const SNIPPET_BYTES = 2048;
+export { readSnippet, SNIPPET_BYTES };
 /** The lease outlives the request timeout by this much (spec §7 step 7). */
 export const LEASE_GRACE_MS = 30_000;
 
@@ -26,33 +27,6 @@ export type Disposition =
 	| { action: "ack" }
 	| { action: "retry"; delaySeconds: number };
 const ACK: Disposition = { action: "ack" };
-
-/** At most `maxBytes` of the body as lossy UTF-8; stream errors keep what was read. */
-export async function readSnippet(
-	response: Response,
-	maxBytes = SNIPPET_BYTES,
-): Promise<string | null> {
-	if (!response.body) {
-		return null;
-	}
-	const reader = response.body.getReader();
-	const buf = new Uint8Array(maxBytes);
-	let len = 0;
-	try {
-		while (len < maxBytes) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			const take = Math.min(value.byteLength, maxBytes - len);
-			buf.set(value.subarray(0, take), len);
-			len += take;
-		}
-	} catch {
-		// Keep the partial snippet; the HTTP status already decided the outcome.
-	} finally {
-		reader.cancel().catch(() => {});
-	}
-	return len === 0 ? null : new TextDecoder().decode(buf.subarray(0, len));
-}
 
 type SignedRequest = {
 	body: Uint8Array<ArrayBuffer>;
@@ -65,17 +39,17 @@ async function sign(
 	ctx: DeliveryContext,
 	body: Uint8Array<ArrayBuffer>,
 ): Promise<SignedRequest> {
-	const secret = await decryptSecret(
+	const secrets = await destinationSigningSecrets(
 		deps.env,
-		ctx.destination.signingSecretEnc,
-		`destinations.signing_secret_enc:${ctx.destination.id}`,
+		ctx.destination,
+		deps.now(),
 	);
 	const timestampSec = Math.floor(deps.now() / 1000);
-	const signature = await signWebhook({
+	const signature = await signWebhookAll({
 		id: ctx.delivery.id,
 		timestampSec,
 		body,
-		secret,
+		secrets,
 	});
 	return { body, timestampSec, signature };
 }
@@ -87,32 +61,20 @@ async function send(
 	timeoutMs: number,
 ): Promise<{ result: SendResult; snippet: string | null }> {
 	const { delivery, event, destination } = ctx;
-	try {
-		const response = await deps.fetch(destination.url, {
-			method: "POST",
-			headers: buildOutboundHeaders({
-				storedHeaders: event.headersJson,
-				contentType: event.contentType,
-				deliveryId: delivery.id,
-				eventId: event.id,
-				timestampSec,
-				signature,
-			}),
-			body,
-			redirect: "manual",
-			signal: AbortSignal.timeout(timeoutMs),
-		});
-		return {
-			result: {
-				kind: "response",
-				status: response.status,
-				retryAfter: response.headers.get("retry-after"),
-			},
-			snippet: await readSnippet(response),
-		};
-	} catch (error) {
-		return { result: { kind: "error", error }, snippet: null };
-	}
+	const { result, snippet } = await sendSigned(deps, {
+		url: destination.url,
+		headers: buildOutboundHeaders({
+			storedHeaders: event.headersJson,
+			contentType: event.contentType,
+			deliveryId: delivery.id,
+			eventId: event.id,
+			timestampSec,
+			signature,
+		}),
+		body,
+		timeoutMs,
+	});
+	return { result, snippet };
 }
 
 /** Spec §7 steps 1–10. Infra errors never count as attempts (msg.retry instead). */
@@ -152,19 +114,20 @@ export async function processDelivery(
 		});
 		return ACK;
 	}
-	// A duplicate message must not cut the backoff short; the due one still arrives.
+	// A duplicate message must not cut the backoff short; the due one still arrives
+	// (it is sent after next_attempt_at is recorded), and the reconciler resends it if
+	// lost. Ack instead of re-delaying: native retries would carry it to the DLQ.
 	const { nextAttemptAt } = ctx.delivery;
 	if (
 		ctx.delivery.status === "retrying" &&
 		nextAttemptAt !== null &&
 		nextAttemptAt > deps.now()
 	) {
-		const delaySeconds = Math.ceil((nextAttemptAt - deps.now()) / 1000);
 		logger.info("delivery.not_due", {
 			delivery_id: deliveryId,
-			delay_s: delaySeconds,
+			delay_s: Math.ceil((nextAttemptAt - deps.now()) / 1000),
 		});
-		return { action: "retry", delaySeconds };
+		return ACK;
 	}
 	const policy = resolvePolicy(ctx.destination);
 	const finish = async (lastError: string) => {

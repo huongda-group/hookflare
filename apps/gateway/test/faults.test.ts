@@ -1,5 +1,9 @@
 import { env } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
+import { clearAccessKeyCache } from "../src/admin/auth/access";
+import { projects } from "../src/core/db/schema";
+import { adminApp } from "./helpers/admin";
 import { recordingQueue, testDeps } from "./helpers/deps";
 import { faultyD1, faultyDeps, faultyQueue, faultyR2 } from "./helpers/faults";
 
@@ -48,5 +52,25 @@ describe("fault injection", () => {
 		await expect(r2.get("faults/a")).rejects.toThrow();
 		await r2.delete("faults/a");
 		expect(r2.log).toEqual(["put faults/a", "get faults/a", "delete faults/a"]);
+	});
+
+	it("writes neither the mutation nor the audit row when the batch fails", async () => {
+		const base = testDeps();
+		await (await adminApp(base)).request("GET", "/me"); // bootstrap outside the fault
+		clearAccessKeyCache(); // each adminApp mints fresh keys under the same kid
+		const deps = faultyDeps(base, {
+			d1: [{ match: /insert into "audit_logs"/i }],
+		});
+		const api = await adminApp(deps);
+		const res = await api.request("POST", "/projects", {
+			name: "Atomic",
+			slug: `atomic-${crypto.randomUUID().slice(0, 8)}`,
+		});
+		expect(res.status).toBe(500);
+		const rows = await base.db
+			.select()
+			.from(projects)
+			.where(eq(projects.name, "Atomic"));
+		expect(rows).toEqual([]);
 	});
 });

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { adminRoutes } from "./admin/router";
 import { createLogger, type Logger } from "./core/log";
+import type { Role } from "./core/rbac";
 import { createDeps, type Deps } from "./deps";
 import type { AppEnv } from "./env";
 import { ingressRoutes } from "./ingress/route";
@@ -14,7 +15,7 @@ export type AppBindings = {
 		logger: Logger;
 		deps: Deps;
 		/** Set by the Access middleware on /api/admin/v1. */
-		actor?: { email: string };
+		actor?: { email: string; role: Role };
 	};
 };
 

@@ -1,15 +1,21 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { deliveries, deliveryAttempts } from "../../src/core/db/schema";
+import { encryptSecret } from "../../src/core/crypto";
+import {
+	deliveries,
+	deliveryAttempts,
+	destinations,
+} from "../../src/core/db/schema";
 import { DnsError } from "../../src/core/dns";
 import { createLogger } from "../../src/core/log";
+import { aad } from "../../src/core/secrets";
+import { signWebhook } from "../../src/core/sign";
 import { clearSsrfCache } from "../../src/core/ssrf";
 import {
 	handleDeliveryBatch,
 	processDelivery,
 	readSnippet,
 } from "../../src/delivery/consumer";
-import { signWebhook } from "../../src/delivery/sign";
 import type { Deps } from "../../src/deps";
 import { type RecordingQueue, recordingQueue, testDeps } from "../helpers/deps";
 import { faultyDeps } from "../helpers/faults";
@@ -279,6 +285,50 @@ describe("processDelivery", () => {
 		expect(delivery.status).toBe("delivered");
 		expect(attempts[0].responseSnippet).toBe("partial");
 	});
+
+	it("sends two signatures while the previous signing secret is in grace", async () => {
+		const fetch = vi.fn(async () => new Response("ok", { status: 200 }));
+		const deps = testDeps({
+			fetch: fetch as unknown as typeof globalThis.fetch,
+		});
+		const p = await seedPipeline(deps);
+		const prev = "whsec_cHJldmlvdXMtc2VjcmV0LWJ5dGVzLTMyLWxvbmchIQ==";
+		await deps.db
+			.update(destinations)
+			.set({
+				signingSecretPrevEnc: await encryptSecret(
+					deps.env,
+					prev,
+					aad.destinationPrev(p.destination.id),
+				),
+				signingSecretPrevExpiresAt: deps.now() + 3_600_000,
+			})
+			.where(eq(destinations.id, p.destination.id));
+		const { deliveryId } = await seedDelivery(deps, p);
+		await processDelivery(deps, deliveryId, createLogger(deps.env, {}));
+		const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+		const headers = new Headers(init.headers);
+		const sigs = headers.get("webhook-signature")?.split(" ") ?? [];
+		expect(sigs).toHaveLength(2);
+		const ts = Number(headers.get("webhook-timestamp"));
+		const body = init.body as Uint8Array;
+		expect(sigs[0]).toBe(
+			await signWebhook({
+				id: deliveryId,
+				timestampSec: ts,
+				body,
+				secret: TEST_SIGNING_SECRET,
+			}),
+		);
+		expect(sigs[1]).toBe(
+			await signWebhook({
+				id: deliveryId,
+				timestampSec: ts,
+				body,
+				secret: prev,
+			}),
+		);
+	});
 });
 
 describe("readSnippet", () => {
@@ -497,7 +547,7 @@ describe("processDelivery retries (M2)", () => {
 		});
 	});
 
-	it("defers a retrying delivery that is not due yet, without a request", async () => {
+	it("acks a duplicate of a retrying delivery that is not due yet, without a request", async () => {
 		const fetchMock = fetchReturning(() => new Response("ok"));
 		const { deps, advance } = clocked({ fetch: fetchMock });
 		const p = await seedPipeline(deps);
@@ -508,9 +558,9 @@ describe("processDelivery retries (M2)", () => {
 				nextAttemptAt: T0 + 29_500,
 			},
 		});
+		// Acked, not re-delayed: native retries would push the message toward the DLQ.
 		expect(await processDelivery(deps, deliveryId, logger)).toEqual({
-			action: "retry",
-			delaySeconds: 30,
+			action: "ack",
 		});
 		expect(fetchMock).not.toHaveBeenCalled();
 		expect((await state(deps, deliveryId)).delivery).toMatchObject({

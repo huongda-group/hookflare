@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from "hono";
 import { createRemoteJWKSet, customFetch, errors, jwtVerify } from "jose";
 import type { AppBindings } from "../../app";
+import { bootstrapStatements, getUser } from "../../core/db/users";
 
 /** Unknown-kid refetches are bounded to one per team domain per cooldown. */
 const COOLDOWN_MS = 60_000;
@@ -89,7 +90,7 @@ async function verifyWithRotation(
 	}
 }
 
-/** Spec §9.1. Fails closed: missing config is a 500, never an open API. */
+/** Spec §6.1. Fails closed: missing config is a 500, never an open API. */
 export function accessMiddleware(
 	options: { fetch?: typeof fetch } = {},
 ): MiddlewareHandler<AppBindings> {
@@ -132,13 +133,21 @@ export function accessMiddleware(
 		}
 
 		const normalized = email?.trim().toLowerCase();
-		if (
-			!normalized ||
-			!allowedEmails(env.BOOTSTRAP_ADMIN_EMAILS).has(normalized)
-		) {
+		if (!normalized) {
 			return c.json({ error: "forbidden" }, 403);
 		}
-		c.set("actor", { email: normalized });
+		// Spec §6.1: D1 is the source of truth; the env list only seeds admins.
+		const { db, now } = c.var.deps;
+		let user = await getUser(db, normalized);
+		if (!user && allowedEmails(env.BOOTSTRAP_ADMIN_EMAILS).has(normalized)) {
+			await db.batch(bootstrapStatements(db, normalized, now()));
+			user = await getUser(db, normalized);
+			c.var.logger.info("admin.user_bootstrapped", { actor_email: normalized });
+		}
+		if (!user || user.disabledAt !== null) {
+			return c.json({ error: "forbidden" }, 403);
+		}
+		c.set("actor", { email: normalized, role: user.role });
 		await next();
 	};
 }

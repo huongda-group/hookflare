@@ -5,12 +5,14 @@ import {
 	listQuery,
 	type Page,
 	patchSourceRequest,
+	rotateSourceSecretRequest,
 	type Source,
 } from "@hookflare/shared";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import type { AppBindings } from "../../app";
+import { auditInsertIfChanged } from "../../core/audit";
 import {
 	bytesToB64url,
 	decryptSecret,
@@ -22,15 +24,26 @@ import { getProject } from "../../core/db/projects";
 import { type SourceRow, sources } from "../../core/db/schema";
 import { getSource, listSources } from "../../core/db/sources";
 import { newId } from "../../core/ids";
-import { audit, paginate, readJson, readQuery } from "../http";
-
-const aad = (id: string) => `sources.secret_enc:${id}`;
+import { aad, clearExpiredPrev, rotationColumns } from "../../core/secrets";
+import { requirePermission } from "../auth/permission";
+import {
+	auditStmt,
+	paginate,
+	readJson,
+	readOptionalJson,
+	readQuery,
+} from "../http";
 
 async function toSource(
 	c: Context<AppBindings>,
 	row: SourceRow,
 ): Promise<Source> {
 	const env = c.var.deps.env;
+	const now = c.var.deps.now();
+	const live =
+		row.secretPrevEnc &&
+		row.secretPrevExpiresAt !== null &&
+		row.secretPrevExpiresAt > now;
 	return {
 		id: row.id,
 		project_id: row.projectId,
@@ -41,9 +54,19 @@ async function toSource(
 		auth_config: row.authConfig as Source["auth_config"],
 		secret_fingerprint: row.secretEnc
 			? await secretFingerprint(
-					await decryptSecret(env, row.secretEnc, aad(row.id)),
+					await decryptSecret(env, row.secretEnc, aad.source(row.id)),
 				)
 			: null,
+		previous_secret_fingerprint: live
+			? await secretFingerprint(
+					await decryptSecret(
+						env,
+						row.secretPrevEnc as string,
+						aad.sourcePrev(row.id),
+					),
+				)
+			: null,
+		previous_secret_expires_at: live ? row.secretPrevExpiresAt : null,
 		event_id_from: row.eventIdFrom,
 		event_id_selector: row.eventIdSelector,
 		max_body_bytes: row.maxBodyBytes,
@@ -72,7 +95,7 @@ function invalidField(c: Context<AppBindings>, path: string, message: string) {
 export function sourceRoutes() {
 	const routes = new Hono<AppBindings>();
 
-	routes.post("/", async (c) => {
+	routes.post("/", requirePermission("config.write"), async (c) => {
 		const body = await readJson(c, createSourceRequest);
 		if (!body.ok) return body.response;
 		const req = body.value;
@@ -100,7 +123,11 @@ export function sourceRoutes() {
 			authType: req.auth_type,
 			authConfig: req.auth_config,
 			secretEnc:
-				secret === undefined ? null : await encryptSecret(env, secret, aad(id)),
+				secret === undefined
+					? null
+					: await encryptSecret(env, secret, aad.source(id)),
+			secretPrevEnc: null,
+			secretPrevExpiresAt: null,
 			eventIdFrom: req.event_id_from,
 			eventIdSelector:
 				req.event_id_from === "none" ? null : (req.event_id_selector ?? null),
@@ -108,16 +135,28 @@ export function sourceRoutes() {
 			createdAt: ts,
 			updatedAt: ts,
 		};
-		await db.insert(sources).values(row);
-		const { secret: _secret, ...diff } = req as typeof req & {
+		const {
+			secret: _secret,
+			reason,
+			...diff
+		} = req as typeof req & {
 			secret?: string;
 		};
-		audit(c, "source", "created", id, diff);
+		await db.batch([
+			db.insert(sources).values(row),
+			auditStmt(c, {
+				action: "source.created",
+				resourceType: "source",
+				resourceId: id,
+				diff,
+				reason,
+			}),
+		]);
 		const dto = await toSource(c, row);
 		return c.json(generated ? { ...dto, secret: generated } : dto, 201);
 	});
 
-	routes.get("/", async (c) => {
+	routes.get("/", requirePermission("events.read"), async (c) => {
 		const q = readQuery(c, listQuery);
 		if (!q.ok) return q.response;
 		const { rows, nextCursor } = paginate(
@@ -132,22 +171,28 @@ export function sourceRoutes() {
 		return c.json({ data, next_cursor: nextCursor } satisfies Page<Source>);
 	});
 
-	routes.get("/:id", async (c) => {
+	routes.get("/:id", requirePermission("events.read"), async (c) => {
 		const row = await getSource(c.var.deps.db, c.req.param("id"));
 		return row
 			? c.json(await toSource(c, row))
 			: c.json({ error: "not_found" }, 404);
 	});
 
-	routes.patch("/:id", async (c) => {
+	routes.patch("/:id", requirePermission("config.write"), async (c) => {
 		const body = await readJson(c, patchSourceRequest);
 		if (!body.ok) return body.response;
-		const patch = body.value;
+		const { reason, ...patch } = body.value;
 		const { db, now } = c.var.deps;
 		const existing = await getSource(db, c.req.param("id"));
 		if (!existing) return c.json({ error: "not_found" }, 404);
 
-		const set: Partial<SourceRow> = { updatedAt: now() };
+		const ts = now();
+		const set: Partial<SourceRow> = { updatedAt: ts };
+		const prev = clearExpiredPrev(
+			sources.secretPrevEnc,
+			sources.secretPrevExpiresAt,
+			ts,
+		);
 		if (patch.name !== undefined) set.name = patch.name;
 		if (patch.status !== undefined) set.status = patch.status;
 		if (patch.max_body_bytes !== undefined)
@@ -190,15 +235,89 @@ export function sourceRoutes() {
 			set.eventIdSelector = selector;
 		}
 
-		const [row] = await db
-			.update(sources)
-			.set(set)
-			.where(eq(sources.id, existing.id))
-			.returning();
-		if (!row) return c.json({ error: "not_found" }, 404);
-		audit(c, "source", "updated", row.id, patch);
+		const [[row]] = await db.batch([
+			db
+				.update(sources)
+				.set({
+					...set,
+					secretPrevEnc: prev.enc,
+					secretPrevExpiresAt: prev.expiresAt,
+				})
+				.where(eq(sources.id, existing.id))
+				.returning(),
+			auditStmt(c, {
+				action: "source.updated",
+				resourceType: "source",
+				resourceId: existing.id,
+				diff: patch,
+				reason,
+			}),
+		]);
 		return c.json(await toSource(c, row));
 	});
+
+	routes.post(
+		"/:id/rotate-secret",
+		requirePermission("config.write"),
+		async (c) => {
+			const body = await readOptionalJson(c, rotateSourceSecretRequest);
+			if (!body.ok) return body.response;
+			const { db, now, env } = c.var.deps;
+			const id = c.req.param("id");
+			const existing = await getSource(db, id);
+			if (!existing) return c.json({ error: "not_found" }, 404);
+			if (existing.authType === "none" || !existing.secretEnc)
+				return c.json({ error: "no_secret" }, 409);
+			const ts = now();
+			const secret =
+				body.value.secret ??
+				bytesToB64url(crypto.getRandomValues(new Uint8Array(32)));
+			const cols = await rotationColumns({
+				env,
+				currentEnc: existing.secretEnc,
+				currentAad: aad.source(id),
+				prevAad: aad.sourcePrev(id),
+				newSecret: secret,
+				newAad: aad.source(id),
+				graceHours: body.value.grace_hours,
+				now: ts,
+			});
+			const fingerprint = await secretFingerprint(secret);
+			// Fenced on the ciphertext we read: a concurrent rotation makes this a no-op.
+			const [[row]] = await db.batch([
+				db
+					.update(sources)
+					.set({
+						secretEnc: cols.enc,
+						secretPrevEnc: cols.prevEnc,
+						secretPrevExpiresAt: cols.prevExpiresAt,
+						updatedAt: ts,
+					})
+					.where(
+						and(eq(sources.id, id), eq(sources.secretEnc, existing.secretEnc)),
+					)
+					.returning(),
+				auditInsertIfChanged(db, {
+					actor: c.var.actor?.email ?? "",
+					at: ts,
+					action: "source.secret_rotated",
+					resourceType: "source",
+					resourceId: id,
+					reason: body.value.reason,
+					diff: {
+						grace_hours: body.value.grace_hours,
+						prev_expires_at: cols.prevExpiresAt,
+						new_fingerprint: fingerprint,
+					},
+				}),
+			]);
+			if (!row) return c.json({ error: "conflict" }, 409);
+			return c.json({
+				...(await toSource(c, row)),
+				...(body.value.secret ? {} : { secret }),
+			});
+		},
+	);
 
 	return routes;
 }

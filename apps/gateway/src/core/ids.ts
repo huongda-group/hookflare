@@ -7,6 +7,7 @@ export const ID_PREFIXES = [
 	"att",
 	"aud",
 	"alr",
+	"tst",
 ] as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[number];

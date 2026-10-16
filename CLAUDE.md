@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Hookflare is an inbound webhook gateway on Cloudflare (Workers + Hono, D1, Queues, R2, Durable Objects, Access). Milestones M0 (Foundation) and M1 (Core pipeline) are done: ingress, D1 ledger via Drizzle, queue consumer with single-shot delivery, Standard Webhooks signing, SSRF guard, and a minimal admin API behind Access. M2 (Reliability) is done: retries with exponential backoff, lease fencing, DLQ consumer, dedup by provider event ID, R2 payloads, per-minute reconciler, per-destination retry policy, and pause/resume.
+Hookflare is an inbound webhook gateway on Cloudflare (Workers + Hono, D1, Queues, R2, Durable Objects, Access). Milestones M0 (Foundation) and M1 (Core pipeline) are done: ingress, D1 ledger via Drizzle, queue consumer with single-shot delivery, Standard Webhooks signing, SSRF guard, and a minimal admin API behind Access. M2 (Reliability) is done: retries with exponential backoff, lease fencing, DLQ consumer, dedup by provider event ID, R2 payloads, per-minute reconciler, per-destination retry policy, and pause/resume. M3 (Admin API & security) is done: users + RBAC (viewer/operator/admin) with bootstrap admins, audit_logs written in the same batch as every mutation, event search and failures views with cursors, single and bulk replay, synchronous test delivery, and source/destination secret rotation with a grace window.
 
 ## Source documents and precedence
 
@@ -45,9 +45,10 @@ To run a single test: `pnpm --filter gateway exec vitest run test/core/ids.test.
 - Verify source signatures against the **raw body bytes**. Parse JSON (e.g. to extract the provider event ID) only after verification.
 - **D1 is the source of truth for retry state.** The retry budget is `deliveries.attempt_count` compared against the destination's `max_attempts`, not the queue's `msg.attempts`, which resets on re-enqueue. Native DLQ is only a safety net.
 - The consumer must acquire the conditional-UPDATE **lease** before calling a backend. If 0 rows are affected, ack and skip: that is how duplicate queue messages become harmless.
-- Retries are new delayed messages; `msg.retry()` is only for infra errors, as a fallback when the reschedule send fails, and to re-delay a duplicate message that arrives before `next_attempt_at`.
+- Retries are new delayed messages; `msg.retry()` is only for infra errors and as a fallback when the reschedule send fails. A duplicate message that arrives before `next_attempt_at` is acked (never re-delayed, so it cannot reach the DLQ); the due message still arrives, and the reconciler resends it if lost.
 - The record update is fenced by `lease_until`: it matches the lease value, so a stale worker whose lease expired writes neither the delivery update nor the attempt row.
 - Infra errors (D1/R2), limiter rejections, and paused destinations never count as attempts.
 - Replay always creates a **new** `deliveries` row (`kind=replay`) and never mutates past deliveries or attempts. Every admin mutation writes `audit_logs` with secrets redacted.
+- Every admin mutation and its audit_logs row are written in one db.batch; replay audits list every new delivery ID. Permissions are checked per route with requirePermission(); the users row is read on every admin request.
 - Outbound requests: HTTPS only, `redirect: "manual"`, SSRF check (DoH resolve) before every delivery, Standard Webhooks signing, and credential headers stripped via the shared denylist.
 - Archival never removes an event from D1 while any of its deliveries is non-terminal, and deletes from D1 only after the R2 manifest has been verified.

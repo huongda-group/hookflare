@@ -83,4 +83,8 @@ describe("ids", () => {
 	it("does not echo untrusted input in the idTimestamp error", () => {
 		expect(() => idTimestamp("<script>")).toThrow(/^invalid id$/);
 	});
+
+	it("accepts the tst prefix", () => {
+		expect(isId(newId("tst"), "tst")).toBe(true);
+	});
 });
