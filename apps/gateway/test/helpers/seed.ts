@@ -115,26 +115,34 @@ export async function seedDelivery(
 		contentType?: string | null;
 		delivery?: Partial<typeof deliveries.$inferInsert>;
 		event?: Partial<typeof webhookEvents.$inferInsert>;
+		/** Adds the delivery to this existing event instead of inserting one. */
+		eventId?: string;
 	} = {},
 ): Promise<{ eventId: string; deliveryId: string }> {
 	const now = deps.now();
-	const eventId = newId("evt", now);
+	const eventId = opts.eventId ?? newId("evt", now);
 	const deliveryId = newId("dlv", now);
 	const body = opts.body ?? new TextEncoder().encode('{"hello":"world"}');
-	await deps.db.insert(webhookEvents).values({
-		id: eventId,
-		projectId: p.project.id,
-		sourceId: p.source.id,
-		providerEventId: null,
-		receivedAt: now,
-		headersJson: opts.headers ?? { "content-type": "application/json" },
-		contentType:
-			opts.contentType === undefined ? "application/json" : opts.contentType,
-		sizeBytes: body.byteLength,
-		payloadSha256: "0".repeat(64),
-		bodyInline: body,
-		...opts.event,
-	});
+	if (!opts.eventId) {
+		// Bodies over 64 KiB live in R2, like ingress stores them.
+		const r2Key = body.byteLength > 64 * 1024 ? `events/test/${eventId}` : null;
+		if (r2Key) await deps.payloads.put(r2Key, body);
+		await deps.db.insert(webhookEvents).values({
+			id: eventId,
+			projectId: p.project.id,
+			sourceId: p.source.id,
+			providerEventId: null,
+			receivedAt: now,
+			headersJson: opts.headers ?? { "content-type": "application/json" },
+			contentType:
+				opts.contentType === undefined ? "application/json" : opts.contentType,
+			sizeBytes: body.byteLength,
+			payloadSha256: "0".repeat(64),
+			bodyInline: r2Key ? new Uint8Array() : body,
+			r2Key,
+			...opts.event,
+		});
+	}
 	await deps.db.insert(deliveries).values({
 		id: deliveryId,
 		eventId,

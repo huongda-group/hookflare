@@ -2,7 +2,11 @@ import type { BulkReplayResult, ReplayResult } from "@hookflare/shared";
 import { asc, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { clearAccessKeyCache } from "../../src/admin/auth/access";
-import { deliveries, destinations } from "../../src/core/db/schema";
+import {
+	deliveries,
+	destinations,
+	webhookEvents,
+} from "../../src/core/db/schema";
 import { newId } from "../../src/core/ids";
 import { adminApp, auditRows } from "../helpers/admin";
 import { type RecordingQueue, recordingQueue, testDeps } from "../helpers/deps";
@@ -179,6 +183,27 @@ describe("POST /events/:id/replay", () => {
 			(await api.request("POST", `/events/${eventId}/replay`, { reason }))
 				.status,
 		).toBe(403);
+	});
+
+	it("clears the archive mark of replayed events in the same batch (spec §7.4)", async () => {
+		const deps = testDeps();
+		const p = await seedPipeline(deps);
+		const { eventId } = await seedDelivery(deps, p, { status: "dead" });
+		await deps.db
+			.update(webhookEvents)
+			.set({ archiveBatchId: "arb_r", archivePart: 1 })
+			.where(eq(webhookEvents.id, eventId));
+		const api = await adminApp(deps, { role: "operator" });
+		const res = await api.request("POST", `/events/${eventId}/replay`, {
+			reason,
+		});
+		expect(res.status).toBeLessThan(300);
+		const [e] = await deps.db
+			.select()
+			.from(webhookEvents)
+			.where(eq(webhookEvents.id, eventId));
+		expect(e.archiveBatchId).toBeNull();
+		expect(e.archivePart).toBeNull();
 	});
 });
 

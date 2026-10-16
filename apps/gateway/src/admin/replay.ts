@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import type { AppBindings } from "../app";
+import { unmarkEventsStatements } from "../core/db/archive";
 import { activeReplays, markQueuedMany } from "../core/db/deliveries";
 import { listDestinationStatuses } from "../core/db/destinations";
 import { getEventR2Keys } from "../core/db/events";
@@ -112,6 +113,10 @@ export async function writeReplays(
 	await deps.db.batch([
 		first,
 		...rest,
+		...unmarkEventsStatements(
+			deps.db,
+			input.ready.map((t) => t.eventId),
+		),
 		auditStmt(c, {
 			action: "delivery.replayed",
 			resourceType: input.resourceType,
