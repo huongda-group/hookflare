@@ -33,7 +33,9 @@ export function settingsRoutes() {
 		if (!body.ok) return body.response;
 		const { db, now } = c.var.deps;
 		const before = await readRetryDefaults(db);
-		const ts = now();
+		// updated_at is the compare-and-swap version, so it must move even when
+		// two writes share a millisecond.
+		const ts = Math.max(now(), (before.updatedAt ?? 0) + 1);
 		const after = body.value.retry_defaults;
 		const [written] = await db.batch([
 			upsertRetryDefaults(db, after, ts, before.updatedAt),

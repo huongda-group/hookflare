@@ -52,4 +52,30 @@ describe("SourceFormDialog", () => {
 		expect(body).not.toHaveProperty("secret");
 		expect(body).toMatchObject({ auth_type: "none", auth_config: {} });
 	});
+
+	it("saves an edit without the fixed auth type", async () => {
+		let body: Record<string, unknown> | undefined;
+		server.use(
+			http.get(apiUrl("/destinations"), () =>
+				HttpResponse.json({ data: [destination()], next_cursor: null }),
+			),
+			http.patch(apiUrl("/sources/src_1"), async ({ request }) => {
+				body = (await request.json()) as Record<string, unknown>;
+				return HttpResponse.json(source());
+			}),
+		);
+		const user = userEvent.setup();
+		render(
+			<QueryClientProvider client={createQueryClient()}>
+				<SourceFormDialog open onOpenChange={() => {}} source={source()} />
+			</QueryClientProvider>,
+		);
+		const name = screen.getByLabelText("Name");
+		await user.clear(name);
+		await user.type(name, "Stripe live");
+		await user.click(screen.getByRole("button", { name: "Save" }));
+		await waitFor(() => expect(body).toBeDefined());
+		expect(body).toMatchObject({ name: "Stripe live" });
+		expect(body).not.toHaveProperty("auth_type");
+	});
 });

@@ -88,6 +88,7 @@ function SimpleSelect({
  * Create: the whole discriminated body is validated by createSourceRequest.
  * Edit: auth_type is fixed (M3 stores it per source), and the server checks
  * auth_config against it, so the form shows the fields for the stored type.
+ * auth_type stays out of the edit values: the strict patch schema rejects it.
  */
 export function SourceFormDialog({
 	open,
@@ -111,7 +112,6 @@ export function SourceFormDialog({
 			? {
 					name: source.name,
 					destination_id: source.destination_id,
-					auth_type: source.auth_type,
 					auth_config: source.auth_config,
 					event_id_from: source.event_id_from,
 					event_id_selector: source.event_id_selector,
@@ -119,7 +119,8 @@ export function SourceFormDialog({
 				}
 			: { name: "", auth_type: "none", auth_config: {}, event_id_from: "none" },
 	});
-	const authType = form.watch("auth_type");
+	const watchedAuthType = form.watch("auth_type");
+	const authType = editing ? source.auth_type : watchedAuthType;
 	const eventFrom = form.watch("event_id_from");
 	const projectId = editing ? source.project_id : form.watch("project_id");
 	const destinations = useDestinationsList(projectId);
@@ -149,7 +150,7 @@ export function SourceFormDialog({
 			body.event_id_selector = editing ? null : undefined;
 		try {
 			if (editing) {
-				const { auth_type: _t, secret: _s, project_id: _p, ...patch } = body;
+				const { secret: _s, project_id: _p, ...patch } = body;
 				await api.patch(`/sources/${source.id}`, patch);
 			} else {
 				const res = await api.post<{ secret?: string }>("/sources", body);

@@ -6,6 +6,7 @@ import { type ReactNode, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { createQueryClient } from "@/router";
 import { apiUrl, server } from "@/test/server";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { ReplayDialog } from "./ReplayDialog";
 import { RotateSecretDialog } from "./RotateSecretDialog";
 import { SecretRevealDialog } from "./SecretRevealDialog";
@@ -289,5 +290,23 @@ describe("RotateSecretDialog", () => {
 		);
 		await userEvent.click(screen.getByRole("button", { name: "reopen" }));
 		expect(await screen.findByLabelText(/New secret/)).toHaveValue("");
+	});
+});
+
+describe("ConfirmDialog", () => {
+	it("clears a typed reason after cancel", async () => {
+		const props = {
+			onOpenChange: () => {},
+			title: "Disable destination",
+			description: "Stops deliveries.",
+			confirmLabel: "Disable",
+			onConfirm: async () => {},
+		};
+		const { rerender } = render(<ConfirmDialog open {...props} />);
+		await userEvent.type(screen.getByLabelText("Reason (optional)"), "old");
+		await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+		rerender(<ConfirmDialog open={false} {...props} />);
+		rerender(<ConfirmDialog open {...props} />);
+		expect(await screen.findByLabelText("Reason (optional)")).toHaveValue("");
 	});
 });

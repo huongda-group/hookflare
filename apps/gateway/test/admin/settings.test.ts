@@ -97,6 +97,22 @@ describe("PATCH /settings", () => {
 		);
 	});
 
+	it("advances updated_at when two updates land in the same millisecond", async () => {
+		// updated_at is the compare-and-swap version: a repeat of the stored
+		// value would let a writer that read the previous version slip through.
+		const deps = testDeps({ now: () => 1_000 });
+		const api = await adminApp(deps);
+		const first = await api.request("PATCH", "/settings", {
+			retry_defaults: next,
+		});
+		expect((await first.json<Settings>()).updated_at).toBe(1_000);
+		const second = await api.request("PATCH", "/settings", {
+			retry_defaults: { ...next, max_attempts: 6 },
+		});
+		expect(second.status).toBe(200);
+		expect((await second.json<Settings>()).updated_at).toBe(1_001);
+	});
+
 	it("answers 409 and writes no audit row when another update wins the race", async () => {
 		const deps = testDeps();
 		const api = await adminApp(deps);
