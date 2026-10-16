@@ -50,6 +50,13 @@
 			"when": 1792126226073,
 			"tag": "0006_dashboard",
 			"breakpoints": true
+		},
+		{
+			"idx": 7,
+			"version": "6",
+			"when": 1792142658786,
+			"tag": "0007_limiter",
+			"breakpoints": true
 		}
 	]
 }

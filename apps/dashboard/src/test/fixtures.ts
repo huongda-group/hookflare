@@ -30,6 +30,8 @@ export const destination = (o: Partial<Destination> = {}): Destination => ({
 	max_attempts: null,
 	backoff_base_s: null,
 	backoff_max_s: null,
+	max_in_flight: null,
+	rate_limit_per_s: null,
 	signing_secret_fingerprint: "ab12cd34",
 	previous_secret_fingerprint: null,
 	previous_secret_expires_at: null,

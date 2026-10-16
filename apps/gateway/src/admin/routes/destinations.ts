@@ -102,6 +102,8 @@ export async function toDestination(
 		max_attempts: row.maxAttempts,
 		backoff_base_s: row.backoffBaseS,
 		backoff_max_s: row.backoffMaxS,
+		max_in_flight: row.maxInFlight,
+		rate_limit_per_s: row.rateLimitPerS,
 		signing_secret_fingerprint: await secretFingerprint(
 			await decryptSecret(env, row.signingSecretEnc, aad.destination(row.id)),
 		),
@@ -202,6 +204,8 @@ export function destinationRoutes() {
 			maxAttempts: fields.max_attempts ?? null,
 			backoffBaseS: fields.backoff_base_s ?? null,
 			backoffMaxS: fields.backoff_max_s ?? null,
+			maxInFlight: fields.max_in_flight ?? null,
+			rateLimitPerS: fields.rate_limit_per_s ?? null,
 			createdAt: ts,
 			updatedAt: ts,
 		};
@@ -300,6 +304,12 @@ export function destinationRoutes() {
 				: {}),
 			...(v.backoff_max_s !== undefined
 				? { backoffMaxS: v.backoff_max_s }
+				: {}),
+			...(v.max_in_flight !== undefined
+				? { maxInFlight: v.max_in_flight }
+				: {}),
+			...(v.rate_limit_per_s !== undefined
+				? { rateLimitPerS: v.rate_limit_per_s }
 				: {}),
 		};
 		// Only a patch that touches backoff is validated: raised defaults must not

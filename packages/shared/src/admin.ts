@@ -20,6 +20,8 @@ const backoffBaseS = z.number().int().min(1).max(3600);
 /** Queues cap delaySeconds at 12 h. ≥ backoff_base_s is checked by the route after defaults. */
 const backoffMaxS = z.number().int().min(1).max(43_200);
 const maxBodyBytes = z.number().int().min(1).max(10_485_760);
+/** M5a: NULL = unlimited. Not part of retry_defaults (limits describe one backend). */
+export const destinationLimit = z.number().int().min(1).max(1000);
 const secret = z.string().min(16).max(512);
 
 export const reasonSchema = z.string().trim().min(1).max(500);
@@ -126,6 +128,8 @@ export const createDestinationRequest = z.strictObject({
 	max_attempts: maxAttempts.optional(),
 	backoff_base_s: backoffBaseS.optional(),
 	backoff_max_s: backoffMaxS.optional(),
+	max_in_flight: destinationLimit.nullable().optional(),
+	rate_limit_per_s: destinationLimit.nullable().optional(),
 	...optionalReason,
 });
 export const patchDestinationRequest = z.strictObject({
@@ -136,6 +140,8 @@ export const patchDestinationRequest = z.strictObject({
 	max_attempts: maxAttempts.nullable().optional(),
 	backoff_base_s: backoffBaseS.nullable().optional(),
 	backoff_max_s: backoffMaxS.nullable().optional(),
+	max_in_flight: destinationLimit.nullable().optional(),
+	rate_limit_per_s: destinationLimit.nullable().optional(),
 	...optionalReason,
 });
 
@@ -209,6 +215,8 @@ export type Destination = {
 	max_attempts: number | null;
 	backoff_base_s: number | null;
 	backoff_max_s: number | null;
+	max_in_flight: number | null;
+	rate_limit_per_s: number | null;
 	signing_secret_fingerprint: string;
 	previous_secret_fingerprint: string | null;
 	previous_secret_expires_at: number | null;

@@ -328,3 +328,37 @@ describe("M4 contracts", () => {
 		);
 	});
 });
+
+describe("destination limits", () => {
+	const base = {
+		project_id: "prj_1",
+		name: "a",
+		url: "https://example.com/h",
+	};
+	it("accepts 1–1000 and null on patch", () => {
+		expect(
+			createDestinationRequest.safeParse({
+				...base,
+				max_in_flight: 1,
+				rate_limit_per_s: 1000,
+			}).success,
+		).toBe(true);
+		expect(
+			patchDestinationRequest.safeParse({
+				max_in_flight: null,
+				rate_limit_per_s: null,
+			}).success,
+		).toBe(true);
+	});
+	it("rejects 0, 1001, and fractions", () => {
+		for (const v of [0, 1001, 1.5]) {
+			expect(
+				createDestinationRequest.safeParse({ ...base, max_in_flight: v })
+					.success,
+			).toBe(false);
+			expect(
+				patchDestinationRequest.safeParse({ rate_limit_per_s: v }).success,
+			).toBe(false);
+		}
+	});
+});

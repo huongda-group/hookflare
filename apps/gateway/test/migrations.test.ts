@@ -151,3 +151,12 @@ describe("0006", () => {
 		expect(row).toEqual({ received: 2, delivered: 0 });
 	});
 });
+
+describe("0007", () => {
+	it("0007 only adds the two limit columns (no table rebuild)", () => {
+		const sql = migration("0007_limiter").queries.join("\n");
+		expect(sql).not.toMatch(/__new_/);
+		expect(sql).toMatch(/ADD `max_in_flight` integer/);
+		expect(sql).toMatch(/ADD `rate_limit_per_s` integer/);
+	});
+});

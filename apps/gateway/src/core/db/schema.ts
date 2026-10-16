@@ -112,6 +112,10 @@ export const destinations = sqliteTable(
 		maxAttempts: integer("max_attempts"),
 		backoffBaseS: integer("backoff_base_s"),
 		backoffMaxS: integer("backoff_max_s"),
+		// M5a limits (spec §5.1). Bounds 1–1000 are enforced by the API only:
+		// a table-level CHECK would make drizzle-kit rebuild this FK target.
+		maxInFlight: integer("max_in_flight"),
+		rateLimitPerS: integer("rate_limit_per_s"),
 		createdAt: integer("created_at").notNull(),
 		updatedAt: integer("updated_at").notNull(),
 	},
