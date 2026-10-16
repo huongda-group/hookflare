@@ -522,6 +522,7 @@ export const ALERT_RULES = [
 	"stuck_pending",
 	"d1_storage",
 	"archive_stuck",
+	"backup_stale",
 ] as const;
 export type AlertRule = (typeof ALERT_RULES)[number];
 

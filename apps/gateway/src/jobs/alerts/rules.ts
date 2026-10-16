@@ -1,7 +1,8 @@
-import type { AlertRules } from "@hookflare/shared";
+import type { AlertRules, StorageSettings } from "@hookflare/shared";
 import { eq, sql } from "drizzle-orm";
 import type { ActiveAlert, OpenAlertRow } from "../../core/db/alerts";
 import { settings } from "../../core/db/schema";
+import { readSetting, STORAGE_SETTING } from "../../core/settings";
 import type { Db, Deps } from "../../deps";
 
 export const D1_LIMIT_BYTES = 10 * 1024 ** 3;
@@ -259,21 +260,78 @@ export async function archiveStuck(
 	];
 }
 
+export const BACKUP_STALE_AFTER_MS = 36 * 3_600_000;
+
+/**
+ * M6: a verified full-DB backup must land at least every 36 h. Disabled
+ * backups never alert, and a fresh deployment (no backup row yet, oldest
+ * migration applied recently) gets a grace period instead of an incident.
+ */
+export async function backupStale(
+	deps: Pick<Deps, "db" | "now">,
+	storage: StorageSettings,
+): Promise<ActiveAlert[]> {
+	if (!storage.backup_enabled) return [];
+	const now = deps.now();
+	const [latest] = await deps.db.all<{
+		last_verified_at: number | null;
+	}>(sql`
+		SELECT MAX(finished_at) AS last_verified_at FROM backups WHERE status = 'verified'`);
+	const lastVerifiedAt = latest?.last_verified_at ?? null;
+	if (lastVerifiedAt !== null && lastVerifiedAt >= now - BACKUP_STALE_AFTER_MS)
+		return [];
+	if (lastVerifiedAt === null) {
+		const rows = await deps.db.all<{ one: number }>(
+			sql`SELECT 1 AS one FROM backups LIMIT 1`,
+		);
+		if (rows.length === 0) {
+			const [oldest] = await deps.db.all<{ oldest: number | null }>(sql`
+				SELECT MIN(unixepoch(applied_at)) AS oldest FROM d1_migrations`);
+			if (
+				oldest?.oldest !== null &&
+				oldest?.oldest !== undefined &&
+				oldest.oldest * 1000 >= now - BACKUP_STALE_AFTER_MS
+			)
+				return [];
+		}
+	}
+	return [
+		{
+			rule: "backup_stale",
+			resourceType: "system",
+			resourceId: "backup",
+			projectId: null,
+			details: { last_verified_at: lastVerifiedAt },
+		},
+	];
+}
+
 export async function evaluateRules(
 	deps: Pick<Deps, "db" | "now">,
 	rules: AlertRules,
 	open: OpenAlertRow[],
 ): Promise<Evaluation> {
 	const now = deps.now();
-	const [cf, stuck, dead, d1, stuckArchive] = await Promise.all([
+	const [cf, stuck, dead, d1, stuckArchive, staleBackup] = await Promise.all([
 		consecutiveFailures(deps.db, rules),
 		stuckPending(deps.db, rules, now),
 		newDead(deps.db, rules, open, now),
 		d1Storage(deps.db, rules, open),
 		archiveStuck(deps.db, now),
+		// A corrupt storage row falls back to the defaults (enabled).
+		readSetting(deps.db, STORAGE_SETTING).then(({ value }) =>
+			backupStale(deps, value),
+		),
 	]);
 	return {
-		active: [...cf, ...stuck, ...dead.active, ...d1, ...stuckArchive],
+		active: [
+			...cf,
+			...stuck,
+			...dead.active,
+			...d1,
+			...stuckArchive,
+			...staleBackup,
+		],
 		deadCursor: dead.cursor,
 	};
 }
