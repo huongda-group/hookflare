@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { clearAccessKeyCache } from "../../src/admin/auth/access";
 import { archiveParts } from "../../src/core/db/schema";
 import { adminApp, auditRows } from "../helpers/admin";
@@ -125,6 +125,30 @@ describe("archives API (spec §7.6)", () => {
 		expect((await auditRows(deps, instance_id)).map((a) => a.action)).toEqual([
 			"archive.run_started",
 		]);
+	});
+
+	it("logs the instance id when the audit write fails after the run starts", async () => {
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		const app = await adminApp(deps);
+		const batch = vi
+			.spyOn(deps.db, "batch")
+			.mockRejectedValueOnce(new Error("d1 down"));
+		try {
+			const res = await app.request("POST", "/archives/run", {});
+			expect(res.status).toBe(500);
+			const [instanceId] = archive.created.slice(-1);
+			expect(instanceId).toMatch(/^archive-manual-/);
+			const logged = errorSpy.mock.calls.map((c) => String(c[0]));
+			expect(
+				logged.some(
+					(l) =>
+						l.includes("archive.run_audit_failed") && l.includes(instanceId),
+				),
+			).toBe(true);
+		} finally {
+			batch.mockRestore();
+			errorSpy.mockRestore();
+		}
 	});
 
 	it("previews how many events become eligible", async () => {
