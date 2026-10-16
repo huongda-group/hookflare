@@ -34,6 +34,7 @@ export const qk = {
 		list: (q: object) => ["alerts", "list", q] as const,
 		one: (id: string) => ["alerts", id] as const,
 	},
+	archives: { list: (q: object) => ["archives", "list", q] as const },
 	alertChannels: { all: ["alert-channels"] as const },
 	users: { all: ["users"] as const },
 	audit: { list: (q: object) => ["audit", q] as const },

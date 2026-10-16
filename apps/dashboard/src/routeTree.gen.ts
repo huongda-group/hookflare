@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ArchivesRouteImport } from './routes/archives'
 import { Route as AuditRouteImport } from './routes/audit'
 import { Route as FailuresRouteImport } from './routes/failures'
 import { Route as SettingsRouteImport } from './routes/settings'
@@ -26,6 +27,11 @@ import { Route as EndpointsSourcesSourceIdRouteImport } from './routes/endpoints
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ArchivesRoute = ArchivesRouteImport.update({
+  id: '/archives',
+  path: '/archives',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuditRoute = AuditRouteImport.update({
@@ -93,6 +99,7 @@ const EndpointsSourcesSourceIdRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/archives': typeof ArchivesRoute
   '/audit': typeof AuditRoute
   '/failures': typeof FailuresRoute
   '/settings': typeof SettingsRoute
@@ -108,6 +115,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/archives': typeof ArchivesRoute
   '/audit': typeof AuditRoute
   '/failures': typeof FailuresRoute
   '/settings': typeof SettingsRoute
@@ -124,6 +132,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/archives': typeof ArchivesRoute
   '/audit': typeof AuditRoute
   '/failures': typeof FailuresRoute
   '/settings': typeof SettingsRoute
@@ -141,6 +150,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/archives'
     | '/audit'
     | '/failures'
     | '/settings'
@@ -156,6 +166,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/archives'
     | '/audit'
     | '/failures'
     | '/settings'
@@ -171,6 +182,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/archives'
     | '/audit'
     | '/failures'
     | '/settings'
@@ -187,6 +199,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ArchivesRoute: typeof ArchivesRoute
   AuditRoute: typeof AuditRoute
   FailuresRoute: typeof FailuresRoute
   SettingsRoute: typeof SettingsRoute
@@ -208,6 +221,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/archives': {
+      id: '/archives'
+      path: '/archives'
+      fullPath: '/archives'
+      preLoaderRoute: typeof ArchivesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/audit': {
@@ -299,6 +319,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ArchivesRoute: ArchivesRoute,
   AuditRoute: AuditRoute,
   FailuresRoute: FailuresRoute,
   SettingsRoute: SettingsRoute,
