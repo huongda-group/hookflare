@@ -4,10 +4,12 @@ import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { z } from "zod";
 import { CursorTable } from "@/components/CursorTable";
+import { DestinationSelect } from "@/components/DestinationSelect";
 import { IdText } from "@/components/IdText";
 import { ProjectSelect } from "@/components/ProjectSelect";
 import { ReplayDialog } from "@/components/ReplayDialog";
 import { StatusBadge } from "@/components/StatusBadge";
+import { TimeRangeFilter } from "@/components/TimeRangeFilter";
 import { TimeText } from "@/components/TimeText";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -81,20 +83,16 @@ export function FailuresPage({
 			<div className="flex flex-wrap items-center gap-4">
 				<ProjectSelect
 					value={search.project_id}
-					onChange={(project_id) => set({ project_id })}
+					onChange={(project_id) =>
+						// A destination belongs to one project; keep the pair consistent.
+						set({ project_id, destination_id: undefined })
+					}
 				/>
-				{search.destination_id && (
-					<span className="text-sm">
-						Destination <IdText id={search.destination_id} />{" "}
-						<button
-							type="button"
-							className="underline"
-							onClick={() => set({ destination_id: undefined })}
-						>
-							clear
-						</button>
-					</span>
-				)}
+				<DestinationSelect
+					projectId={search.project_id}
+					value={search.destination_id}
+					onChange={(destination_id) => set({ destination_id })}
+				/>
 				<div className="flex items-center gap-2">
 					<Checkbox
 						id="unresolved"
@@ -106,6 +104,11 @@ export function FailuresPage({
 					</Label>
 				</div>
 			</div>
+			<TimeRangeFilter
+				from={search.from}
+				to={search.to}
+				onChange={(r) => set(r)}
+			/>
 			{canReplay && (
 				<p className="text-xs text-neutral-500">
 					Select up to {MAX_BULK} rows per bulk replay.

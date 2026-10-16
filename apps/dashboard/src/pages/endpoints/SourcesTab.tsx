@@ -1,4 +1,5 @@
 import type { Source } from "@hookflare/shared";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { CursorTable } from "@/components/CursorTable";
 import { IdText } from "@/components/IdText";
@@ -12,6 +13,7 @@ import { SourceActions } from "./SourceActions";
 
 export function SourcesTab({ projectId }: { projectId?: string }) {
 	const query = useSourcesPage({ project_id: projectId });
+	const navigate = useNavigate();
 	const [creating, setCreating] = useState(false);
 	const [secret, setSecret] = useState<string | null>(null);
 	return (
@@ -25,8 +27,26 @@ export function SourcesTab({ projectId }: { projectId?: string }) {
 				query={query}
 				rowKey={(s) => s.id}
 				empty="No sources yet."
+				onRowClick={(s) =>
+					void navigate({
+						to: "/endpoints/sources/$sourceId",
+						params: { sourceId: s.id },
+					})
+				}
 				columns={[
-					{ header: "Name", cell: (s) => s.name },
+					{
+						header: "Name",
+						cell: (s) => (
+							<Link
+								to="/endpoints/sources/$sourceId"
+								params={{ sourceId: s.id }}
+								className="font-medium hover:underline"
+								onClick={(e) => e.stopPropagation()}
+							>
+								{s.name}
+							</Link>
+						),
+					},
 					{ header: "Ingress URL", cell: (s) => <IdText id={s.ingress_url} /> },
 					{ header: "Auth", cell: (s) => s.auth_type },
 					{

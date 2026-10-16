@@ -156,4 +156,21 @@ describe("Destinations tab", () => {
 			within(row).queryByRole("button", { name: "Actions" }),
 		).not.toBeInTheDocument();
 	});
+
+	it("links a destination row to its detail page", async () => {
+		server.use(
+			http.get(apiUrl("/destinations"), () => list(destination())),
+			http.get(apiUrl("/destinations/dst_1"), () =>
+				HttpResponse.json(destination()),
+			),
+		);
+		const { user, router } = renderApp("/endpoints?tab=destinations");
+		await user.click(await screen.findByRole("link", { name: "Billing API" }));
+		expect(router.state.location.pathname).toBe(
+			"/endpoints/destinations/dst_1",
+		);
+		expect(
+			await screen.findByRole("heading", { name: "Billing API" }),
+		).toBeInTheDocument();
+	});
 });

@@ -57,3 +57,13 @@ export function formatBytes(n: number): string {
 	if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
 	return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
+
+/** `datetime-local` wants local "YYYY-MM-DDTHH:mm". */
+export function toLocalInput(ms: number) {
+	const d = new Date(ms - new Date(ms).getTimezoneOffset() * 60_000);
+	return d.toISOString().slice(0, 16);
+}
+
+/** Parses a `datetime-local` value as local time; empty means no bound. */
+export const fromLocalInput = (v: string) =>
+	v ? new Date(v).getTime() : undefined;

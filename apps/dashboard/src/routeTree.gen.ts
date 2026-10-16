@@ -18,6 +18,8 @@ import { Route as EventsIndexRouteImport } from './routes/events/index'
 import { Route as EventsEventIdRouteImport } from './routes/events/$eventId'
 import { Route as ProjectsIndexRouteImport } from './routes/projects/index'
 import { Route as ProjectsProjectIdRouteImport } from './routes/projects/$projectId'
+import { Route as EndpointsDestinationsDestinationIdRouteImport } from './routes/endpoints/destinations.$destinationId'
+import { Route as EndpointsSourcesSourceIdRouteImport } from './routes/endpoints/sources.$sourceId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -64,6 +66,18 @@ const ProjectsProjectIdRoute = ProjectsProjectIdRouteImport.update({
   path: '/projects/$projectId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const EndpointsDestinationsDestinationIdRoute =
+  EndpointsDestinationsDestinationIdRouteImport.update({
+    id: '/endpoints/destinations/$destinationId',
+    path: '/endpoints/destinations/$destinationId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const EndpointsSourcesSourceIdRoute =
+  EndpointsSourcesSourceIdRouteImport.update({
+    id: '/endpoints/sources/$sourceId',
+    path: '/endpoints/sources/$sourceId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -75,6 +89,8 @@ export interface FileRoutesByFullPath {
   '/endpoints/': typeof EndpointsIndexRoute
   '/events/': typeof EventsIndexRoute
   '/projects/': typeof ProjectsIndexRoute
+  '/endpoints/destinations/$destinationId': typeof EndpointsDestinationsDestinationIdRoute
+  '/endpoints/sources/$sourceId': typeof EndpointsSourcesSourceIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -86,6 +102,8 @@ export interface FileRoutesByTo {
   '/endpoints': typeof EndpointsIndexRoute
   '/events': typeof EventsIndexRoute
   '/projects': typeof ProjectsIndexRoute
+  '/endpoints/destinations/$destinationId': typeof EndpointsDestinationsDestinationIdRoute
+  '/endpoints/sources/$sourceId': typeof EndpointsSourcesSourceIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -98,6 +116,8 @@ export interface FileRoutesById {
   '/endpoints/': typeof EndpointsIndexRoute
   '/events/': typeof EventsIndexRoute
   '/projects/': typeof ProjectsIndexRoute
+  '/endpoints/destinations/$destinationId': typeof EndpointsDestinationsDestinationIdRoute
+  '/endpoints/sources/$sourceId': typeof EndpointsSourcesSourceIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -111,6 +131,8 @@ export interface FileRouteTypes {
     | '/endpoints/'
     | '/events/'
     | '/projects/'
+    | '/endpoints/destinations/$destinationId'
+    | '/endpoints/sources/$sourceId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -122,6 +144,8 @@ export interface FileRouteTypes {
     | '/endpoints'
     | '/events'
     | '/projects'
+    | '/endpoints/destinations/$destinationId'
+    | '/endpoints/sources/$sourceId'
   id:
     | '__root__'
     | '/'
@@ -133,6 +157,8 @@ export interface FileRouteTypes {
     | '/endpoints/'
     | '/events/'
     | '/projects/'
+    | '/endpoints/destinations/$destinationId'
+    | '/endpoints/sources/$sourceId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -145,6 +171,8 @@ export interface RootRouteChildren {
   EndpointsIndexRoute: typeof EndpointsIndexRoute
   EventsIndexRoute: typeof EventsIndexRoute
   ProjectsIndexRoute: typeof ProjectsIndexRoute
+  EndpointsDestinationsDestinationIdRoute: typeof EndpointsDestinationsDestinationIdRoute
+  EndpointsSourcesSourceIdRoute: typeof EndpointsSourcesSourceIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -212,6 +240,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectsProjectIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/endpoints/destinations/$destinationId': {
+      id: '/endpoints/destinations/$destinationId'
+      path: '/endpoints/destinations/$destinationId'
+      fullPath: '/endpoints/destinations/$destinationId'
+      preLoaderRoute: typeof EndpointsDestinationsDestinationIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/endpoints/sources/$sourceId': {
+      id: '/endpoints/sources/$sourceId'
+      path: '/endpoints/sources/$sourceId'
+      fullPath: '/endpoints/sources/$sourceId'
+      preLoaderRoute: typeof EndpointsSourcesSourceIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -225,6 +267,9 @@ const rootRouteChildren: RootRouteChildren = {
   EndpointsIndexRoute: EndpointsIndexRoute,
   EventsIndexRoute: EventsIndexRoute,
   ProjectsIndexRoute: ProjectsIndexRoute,
+  EndpointsDestinationsDestinationIdRoute:
+    EndpointsDestinationsDestinationIdRoute,
+  EndpointsSourcesSourceIdRoute: EndpointsSourcesSourceIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

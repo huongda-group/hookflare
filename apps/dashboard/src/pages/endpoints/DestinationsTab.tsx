@@ -1,4 +1,5 @@
 import type { Destination } from "@hookflare/shared";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { CursorTable } from "@/components/CursorTable";
 import { DestinationFormDialog } from "@/components/DestinationFormDialog";
@@ -17,6 +18,7 @@ import { DestinationActions } from "./DestinationActions";
 export function DestinationsTab({ projectId }: { projectId?: string }) {
 	const query = useDestinationsPage({ project_id: projectId });
 	const stats = useDestinationStats(projectId).data;
+	const navigate = useNavigate();
 	const [creating, setCreating] = useState(false);
 	const [secret, setSecret] = useState<string | null>(null);
 	return (
@@ -30,8 +32,26 @@ export function DestinationsTab({ projectId }: { projectId?: string }) {
 				query={query}
 				rowKey={(d) => d.id}
 				empty="No destinations yet."
+				onRowClick={(d) =>
+					void navigate({
+						to: "/endpoints/destinations/$destinationId",
+						params: { destinationId: d.id },
+					})
+				}
 				columns={[
-					{ header: "Name", cell: (d) => d.name },
+					{
+						header: "Name",
+						cell: (d) => (
+							<Link
+								to="/endpoints/destinations/$destinationId"
+								params={{ destinationId: d.id }}
+								className="font-medium hover:underline"
+								onClick={(e) => e.stopPropagation()}
+							>
+								{d.name}
+							</Link>
+						),
+					},
 					{
 						header: "URL",
 						cell: (d) => <span className="font-mono text-xs">{d.url}</span>,

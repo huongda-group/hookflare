@@ -85,4 +85,20 @@ describe("Sources tab", () => {
 			await screen.findByText(/selector/i, { selector: "[data-field-error]" }),
 		).toBeInTheDocument();
 	});
+
+	it("links a source row to its detail page", async () => {
+		server.use(
+			...base(),
+			http.get(apiUrl("/sources"), () =>
+				HttpResponse.json({ data: [source()], next_cursor: null }),
+			),
+			http.get(apiUrl("/sources/src_1"), () => HttpResponse.json(source())),
+		);
+		const { user, router } = renderApp("/endpoints?tab=sources");
+		await user.click(await screen.findByRole("link", { name: "Stripe" }));
+		expect(router.state.location.pathname).toBe("/endpoints/sources/src_1");
+		expect(
+			await screen.findByRole("heading", { name: "Stripe" }),
+		).toBeInTheDocument();
+	});
 });

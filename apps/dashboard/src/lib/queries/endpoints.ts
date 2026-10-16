@@ -4,6 +4,7 @@ import type {
 	Page,
 	Settings,
 	Source,
+	TestDelivery,
 } from "@hookflare/shared";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
@@ -59,5 +60,33 @@ export function useSettings() {
 	return useQuery({
 		queryKey: qk.settings,
 		queryFn: () => api.get<Settings>("/settings"),
+	});
+}
+
+export function useDestination(id: string) {
+	return useQuery({
+		queryKey: qk.destinations.one(id),
+		queryFn: () => api.get<Destination>(`/destinations/${id}`),
+	});
+}
+
+/** Spec §11: the destination detail page lists its test deliveries. */
+export function useDestinationTests(id: string) {
+	return useInfiniteQuery({
+		queryKey: qk.destinations.tests(id),
+		queryFn: ({ pageParam }) =>
+			api.get<Page<TestDelivery>>(`/destinations/${id}/tests`, {
+				limit: 20,
+				cursor: pageParam,
+			}),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (last) => last.next_cursor ?? undefined,
+	});
+}
+
+export function useSource(id: string) {
+	return useQuery({
+		queryKey: qk.sources.one(id),
+		queryFn: () => api.get<Source>(`/sources/${id}`),
 	});
 }
