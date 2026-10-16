@@ -125,6 +125,7 @@ export type EventFilter = {
 	sourceId?: string;
 	destinationId?: string;
 	statuses?: DeliveryStatus[];
+	httpStatus?: number;
 	providerEventId?: string;
 	from?: number;
 	to?: number;
@@ -156,7 +157,7 @@ export async function searchEvents(db: Db, f: EventFilter) {
 				)
 			: undefined,
 	];
-	if (f.destinationId || f.statuses?.length) {
+	if (f.destinationId || f.statuses?.length || f.httpStatus !== undefined) {
 		where.push(
 			exists(
 				db
@@ -170,6 +171,9 @@ export async function searchEvents(db: Db, f: EventFilter) {
 								: undefined,
 							f.statuses?.length
 								? inArray(deliveries.status, f.statuses)
+								: undefined,
+							f.httpStatus !== undefined
+								? eq(deliveries.lastHttpStatus, f.httpStatus)
 								: undefined,
 						),
 					),

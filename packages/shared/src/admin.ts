@@ -255,6 +255,7 @@ export type Delivery = {
 	last_error: string | null;
 	completed_at: number | null;
 	created_at: number;
+	created_by: string | null;
 	attempts: DeliveryAttempt[];
 };
 export type WebhookEvent = {
@@ -282,10 +283,11 @@ export const PERMISSIONS = [
 	"config.write",
 	"users.manage",
 	"audit.read",
+	"settings.manage",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
-const DELIVERY_STATUS_VALUES = [
+export const DELIVERY_STATUS_VALUES = [
 	"pending",
 	"queued",
 	"in_flight",
@@ -315,6 +317,7 @@ export const eventSearchQuery = z
 		destination_id: destinationId.optional(),
 		status: z.array(z.enum(DELIVERY_STATUS_VALUES)).optional(),
 		provider_event_id: z.string().min(1).max(256).optional(),
+		http_status: z.coerce.number().int().min(100).max(599).optional(),
 		from: epochMs.optional(),
 		to: epochMs.optional(),
 		limit: pageLimit,
@@ -404,9 +407,12 @@ export type EventSummary = {
 	size_bytes: number;
 	latest_delivery: {
 		id: string;
+		destination_id: string;
 		kind: string;
 		status: string;
 		attempt_count: number;
+		last_http_status: number | null;
+		next_attempt_at: number | null;
 	} | null;
 };
 export type Failure = Omit<Delivery, "attempts"> & {
@@ -457,4 +463,92 @@ export type AuditLog = {
 	reason: string | null;
 	diff: Record<string, unknown> | null;
 	at: number;
+};
+
+// ---- M4: overview, destination stats, and settings (spec §7) ----
+
+export const STATS_RANGES = ["24h", "7d", "30d"] as const;
+export type StatsRange = (typeof STATS_RANGES)[number];
+export const RANGE_HOURS: Record<StatsRange, number> = {
+	"24h": 24,
+	"7d": 168,
+	"30d": 720,
+};
+
+/** For GET /overview and GET /destinations/stats. */
+export const statsQuery = z.object({
+	project_id: projectId.optional(),
+	range: z.enum(STATS_RANGES).default("24h"),
+});
+
+/** Same bounds as the destination policy fields (spec §7.3). */
+export const retryDefaultsSchema = z
+	.strictObject({
+		timeout_ms: timeoutMs,
+		max_attempts: maxAttempts,
+		backoff_base_s: backoffBaseS,
+		backoff_max_s: backoffMaxS,
+	})
+	.refine((v) => v.backoff_base_s <= v.backoff_max_s, {
+		path: ["backoff_max_s"],
+		message: "backoff_max_s must be >= backoff_base_s",
+	});
+export type RetryDefaults = z.infer<typeof retryDefaultsSchema>;
+
+export const patchSettingsRequest = z.strictObject({
+	retry_defaults: retryDefaultsSchema,
+	...optionalReason,
+});
+export type Settings = {
+	retry_defaults: RetryDefaults;
+	updated_at: number | null;
+};
+
+/** Non-terminal statuses counted live by the Overview. */
+export const LIVE_STATUSES = [
+	"pending",
+	"queued",
+	"in_flight",
+	"retrying",
+	"paused",
+] as const;
+export type LiveStatus = (typeof LIVE_STATUSES)[number];
+
+export type TrendPoint = {
+	hour: number;
+	received: number;
+	delivered: number;
+	failed: number;
+};
+export type FailingDestination = {
+	destination_id: string;
+	name: string | null;
+	failed: number;
+	delivered: number;
+};
+export type Overview = {
+	range: StatsRange;
+	from: number;
+	to: number;
+	generated_at: number;
+	totals: {
+		received: number;
+		delivered: number;
+		failed_final: number;
+		dead: number;
+		attempts: number;
+		success_rate: number | null;
+	};
+	live: Record<LiveStatus, number>;
+	trend: TrendPoint[];
+	failing_destinations: FailingDestination[];
+};
+export type DestinationStats = {
+	destination_id: string;
+	delivered: number;
+	failed: number;
+	success_rate: number | null;
+	last_delivery_at: number | null;
+	last_http_status: number | null;
+	last_error: string | null;
 };

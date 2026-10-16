@@ -15,6 +15,7 @@ const ADMIN: readonly Permission[] = [
 	"config.write",
 	"users.manage",
 	"audit.read",
+	"settings.manage",
 ];
 
 export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {

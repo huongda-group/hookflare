@@ -1,12 +1,15 @@
 import {
 	createDestinationRequest,
 	type Destination,
+	type DestinationStats,
 	listQuery,
 	operateRequest,
 	type Page,
 	pageQuery,
 	patchDestinationRequest,
+	RANGE_HOURS,
 	rotateDestinationSecretRequest,
+	statsQuery,
 	type TestDelivery,
 	testDeliveryRequest,
 } from "@hookflare/shared";
@@ -37,6 +40,7 @@ import {
 	type TestErrorKind,
 	testDeliveries,
 } from "../../core/db/schema";
+import { destinationStats, statsWindow } from "../../core/db/stats";
 import {
 	listTestDeliveries,
 	toTestDelivery,
@@ -45,13 +49,18 @@ import { DnsError } from "../../core/dns";
 import { enqueueThenMark } from "../../core/enqueue";
 import { newId } from "../../core/ids";
 import { failureOf, sendSigned } from "../../core/outbound";
-import { resolvePolicy } from "../../core/policy";
+import {
+	type Policy,
+	type PolicyFields,
+	resolvePolicy,
+} from "../../core/policy";
 import {
 	aad,
 	clearExpiredPrev,
 	destinationSigningSecrets,
 	rotationColumns,
 } from "../../core/secrets";
+import { loadRetryDefaults } from "../../core/settings";
 import { buildOutboundHeaders, signWebhookAll } from "../../core/sign";
 import { checkUrl } from "../../core/ssrf";
 import type { AppEnv } from "../../env";
@@ -66,6 +75,7 @@ import {
 	readOptionalJson,
 	readQuery,
 } from "../http";
+import { successRate } from "./overview";
 
 /** Standard Webhooks secret: whsec_ + base64(32 random bytes). */
 function generateSigningSecret(): string {
@@ -113,13 +123,12 @@ export async function toDestination(
 /** backoff_max_s must not be below backoff_base_s once defaults apply (spec §8.4). */
 function backoffConflict(
 	c: Context<AppBindings>,
-	row: Pick<
-		DestinationRow,
-		"timeoutMs" | "maxAttempts" | "backoffBaseS" | "backoffMaxS"
-	>,
+	row: PolicyFields,
+	defaults: Policy,
 ): Response | null {
-	const policy = resolvePolicy(row);
-	return policy.backoffMaxS < policy.backoffBaseS
+	const base = row.backoffBaseS ?? defaults.backoffBaseS;
+	const max = row.backoffMaxS ?? defaults.backoffMaxS;
+	return max < base
 		? c.json(
 				{
 					error: "invalid_request",
@@ -127,7 +136,7 @@ function backoffConflict(
 						{
 							path: "backoff_max_s",
 							code: "too_small",
-							message: `backoff_max_s must be >= backoff_base_s (${policy.backoffBaseS})`,
+							message: `backoff_max_s must be >= backoff_base_s (${base})`,
 						},
 					],
 				},
@@ -196,7 +205,11 @@ export function destinationRoutes() {
 			createdAt: ts,
 			updatedAt: ts,
 		};
-		const conflict = backoffConflict(c, row);
+		const conflict = backoffConflict(
+			c,
+			row,
+			await loadRetryDefaults(c.var.deps),
+		);
 		if (conflict) return conflict;
 		await db.batch([
 			db.insert(destinations).values(row),
@@ -234,6 +247,29 @@ export function destinationRoutes() {
 		} satisfies Page<Destination>);
 	});
 
+	routes.get("/stats", requirePermission("events.read"), async (c) => {
+		const q = readQuery(c, statsQuery);
+		if (!q.ok) return q.response;
+		const { db, now } = c.var.deps;
+		const rows = await destinationStats(db, {
+			...statsWindow(now(), RANGE_HOURS[q.value.range]),
+			projectId: q.value.project_id,
+		});
+		return c.json({
+			data: rows.map(
+				(r): DestinationStats => ({
+					destination_id: r.destinationId,
+					delivered: r.delivered,
+					failed: r.failed,
+					success_rate: successRate(r.delivered, r.failed),
+					last_delivery_at: r.lastDeliveryAt,
+					last_http_status: r.lastHttpStatus,
+					last_error: r.lastError,
+				}),
+			),
+		});
+	});
+
 	routes.get("/:id", requirePermission("events.read"), async (c) => {
 		const row = await getDestination(c.var.deps.db, c.req.param("id"));
 		return row
@@ -266,7 +302,17 @@ export function destinationRoutes() {
 				? { backoffMaxS: v.backoff_max_s }
 				: {}),
 		};
-		const conflict = backoffConflict(c, { ...existing, ...set });
+		// Only a patch that touches backoff is validated: raised defaults must not
+		// block unrelated edits (the delivery path clamps via resolvePolicy).
+		const touchesBackoff =
+			v.backoff_base_s !== undefined || v.backoff_max_s !== undefined;
+		const conflict = touchesBackoff
+			? backoffConflict(
+					c,
+					{ ...existing, ...set },
+					await loadRetryDefaults(c.var.deps),
+				)
+			: null;
 		if (conflict) return conflict;
 		const ts = now();
 		const prev = clearExpiredPrev(
@@ -447,6 +493,13 @@ export function destinationRoutes() {
 			if (destination.status === "disabled") {
 				return c.json({ error: "destination_disabled" }, 409);
 			}
+			let defaults: Policy;
+			try {
+				defaults = await loadRetryDefaults(deps);
+			} catch (err) {
+				c.var.logger.warn("admin.settings_unavailable", { error: err });
+				return c.json({ error: "unavailable" }, 503);
+			}
 			const startedAt = deps.now();
 			const testId = newId("tst", startedAt);
 			const payload = new Uint8Array(
@@ -487,7 +540,7 @@ export function destinationRoutes() {
 					snippet: null,
 				};
 			} else {
-				const timeoutMs = resolvePolicy(destination).timeoutMs;
+				const timeoutMs = resolvePolicy(destination, defaults).timeoutMs;
 				const timestampSec = Math.floor(startedAt / 1000);
 				const secrets = await destinationSigningSecrets(
 					deps.env,

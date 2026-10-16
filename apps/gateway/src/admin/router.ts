@@ -6,7 +6,9 @@ import { destinationRoutes } from "./routes/destinations";
 import { eventRoutes } from "./routes/events";
 import { failureRoutes } from "./routes/failures";
 import { meRoutes } from "./routes/me";
+import { overviewRoutes } from "./routes/overview";
 import { projectRoutes } from "./routes/projects";
+import { settingsRoutes } from "./routes/settings";
 import { sourceRoutes } from "./routes/sources";
 import { userRoutes } from "./routes/users";
 
@@ -15,6 +17,7 @@ export function adminRoutes(options: { accessFetch?: typeof fetch } = {}) {
 	const routes = new Hono<AppBindings>();
 	routes.use("*", accessMiddleware({ fetch: options.accessFetch }));
 	routes.route("/me", meRoutes());
+	routes.route("/overview", overviewRoutes());
 	routes.route("/projects", projectRoutes());
 	routes.route("/destinations", destinationRoutes());
 	routes.route("/sources", sourceRoutes());
@@ -22,5 +25,6 @@ export function adminRoutes(options: { accessFetch?: typeof fetch } = {}) {
 	routes.route("/failures", failureRoutes());
 	routes.route("/users", userRoutes());
 	routes.route("/audit-logs", auditLogRoutes());
+	routes.route("/settings", settingsRoutes());
 	return routes;
 }

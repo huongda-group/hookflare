@@ -19,6 +19,7 @@ describe("rbac", () => {
 				"config.write",
 				"users.manage",
 				"audit.read",
+				"settings.manage",
 			],
 		});
 	});
@@ -27,6 +28,12 @@ describe("rbac", () => {
 		expect(can("viewer", "payload.read")).toBe(false);
 		expect(can("operator", "payload.read")).toBe(true);
 		expect(can("operator", "config.write")).toBe(false);
-		expect(permissionsOf("admin")).toHaveLength(7);
+		expect(permissionsOf("admin")).toHaveLength(8);
+	});
+
+	it("gives settings.manage to admins only", () => {
+		expect(can("admin", "settings.manage")).toBe(true);
+		expect(can("operator", "settings.manage")).toBe(false);
+		expect(can("viewer", "settings.manage")).toBe(false);
 	});
 });

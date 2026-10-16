@@ -94,4 +94,14 @@ describe("app", () => {
 			"IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
 		);
 	});
+
+	it("still answers unknown /api paths with the JSON 404 (run_worker_first)", async () => {
+		const res = await createApp().request(
+			"https://hookflare.example.com/api/nope",
+			{},
+			env,
+		);
+		expect(res.status).toBe(404);
+		expect(res.headers.get("content-type")).toContain("application/json");
+	});
 });

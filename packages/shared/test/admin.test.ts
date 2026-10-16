@@ -6,12 +6,18 @@ import {
 	createSourceRequest,
 	createUserRequest,
 	eventIdConfigError,
+	eventSearchQuery,
 	listQuery,
+	PERMISSIONS,
 	patchDestinationRequest,
+	patchSettingsRequest,
 	patchSourceRequest,
+	RANGE_HOURS,
 	reasonSchema,
+	retryDefaultsSchema,
 	rotateDestinationSecretRequest,
 	rotateSourceSecretRequest,
+	statsQuery,
 } from "../src/admin";
 
 const base = { project_id: "prj_1", destination_id: "dst_1", name: "Stripe" };
@@ -266,5 +272,59 @@ describe("M3 schemas", () => {
 			createUserRequest.parse({ email: "Ops@Example.COM", role: "operator" })
 				.email,
 		).toBe("ops@example.com");
+	});
+});
+
+describe("M4 contracts", () => {
+	const defaults = {
+		timeout_ms: 10_000,
+		max_attempts: 20,
+		backoff_base_s: 30,
+		backoff_max_s: 21_600,
+	};
+
+	it("adds settings.manage to PERMISSIONS", () => {
+		expect(PERMISSIONS).toContain("settings.manage");
+	});
+
+	it("defaults the stats range to 24h and maps ranges to hours", () => {
+		expect(statsQuery.parse({})).toEqual({ range: "24h" });
+		expect(RANGE_HOURS).toEqual({ "24h": 24, "7d": 168, "30d": 720 });
+		expect(statsQuery.safeParse({ range: "1y" }).success).toBe(false);
+	});
+
+	it("accepts valid retry defaults and rejects base above max", () => {
+		expect(retryDefaultsSchema.parse(defaults)).toEqual(defaults);
+		const bad = retryDefaultsSchema.safeParse({
+			...defaults,
+			backoff_base_s: 600,
+			backoff_max_s: 60,
+		});
+		expect(bad.success).toBe(false);
+		expect(bad.error?.issues[0]?.path).toEqual(["backoff_max_s"]);
+	});
+
+	it("requires all four retry fields and no unknown keys", () => {
+		const { timeout_ms: _t, ...missing } = defaults;
+		expect(retryDefaultsSchema.safeParse(missing).success).toBe(false);
+		expect(
+			patchSettingsRequest.safeParse({ retry_defaults: defaults, extra: 1 })
+				.success,
+		).toBe(false);
+		expect(
+			patchSettingsRequest.parse({ retry_defaults: defaults, reason: " r " }),
+		).toEqual({ retry_defaults: defaults, reason: "r" });
+	});
+
+	it("coerces and bounds the http_status filter", () => {
+		expect(eventSearchQuery.parse({ http_status: "503" }).http_status).toBe(
+			503,
+		);
+		expect(eventSearchQuery.safeParse({ http_status: "99" }).success).toBe(
+			false,
+		);
+		expect(eventSearchQuery.safeParse({ http_status: "600" }).success).toBe(
+			false,
+		);
 	});
 });

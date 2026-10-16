@@ -34,6 +34,7 @@ export function eventRoutes() {
 			sourceId: q.value.source_id,
 			destinationId: q.value.destination_id,
 			statuses: q.value.status,
+			httpStatus: q.value.http_status,
 			providerEventId: q.value.provider_event_id,
 			from: q.value.from,
 			to: q.value.to,
@@ -60,9 +61,12 @@ export function eventRoutes() {
 					latest_delivery: d
 						? {
 								id: d.id,
+								destination_id: d.destinationId,
 								kind: d.kind,
 								status: d.status,
 								attempt_count: d.attemptCount,
+								last_http_status: d.lastHttpStatus,
+								next_attempt_at: d.nextAttemptAt,
 							}
 						: null,
 				};

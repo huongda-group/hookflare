@@ -141,6 +141,12 @@ Verify the signature in your backend with any [Standard Webhooks library](https:
 
 Source changes made with `PATCH` can take up to 30 seconds to reach ingress.
 
+## Dashboard
+
+For local development, run `pnpm dev` with `ACCESS_DEV_EMAIL` set in `apps/gateway/.dev.vars`, plus `pnpm dev:dashboard` (Vite on port 5173, proxying `/api` to the Worker).
+
+Production serves the dashboard from the same Worker behind Cloudflare Access. The Access application must cover `/` and `/api/admin/*`, and must not cover `/in/*`.
+
 ## Delivery contract for your backend
 
 Each request Hookflare sends to your backend includes:

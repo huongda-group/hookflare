@@ -14,6 +14,7 @@ export function toDelivery(d: DeliveryRow): Omit<Delivery, "attempts"> {
 		last_error: d.lastError,
 		completed_at: d.completedAt,
 		created_at: d.createdAt,
+		created_by: d.createdBy,
 	};
 }
 

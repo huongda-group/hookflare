@@ -4,7 +4,7 @@
 	"version": "0.0.0",
 	"type": "module",
 	"scripts": {
-		"test": "vitest run",
+		"test": "node ../../scripts/ensure-dashboard-dist.mjs && vitest run",
 		"typecheck": "tsc --noEmit",
 		"db:generate": "drizzle-kit generate"
 	},

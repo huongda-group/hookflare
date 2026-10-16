@@ -11,8 +11,9 @@ import { DnsError } from "../core/dns";
 import { createLogger, type Logger } from "../core/log";
 import { readSnippet, SNIPPET_BYTES, sendSigned } from "../core/outbound";
 import { loadPayload } from "../core/payloads";
-import { resolvePolicy } from "../core/policy";
+import { type Policy, resolvePolicy } from "../core/policy";
 import { destinationSigningSecrets } from "../core/secrets";
+import { loadRetryDefaults } from "../core/settings";
 import { buildOutboundHeaders, signWebhookAll } from "../core/sign";
 import { checkUrl } from "../core/ssrf";
 import type { DeliveryMessage, Deps } from "../deps";
@@ -98,8 +99,10 @@ export async function processDelivery(
 
 	// 1–2. Load; skip anything another worker owns or already finished.
 	let ctx: DeliveryContext | null;
+	let defaults: Policy;
 	try {
 		ctx = await loadDeliveryContext(deps, deliveryId);
+		defaults = await loadRetryDefaults(deps);
 	} catch (err) {
 		return infra("load", err);
 	}
@@ -129,7 +132,7 @@ export async function processDelivery(
 		});
 		return ACK;
 	}
-	const policy = resolvePolicy(ctx.destination);
+	const policy = resolvePolicy(ctx.destination, defaults);
 	const finish = async (lastError: string) => {
 		await finishWithoutAttempt(deps, deliveryId, lastError);
 		logger.warn("delivery.failed_without_attempt", {
