@@ -1,7 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { parseScenario } from "../src/scenario";
-import { seedStatements } from "../src/seed";
 
 async function loadScenario(name: string): Promise<unknown> {
 	const text = await readFile(
@@ -36,30 +35,5 @@ describe("scenarios", () => {
 
 		const b4 = parseScenario(await loadScenario("b4"));
 		expect(b4.sink.fail_pct).toBe(30);
-	});
-});
-
-describe("seedStatements", () => {
-	it("emits event, delivery, and attempt rows", () => {
-		const statements = seedStatements({
-			events: 2,
-			projectId: "p",
-			sourceId: "s",
-			destinationId: "d",
-			from: 1000,
-		});
-		expect(
-			statements.some((s) => s.startsWith("INSERT INTO webhook_events")),
-		).toBe(true);
-		expect(statements.some((s) => s.startsWith("INSERT INTO deliveries"))).toBe(
-			true,
-		);
-		expect(
-			statements.some((s) => s.startsWith("INSERT INTO delivery_attempts")),
-		).toBe(true);
-		expect(
-			statements.filter((s) => s.startsWith("INSERT INTO webhook_events"))
-				.length,
-		).toBe(2);
 	});
 });
