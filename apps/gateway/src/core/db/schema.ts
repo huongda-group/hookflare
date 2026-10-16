@@ -39,6 +39,16 @@ export const ERROR_KINDS = [
 export const ROLES = ["admin", "operator", "viewer"] as const;
 /** Test deliveries also record an SSRF block, which never reaches the backend. */
 export const TEST_ERROR_KINDS = [...ERROR_KINDS, "ssrf_blocked"] as const;
+export const ALERT_CHANNEL_TYPES = ["discord", "slack", "telegram"] as const;
+export const ALERT_RESOURCE_TYPES = ["destination", "system"] as const;
+export const ALERT_STATUSES = ["open", "resolved"] as const;
+export const NOTIFICATION_KINDS = ["opened", "reminder", "resolved"] as const;
+export const NOTIFICATION_STATUSES = [
+	"pending",
+	"sending",
+	"sent",
+	"failed",
+] as const;
 
 export type AuthType = (typeof AUTH_TYPES)[number];
 export type EventIdFrom = (typeof EVENT_ID_FROM)[number];
@@ -116,11 +126,14 @@ export const destinations = sqliteTable(
 		// a table-level CHECK would make drizzle-kit rebuild this FK target.
 		maxInFlight: integer("max_in_flight"),
 		rateLimitPerS: integer("rate_limit_per_s"),
+		/** M5-12: 0 after a delivered attempt, +1 after any other; written in the fenced record batch. */
+		consecutiveFailures: integer("consecutive_failures").notNull().default(0),
 		createdAt: integer("created_at").notNull(),
 		updatedAt: integer("updated_at").notNull(),
 	},
-	() => [
+	(t) => [
 		check("destinations_status_check", inList("status", DESTINATION_STATUSES)),
+		index("destinations_consecutive_failures_idx").on(t.consecutiveFailures),
 	],
 );
 
@@ -372,3 +385,93 @@ export const statsHourly = sqliteTable(
 );
 
 export type StatsHourlyRow = typeof statsHourly.$inferSelect;
+
+/** M5b channels (spec §6.1). config_enc holds the whole config (M5-9). */
+export const alertChannels = sqliteTable(
+	"alert_channels",
+	{
+		id: text("id").primaryKey(),
+		name: text("name").notNull(),
+		type: text("type", { enum: ALERT_CHANNEL_TYPES }).notNull(),
+		configEnc: text("config_enc").notNull(),
+		configFingerprint: text("config_fingerprint").notNull(),
+		chatId: text("chat_id"),
+		enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+		/** JSON array of rules; [] = every rule. */
+		rulesJson: text("rules_json").notNull().default("[]"),
+		/** JSON array of project IDs; [] = every project and system incidents. */
+		projectIdsJson: text("project_ids_json").notNull().default("[]"),
+		createdAt: integer("created_at").notNull(),
+		updatedAt: integer("updated_at").notNull(),
+	},
+	() => [
+		check("alert_channels_type_check", inList("type", ALERT_CHANNEL_TYPES)),
+	],
+);
+
+/** M5-11: at most one open incident per (rule, resource). */
+export const alerts = sqliteTable(
+	"alerts",
+	{
+		id: text("id").primaryKey(),
+		rule: text("rule").notNull(),
+		resourceType: text("resource_type", {
+			enum: ALERT_RESOURCE_TYPES,
+		}).notNull(),
+		resourceId: text("resource_id").notNull(),
+		projectId: text("project_id"),
+		status: text("status", { enum: ALERT_STATUSES }).notNull(),
+		openedAt: integer("opened_at").notNull(),
+		lastNotifiedAt: integer("last_notified_at"),
+		resolvedAt: integer("resolved_at"),
+		detailsJson: text("details_json").notNull().default("{}"),
+	},
+	(t) => [
+		check(
+			"alerts_resource_type_check",
+			inList("resource_type", ALERT_RESOURCE_TYPES),
+		),
+		check("alerts_status_check", inList("status", ALERT_STATUSES)),
+		uniqueIndex("alerts_open_key_uq")
+			.on(t.rule, t.resourceType, t.resourceId)
+			.where(sql`status = 'open'`),
+		index("alerts_status_opened_idx").on(t.status, t.openedAt),
+	],
+);
+
+/** M5-14 outbox: one row per (state change, channel). */
+export const alertNotifications = sqliteTable(
+	"alert_notifications",
+	{
+		id: text("id").primaryKey(),
+		alertId: text("alert_id")
+			.notNull()
+			.references(() => alerts.id),
+		channelId: text("channel_id")
+			.notNull()
+			.references(() => alertChannels.id),
+		kind: text("kind", { enum: NOTIFICATION_KINDS }).notNull(),
+		status: text("status", { enum: NOTIFICATION_STATUSES })
+			.notNull()
+			.default("pending"),
+		tries: integer("tries").notNull().default(0),
+		lastError: text("last_error"),
+		createdAt: integer("created_at").notNull(),
+		/** When the current `sending` claim started; a claim older than 60 s is reclaimed. */
+		claimedAt: integer("claimed_at"),
+		sentAt: integer("sent_at"),
+	},
+	(t) => [
+		check("alert_notifications_kind_check", inList("kind", NOTIFICATION_KINDS)),
+		check(
+			"alert_notifications_status_check",
+			inList("status", NOTIFICATION_STATUSES),
+		),
+		index("alert_notifications_status_created_idx").on(t.status, t.createdAt),
+		index("alert_notifications_alert_idx").on(t.alertId),
+	],
+);
+
+export type AlertChannelRow = typeof alertChannels.$inferSelect;
+export type AlertRow = typeof alerts.$inferSelect;
+export type AlertNotificationRow = typeof alertNotifications.$inferSelect;

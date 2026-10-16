@@ -206,6 +206,7 @@ export function destinationRoutes() {
 			backoffMaxS: fields.backoff_max_s ?? null,
 			maxInFlight: fields.max_in_flight ?? null,
 			rateLimitPerS: fields.rate_limit_per_s ?? null,
+			consecutiveFailures: 0,
 			createdAt: ts,
 			updatedAt: ts,
 		};

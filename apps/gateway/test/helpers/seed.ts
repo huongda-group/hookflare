@@ -60,6 +60,7 @@ export async function seedPipeline(
 		backoffMaxS: null,
 		maxInFlight: null,
 		rateLimitPerS: null,
+		consecutiveFailures: 0,
 		createdAt: now,
 		updatedAt: now,
 		...opts.destination,

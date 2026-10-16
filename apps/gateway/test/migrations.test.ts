@@ -160,3 +160,32 @@ describe("0007", () => {
 		expect(sql).toMatch(/ADD `rate_limit_per_s` integer/);
 	});
 });
+
+describe("0008_alerts", () => {
+	it("0008 creates the alert tables without rebuilding destinations", () => {
+		const sql = migration("0008_alerts").queries.join("\n");
+		expect(sql).not.toMatch(/__new_/);
+		expect(sql).toMatch(/CREATE TABLE `alert_channels`/);
+		expect(sql).toMatch(
+			/CREATE UNIQUE INDEX `alerts_open_key_uq`.*WHERE status = 'open'/s,
+		);
+		expect(sql).toMatch(
+			/ADD `consecutive_failures` integer DEFAULT 0 NOT NULL/,
+		);
+	});
+
+	it("allows one open incident per key but many resolved ones", async () => {
+		const db = env.DB;
+		const ins = (id: string, status: string) =>
+			db
+				.prepare(
+					"INSERT INTO alerts (id, rule, resource_type, resource_id, status, opened_at) VALUES (?, 'new_dead', 'destination', 'dst_mig', ?, 1)",
+				)
+				.bind(id, status)
+				.run();
+		await ins("alr_mig1", "resolved");
+		await ins("alr_mig2", "resolved");
+		await ins("alr_mig3", "open");
+		await expect(ins("alr_mig4", "open")).rejects.toThrow(/UNIQUE/);
+	});
+});
