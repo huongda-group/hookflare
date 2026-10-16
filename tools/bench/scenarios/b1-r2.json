@@ -1,0 +1,9 @@
+{
+	"name": "b1-r2",
+	"steps": [{ "rate_per_s": 50, "duration_s": 180 }],
+	"sources": 40,
+	"body_bytes": 102400,
+	"sink": {},
+	"drain_timeout_s": 1800,
+	"notes": "Repeat of the B1 50 req/s step with 100 KB bodies to exercise the R2 payload path."
+}

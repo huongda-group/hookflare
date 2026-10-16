@@ -1,0 +1,9 @@
+{
+	"name": "b3",
+	"steps": [{ "rate_per_s": 50, "duration_s": 600 }],
+	"sources": 10,
+	"body_bytes": 1024,
+	"sink": {},
+	"drain_timeout_s": 3600,
+	"notes": "Consumer concurrency. Manual steps: pause the destination, pre-load 50,000 events, resume, then run this scenario so ingress at 50 req/s overlaps the drain. Repeat with max_concurrency unset, 5, 10, 20 and with sink delay_ms 100 and 1000 (set the sink query param on the destination URL between runs)."
+}
