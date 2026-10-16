@@ -547,7 +547,7 @@ describe("processDelivery retries (M2)", () => {
 		});
 	});
 
-	it("defers a retrying delivery that is not due yet, without a request", async () => {
+	it("acks a duplicate of a retrying delivery that is not due yet, without a request", async () => {
 		const fetchMock = fetchReturning(() => new Response("ok"));
 		const { deps, advance } = clocked({ fetch: fetchMock });
 		const p = await seedPipeline(deps);
@@ -558,9 +558,9 @@ describe("processDelivery retries (M2)", () => {
 				nextAttemptAt: T0 + 29_500,
 			},
 		});
+		// Acked, not re-delayed: native retries would push the message toward the DLQ.
 		expect(await processDelivery(deps, deliveryId, logger)).toEqual({
-			action: "retry",
-			delaySeconds: 30,
+			action: "ack",
 		});
 		expect(fetchMock).not.toHaveBeenCalled();
 		expect((await state(deps, deliveryId)).delivery).toMatchObject({

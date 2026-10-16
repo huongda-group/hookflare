@@ -114,19 +114,20 @@ export async function processDelivery(
 		});
 		return ACK;
 	}
-	// A duplicate message must not cut the backoff short; the due one still arrives.
+	// A duplicate message must not cut the backoff short; the due one still arrives
+	// (it is sent after next_attempt_at is recorded), and the reconciler resends it if
+	// lost. Ack instead of re-delaying: native retries would carry it to the DLQ.
 	const { nextAttemptAt } = ctx.delivery;
 	if (
 		ctx.delivery.status === "retrying" &&
 		nextAttemptAt !== null &&
 		nextAttemptAt > deps.now()
 	) {
-		const delaySeconds = Math.ceil((nextAttemptAt - deps.now()) / 1000);
 		logger.info("delivery.not_due", {
 			delivery_id: deliveryId,
-			delay_s: delaySeconds,
+			delay_s: Math.ceil((nextAttemptAt - deps.now()) / 1000),
 		});
-		return { action: "retry", delaySeconds };
+		return ACK;
 	}
 	const policy = resolvePolicy(ctx.destination);
 	const finish = async (lastError: string) => {

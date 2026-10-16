@@ -45,7 +45,7 @@ To run a single test: `pnpm --filter gateway exec vitest run test/core/ids.test.
 - Verify source signatures against the **raw body bytes**. Parse JSON (e.g. to extract the provider event ID) only after verification.
 - **D1 is the source of truth for retry state.** The retry budget is `deliveries.attempt_count` compared against the destination's `max_attempts`, not the queue's `msg.attempts`, which resets on re-enqueue. Native DLQ is only a safety net.
 - The consumer must acquire the conditional-UPDATE **lease** before calling a backend. If 0 rows are affected, ack and skip: that is how duplicate queue messages become harmless.
-- Retries are new delayed messages; `msg.retry()` is only for infra errors, as a fallback when the reschedule send fails, and to re-delay a duplicate message that arrives before `next_attempt_at`.
+- Retries are new delayed messages; `msg.retry()` is only for infra errors and as a fallback when the reschedule send fails. A duplicate message that arrives before `next_attempt_at` is acked (never re-delayed, so it cannot reach the DLQ); the due message still arrives, and the reconciler resends it if lost.
 - The record update is fenced by `lease_until`: it matches the lease value, so a stale worker whose lease expired writes neither the delivery update nor the attempt row.
 - Infra errors (D1/R2), limiter rejections, and paused destinations never count as attempts.
 - Replay always creates a **new** `deliveries` row (`kind=replay`) and never mutates past deliveries or attempts. Every admin mutation writes `audit_logs` with secrets redacted.
