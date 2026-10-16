@@ -11,9 +11,10 @@ import {
 	webhookEvents,
 } from "../../core/db/schema";
 import { createLogger, type Logger } from "../../core/log";
+import { base64, gzipLines, sha256Hex, toBytes } from "../../core/ndjson";
 import type { Deps } from "../../deps";
 import { batchPrefix, dayStartOf, partKey } from "./keys";
-import { base64, groupBy, gzipLines, sha256Hex, toBytes } from "./ndjson";
+import { groupBy } from "./ndjson";
 
 export const PART_MAX_EVENTS = 5_000;
 export const PART_MAX_RAW_BYTES = 32 * 1024 * 1024;
