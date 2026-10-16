@@ -15,6 +15,7 @@ import { Route as FailuresRouteImport } from './routes/failures'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as EndpointsIndexRouteImport } from './routes/endpoints/index'
 import { Route as EventsIndexRouteImport } from './routes/events/index'
+import { Route as EventsEventIdRouteImport } from './routes/events/$eventId'
 import { Route as ProjectsIndexRouteImport } from './routes/projects/index'
 
 const IndexRoute = IndexRouteImport.update({
@@ -47,6 +48,11 @@ const EventsIndexRoute = EventsIndexRouteImport.update({
   path: '/events/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const EventsEventIdRoute = EventsEventIdRouteImport.update({
+  id: '/events/$eventId',
+  path: '/events/$eventId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProjectsIndexRoute = ProjectsIndexRouteImport.update({
   id: '/projects/',
   path: '/projects/',
@@ -58,6 +64,7 @@ export interface FileRoutesByFullPath {
   '/audit': typeof AuditRoute
   '/failures': typeof FailuresRoute
   '/settings': typeof SettingsRoute
+  '/events/$eventId': typeof EventsEventIdRoute
   '/endpoints/': typeof EndpointsIndexRoute
   '/events/': typeof EventsIndexRoute
   '/projects/': typeof ProjectsIndexRoute
@@ -67,6 +74,7 @@ export interface FileRoutesByTo {
   '/audit': typeof AuditRoute
   '/failures': typeof FailuresRoute
   '/settings': typeof SettingsRoute
+  '/events/$eventId': typeof EventsEventIdRoute
   '/endpoints': typeof EndpointsIndexRoute
   '/events': typeof EventsIndexRoute
   '/projects': typeof ProjectsIndexRoute
@@ -77,6 +85,7 @@ export interface FileRoutesById {
   '/audit': typeof AuditRoute
   '/failures': typeof FailuresRoute
   '/settings': typeof SettingsRoute
+  '/events/$eventId': typeof EventsEventIdRoute
   '/endpoints/': typeof EndpointsIndexRoute
   '/events/': typeof EventsIndexRoute
   '/projects/': typeof ProjectsIndexRoute
@@ -88,6 +97,7 @@ export interface FileRouteTypes {
     | '/audit'
     | '/failures'
     | '/settings'
+    | '/events/$eventId'
     | '/endpoints/'
     | '/events/'
     | '/projects/'
@@ -97,6 +107,7 @@ export interface FileRouteTypes {
     | '/audit'
     | '/failures'
     | '/settings'
+    | '/events/$eventId'
     | '/endpoints'
     | '/events'
     | '/projects'
@@ -106,6 +117,7 @@ export interface FileRouteTypes {
     | '/audit'
     | '/failures'
     | '/settings'
+    | '/events/$eventId'
     | '/endpoints/'
     | '/events/'
     | '/projects/'
@@ -116,6 +128,7 @@ export interface RootRouteChildren {
   AuditRoute: typeof AuditRoute
   FailuresRoute: typeof FailuresRoute
   SettingsRoute: typeof SettingsRoute
+  EventsEventIdRoute: typeof EventsEventIdRoute
   EndpointsIndexRoute: typeof EndpointsIndexRoute
   EventsIndexRoute: typeof EventsIndexRoute
   ProjectsIndexRoute: typeof ProjectsIndexRoute
@@ -165,6 +178,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EventsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/events/$eventId': {
+      id: '/events/$eventId'
+      path: '/events/$eventId'
+      fullPath: '/events/$eventId'
+      preLoaderRoute: typeof EventsEventIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/projects/': {
       id: '/projects/'
       path: '/projects'
@@ -180,6 +200,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuditRoute: AuditRoute,
   FailuresRoute: FailuresRoute,
   SettingsRoute: SettingsRoute,
+  EventsEventIdRoute: EventsEventIdRoute,
   EndpointsIndexRoute: EndpointsIndexRoute,
   EventsIndexRoute: EventsIndexRoute,
   ProjectsIndexRoute: ProjectsIndexRoute,

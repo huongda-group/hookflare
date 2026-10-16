@@ -1,5 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { OverviewPage, overviewSearch } from "@/pages/OverviewPage";
 
 export const Route = createFileRoute("/")({
-	component: () => <h1 className="p-6 text-xl font-semibold">Hookflare</h1>,
+	validateSearch: overviewSearch,
+	component: function OverviewRoute() {
+		const search = Route.useSearch();
+		const navigate = Route.useNavigate();
+		return (
+			<OverviewPage
+				search={search}
+				setSearch={(s) => navigate({ search: (prev) => ({ ...prev, ...s }) })}
+			/>
+		);
+	},
 });
