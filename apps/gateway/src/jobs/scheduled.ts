@@ -1,5 +1,7 @@
 import { startArchiveRun } from "../core/archive-run";
+import { startBackupRun } from "../core/backup-run";
 import { createLogger } from "../core/log";
+import { readSetting, STORAGE_SETTING } from "../core/settings";
 import type { Deps } from "../deps";
 import { runAlerts } from "./alerts/job";
 import { dayOf } from "./archive/keys";
@@ -9,6 +11,7 @@ import { rollup } from "./rollup";
 export const RECONCILE_CRON = "* * * * *";
 export const ROLLUP_CRON = "*/5 * * * *";
 export const ARCHIVE_CRON = "0 3 * * *";
+export const BACKUP_CRON = "0 20 * * *";
 
 /** Dispatches on controller.cron. */
 export async function runScheduled(cron: string, deps: Deps): Promise<void> {
@@ -47,6 +50,23 @@ export async function runScheduled(cron: string, deps: Deps): Promise<void> {
 			);
 		} catch (err) {
 			logger.error("archive.start_failed", { error: String(err) });
+		}
+		return;
+	}
+	if (cron === BACKUP_CRON) {
+		const { value: storage } = await readSetting(deps.db, STORAGE_SETTING);
+		if (!storage.backup_enabled) {
+			logger.info("backup.disabled", {});
+			return;
+		}
+		try {
+			await startBackupRun(
+				deps,
+				{ instanceId: `backup-${dayOf(deps.now())}`, trigger: "cron" },
+				logger,
+			);
+		} catch (err) {
+			logger.error("backup.start_failed", { error: String(err) });
 		}
 		return;
 	}

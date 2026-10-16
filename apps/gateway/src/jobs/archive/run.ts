@@ -1,5 +1,6 @@
 import { isArchiveRunning } from "../../core/archive-run";
 import type { Logger } from "../../core/log";
+import type { StepFn } from "../../core/workflow";
 import type { Deps } from "../../deps";
 import { buildAuditPart, buildEventPart } from "./part";
 import { DEFAULT_LIMITS, type PlanLimits, planRun } from "./plan";
@@ -14,8 +15,7 @@ import {
 import { expireArchives } from "./retention";
 import { verifyBatch } from "./verify";
 
-/** One durable, retried step: `step.do` in the Workflow, a plain call in tests. */
-export type StepFn = <T>(name: string, fn: () => Promise<T>) => Promise<T>;
+export type { StepFn };
 
 /**
  * Spec §7.4. Orchestration only: every step is a plain function over Deps.

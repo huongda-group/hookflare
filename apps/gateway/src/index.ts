@@ -7,6 +7,7 @@ import { runScheduled } from "./jobs/scheduled";
 
 export { DestinationLimiter } from "./delivery/limiter";
 export { ArchiveWorkflow } from "./jobs/archive/workflow";
+export { BackupWorkflow } from "./jobs/backup/workflow";
 
 const app = createApp();
 
