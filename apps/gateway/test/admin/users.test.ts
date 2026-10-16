@@ -137,6 +137,16 @@ describe("/users", () => {
 		expect(await res.json()).toEqual({ error: "self_disable" });
 	});
 
+	it("answers 404, not 500, for an email containing a percent sign", async () => {
+		const api = await adminApp(testDeps(), { role: "admin" });
+		const res = await api.request(
+			"PATCH",
+			`/users/${encodeURIComponent("100%off@example.com")}`,
+			{ role: "viewer" },
+		);
+		expect(res.status).toBe(404);
+	});
+
 	it("lists users by email with a cursor and answers 404 for an unknown user", async () => {
 		const deps = testDeps();
 		const api = await adminApp(deps, { role: "admin" });

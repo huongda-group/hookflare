@@ -79,7 +79,7 @@ export function userRoutes() {
 		const body = await readJson(c, patchUserRequest);
 		if (!body.ok) return body.response;
 		const { db, now } = c.var.deps;
-		const email = decodeURIComponent(c.req.param("email")).trim().toLowerCase();
+		const email = c.req.param("email").trim().toLowerCase();
 		const existing = await getUser(db, email);
 		if (!existing) return c.json({ error: "not_found" }, 404);
 		const { role, disabled, reason } = body.value;

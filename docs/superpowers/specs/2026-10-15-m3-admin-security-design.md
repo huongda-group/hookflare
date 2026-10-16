@@ -268,7 +268,7 @@ Tests never touch `deliveries`, the queue, the retry budget, or the limiter. **`
 
 - **Re-encryption:** the current secret is decrypted and re-encrypted under the AAD of the prev column (`sources.secret_prev_enc:<id>`, `destinations.signing_secret_prev_enc:<id>`), since AAD binds ciphertext to its column.
 - **One prev at a time:** rotating again during a grace window drops the older prev immediately.
-- **`grace_hours = 0`:** clears the prev columns instead of storing an already-expired secret.
+- **`grace_hours = 0`:** clears the prev columns instead of storing an already-expired secret. The admin side sees the revoke immediately; ingress may keep accepting the old inbound secret for up to the 30 s source cache TTL (see §15 risks).
 - **Expiry:** `core/secrets.ts` `activeSecrets(row, now)` ignores an expired prev. Expired columns are cleared lazily on the next rotate or update of that row; no job is needed.
 - **DTOs** gain `previous_secret_fingerprint` and `previous_secret_expires_at` (null when no prev is active).
 - **Audit:** `source.secret_rotated` / `destination.secret_rotated` with `{grace_hours, prev_expires_at, new_fingerprint}`. (`previous_secret_expires_at` would be dropped by the redactor, whose key pattern matches `secret`.)

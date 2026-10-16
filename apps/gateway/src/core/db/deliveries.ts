@@ -8,6 +8,7 @@ import {
 	gt,
 	gte,
 	inArray,
+	isNotNull,
 	isNull,
 	lt,
 	lte,
@@ -257,6 +258,8 @@ export async function listFailures(db: Db, f: FailureFilter) {
 	const newer = alias(deliveries, "newer");
 	const where: (SQL | undefined)[] = [
 		inArray(deliveries.status, f.statuses?.length ? f.statuses : [...FAILED]),
+		// The cursor keys on completed_at; failed rows always set it.
+		isNotNull(deliveries.completedAt),
 		f.projectId ? eq(deliveries.projectId, f.projectId) : undefined,
 		f.destinationId ? eq(deliveries.destinationId, f.destinationId) : undefined,
 		f.from !== undefined ? gte(deliveries.completedAt, f.from) : undefined,
@@ -280,6 +283,7 @@ export async function listFailures(db: Db, f: FailureFilter) {
 								eq(newer.eventId, deliveries.eventId),
 								eq(newer.destinationId, deliveries.destinationId),
 								eq(newer.kind, "replay"),
+								eq(newer.status, "delivered"),
 								gt(newer.id, deliveries.id),
 							),
 						),

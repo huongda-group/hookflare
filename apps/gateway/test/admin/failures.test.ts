@@ -82,6 +82,27 @@ describe("GET /failures", () => {
 		});
 	});
 
+	it("keeps a failure visible while its replay is still in flight", async () => {
+		const { deps, p, dead, api } = await fixture();
+		const replayId = newId("dlv", deps.now() + 10);
+		await deps.db.insert(deliveries).values({
+			id: replayId,
+			eventId: dead.eventId,
+			destinationId: p.destination.id,
+			projectId: p.project.id,
+			kind: "replay",
+			status: "paused",
+			attemptCount: 0,
+			createdAt: deps.now(),
+		});
+		const page = await (
+			await api.request("GET", `/failures?destination_id=${p.destination.id}`)
+		).json<Page>();
+		expect(page.data.find((f) => f.id === dead.deliveryId)).toMatchObject({
+			latest_replay: { id: replayId, status: "paused" },
+		});
+	});
+
 	it("filters by status and pages with a cursor", async () => {
 		const { p, dead, final, api } = await fixture();
 		const onlyDead = await (

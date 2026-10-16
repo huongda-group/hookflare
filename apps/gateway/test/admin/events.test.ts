@@ -166,17 +166,21 @@ describe("GET /events", () => {
 });
 
 describe("GET /events/:id/deliveries", () => {
-	it("lists every delivery of the event oldest first", async () => {
+	it("lists every delivery of the event oldest first, with attempts", async () => {
 		const deps = testDeps();
 		const p = await seedPipeline(deps);
-		const { eventId, deliveryId } = await seedDelivery(deps, p, {
-			status: "dead",
-		});
+		const { eventId, deliveryId } = await seedDelivery(deps, p);
+		await processDelivery(deps, deliveryId, createLogger(deps.env, {}));
 		const api = await adminApp(deps, { role: "viewer" });
 		const res = await api.request("GET", `/events/${eventId}/deliveries`);
 		expect(res.status).toBe(200);
-		const body = await res.json<{ data: { id: string }[] }>();
+		const body = await res.json<{
+			data: { id: string; attempts: { http_status: number }[] }[];
+		}>();
 		expect(body.data.map((d) => d.id)).toEqual([deliveryId]);
+		expect(body.data[0].attempts).toEqual([
+			expect.objectContaining({ attempt_no: 1, http_status: 200 }),
+		]);
 		expect(
 			(await api.request("GET", "/events/evt_missing/deliveries")).status,
 		).toBe(404);

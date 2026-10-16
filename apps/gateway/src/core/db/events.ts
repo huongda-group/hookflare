@@ -208,18 +208,6 @@ export async function latestDeliveries(
 	return out;
 }
 
-export async function listEventDeliveries(
-	db: Db,
-	eventId: string,
-): Promise<DeliveryRow[]> {
-	return db
-		.select()
-		.from(deliveries)
-		.where(eq(deliveries.eventId, eventId))
-		.orderBy(asc(deliveries.createdAt), asc(deliveries.id))
-		.all();
-}
-
 /** The only reader of event bodies on the admin side (spec §8.3). */
 export async function getEventPayloadRef(db: Db, id: string) {
 	return db

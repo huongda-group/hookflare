@@ -11,7 +11,6 @@ import {
 	getEventDetail,
 	getEventPayloadRef,
 	latestDeliveries,
-	listEventDeliveries,
 	searchEvents,
 } from "../../core/db/events";
 import { loadPayload } from "../../core/payloads";
@@ -76,13 +75,15 @@ export function eventRoutes() {
 	});
 
 	routes.get("/:id/deliveries", requirePermission("events.read"), async (c) => {
-		const { db } = c.var.deps;
-		const id = c.req.param("id");
-		const rows = await listEventDeliveries(db, id);
-		if (rows.length === 0 && !(await getEventDetail(db, id))) {
-			return c.json({ error: "not_found" }, 404);
-		}
-		return c.json({ data: rows.map(toDelivery), next_cursor: null });
+		const detail = await getEventDetail(c.var.deps.db, c.req.param("id"));
+		if (!detail) return c.json({ error: "not_found" }, 404);
+		return c.json({
+			data: detail.deliveries.map((d) => ({
+				...toDelivery(d),
+				attempts: d.attempts.map(toAttempt),
+			})),
+			next_cursor: null,
+		});
 	});
 
 	routes.get("/:id/payload", requirePermission("payload.read"), async (c) => {
