@@ -31,6 +31,7 @@ describe("retry defaults", () => {
 		expect(await readRetryDefaults(testDeps().db)).toEqual({
 			policy: DEFAULT_POLICY,
 			updatedAt: null,
+			corrupt: false,
 		});
 	});
 
@@ -46,6 +47,7 @@ describe("retry defaults", () => {
 				backoffMaxS: 600,
 			},
 			updatedAt: 5678,
+			corrupt: false,
 		});
 	});
 
@@ -56,7 +58,10 @@ describe("retry defaults", () => {
 				.insert(settings)
 				.values({ key: RETRY_DEFAULTS_KEY, valueJson, updatedAt: 1 })
 				.onConflictDoUpdate({ target: settings.key, set: { valueJson } });
-			expect((await readRetryDefaults(db)).policy).toEqual(DEFAULT_POLICY);
+			expect(await readRetryDefaults(db)).toMatchObject({
+				policy: DEFAULT_POLICY,
+				corrupt: true,
+			});
 		}
 	});
 

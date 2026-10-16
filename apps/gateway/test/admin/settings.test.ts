@@ -6,8 +6,9 @@ import { auditLogs, settings } from "../../src/core/db/schema";
 import {
 	clearRetryDefaultsCache,
 	RETRY_DEFAULTS_KEY,
+	upsertRetryDefaults,
 } from "../../src/core/settings";
-import { adminApp, auditRows } from "../helpers/admin";
+import { adminApp, auditRows, beforeNextBatch } from "../helpers/admin";
 import { testDeps, withFailingBatch } from "../helpers/deps";
 
 const next = {
@@ -94,6 +95,24 @@ describe("PATCH /settings", () => {
 		expect(body.issues.map((i) => i.path)).toContain(
 			"retry_defaults.backoff_max_s",
 		);
+	});
+
+	it("answers 409 and writes no audit row when another update wins the race", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps);
+		await api.request("GET", "/me"); // bootstrap batch happens here
+		beforeNextBatch(deps, () =>
+			upsertRetryDefaults(deps.db, { ...next, max_attempts: 9 }, 1),
+		);
+		const res = await api.request("PATCH", "/settings", {
+			retry_defaults: next,
+		});
+		expect(res.status).toBe(409);
+		expect(await auditRows(deps, RETRY_DEFAULTS_KEY)).toEqual([]);
+		const stored = await (
+			await api.request("GET", "/settings")
+		).json<Settings>();
+		expect(stored.retry_defaults.max_attempts).toBe(9);
 	});
 
 	it("writes neither the setting nor the audit row when the batch fails", async () => {

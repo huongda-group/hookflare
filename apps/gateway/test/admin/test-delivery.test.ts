@@ -4,10 +4,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { clearAccessKeyCache } from "../../src/admin/auth/access";
 import { deliveries, destinations } from "../../src/core/db/schema";
 import { DnsError } from "../../src/core/dns";
+import { clearRetryDefaultsCache } from "../../src/core/settings";
 import { signWebhook } from "../../src/core/sign";
 import { clearSsrfCache } from "../../src/core/ssrf";
 import { adminApp, auditRows } from "../helpers/admin";
 import { type RecordingQueue, recordingQueue, testDeps } from "../helpers/deps";
+import { faultyDeps } from "../helpers/faults";
 import { seedPipeline, TEST_SIGNING_SECRET } from "../helpers/seed";
 
 describe("POST /destinations/:id/test", () => {
@@ -128,6 +130,23 @@ describe("POST /destinations/:id/test", () => {
 				.status,
 		).toBe(503);
 		expect(await auditRows(deps, destination.id)).toEqual([]);
+	});
+
+	it("answers 503 and records nothing when the retry defaults cannot load", async () => {
+		const base = testDeps();
+		const { destination } = await seedPipeline(base);
+		const op = await adminApp(base, { role: "operator" });
+		const api = await adminApp(
+			faultyDeps(base, { d1: [{ match: /from "settings"/i }] }),
+			{ email: op.email },
+		);
+		clearAccessKeyCache(); // second app minted fresh keys under the same kid
+		clearRetryDefaultsCache();
+		expect(
+			(await api.request("POST", `/destinations/${destination.id}/test`))
+				.status,
+		).toBe(503);
+		expect(await auditRows(base, destination.id)).toEqual([]);
 	});
 
 	it("allows a paused destination and rejects a disabled one", async () => {

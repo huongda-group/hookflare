@@ -1,5 +1,5 @@
 import { type RetryDefaults, retryDefaultsSchema } from "@hookflare/shared";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { Db, Deps } from "../deps";
 import { settings } from "./db/schema";
 import { DEFAULT_POLICY, type Policy } from "./policy";
@@ -28,23 +28,24 @@ export function toRetryDefaults(p: Policy): RetryDefaults {
 /** A missing, unparsable, or out-of-bounds row means DEFAULT_POLICY: deliveries never fail on it. */
 export async function readRetryDefaults(
 	db: Db,
-): Promise<{ policy: Policy; updatedAt: number | null }> {
+): Promise<{ policy: Policy; updatedAt: number | null; corrupt: boolean }> {
 	const row = await db
 		.select()
 		.from(settings)
 		.where(eq(settings.key, RETRY_DEFAULTS_KEY))
 		.get();
-	if (!row) return { policy: DEFAULT_POLICY, updatedAt: null };
+	if (!row) return { policy: DEFAULT_POLICY, updatedAt: null, corrupt: false };
 	let raw: unknown;
 	try {
 		raw = JSON.parse(row.valueJson);
 	} catch {
-		return { policy: DEFAULT_POLICY, updatedAt: row.updatedAt };
+		return { policy: DEFAULT_POLICY, updatedAt: row.updatedAt, corrupt: true };
 	}
 	const parsed = retryDefaultsSchema.safeParse(raw);
 	return {
 		policy: parsed.success ? toPolicy(parsed.data) : DEFAULT_POLICY,
 		updatedAt: row.updatedAt,
+		corrupt: !parsed.success,
 	};
 }
 
@@ -65,8 +66,17 @@ export function clearRetryDefaultsCache(): void {
 	cached = null;
 }
 
-/** Unexecuted: batch it with the audit row (M3-7). */
-export function upsertRetryDefaults(db: Db, value: RetryDefaults, at: number) {
+/**
+ * Unexecuted: batch it with the audit row (M3-7). With `expectedUpdatedAt`
+ * (null = no row yet) the write only lands if nobody changed the row since
+ * it was read; `.returning()` is then empty and the caller answers 409.
+ */
+export function upsertRetryDefaults(
+	db: Db,
+	value: RetryDefaults,
+	at: number,
+	expectedUpdatedAt?: number | null,
+) {
 	const valueJson = JSON.stringify(value);
 	return db
 		.insert(settings)
@@ -74,5 +84,14 @@ export function upsertRetryDefaults(db: Db, value: RetryDefaults, at: number) {
 		.onConflictDoUpdate({
 			target: settings.key,
 			set: { valueJson, updatedAt: at },
-		});
+			...(expectedUpdatedAt === undefined
+				? {}
+				: {
+						setWhere:
+							expectedUpdatedAt === null
+								? sql`0`
+								: eq(settings.updatedAt, expectedUpdatedAt),
+					}),
+		})
+		.returning({ key: settings.key });
 }

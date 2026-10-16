@@ -493,6 +493,13 @@ export function destinationRoutes() {
 			if (destination.status === "disabled") {
 				return c.json({ error: "destination_disabled" }, 409);
 			}
+			let defaults: Policy;
+			try {
+				defaults = await loadRetryDefaults(deps);
+			} catch (err) {
+				c.var.logger.warn("admin.settings_unavailable", { error: err });
+				return c.json({ error: "unavailable" }, 503);
+			}
 			const startedAt = deps.now();
 			const testId = newId("tst", startedAt);
 			const payload = new Uint8Array(
@@ -533,10 +540,7 @@ export function destinationRoutes() {
 					snippet: null,
 				};
 			} else {
-				const timeoutMs = resolvePolicy(
-					destination,
-					await loadRetryDefaults(deps),
-				).timeoutMs;
+				const timeoutMs = resolvePolicy(destination, defaults).timeoutMs;
 				const timestampSec = Math.floor(startedAt / 1000);
 				const secrets = await destinationSigningSecrets(
 					deps.env,
