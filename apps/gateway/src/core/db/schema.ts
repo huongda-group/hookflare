@@ -4,6 +4,7 @@ import {
 	customType,
 	index,
 	integer,
+	primaryKey,
 	sqliteTable,
 	text,
 	uniqueIndex,
@@ -190,6 +191,7 @@ export const webhookEvents = sqliteTable(
 	(t) => [
 		index("webhook_events_source_received_idx").on(t.sourceId, t.receivedAt),
 		index("webhook_events_project_received_idx").on(t.projectId, t.receivedAt),
+		index("webhook_events_received_idx").on(t.receivedAt),
 		uniqueIndex("webhook_events_source_provider_uq")
 			.on(t.sourceId, t.providerEventId)
 			.where(sql`provider_event_id IS NOT NULL`),
@@ -255,6 +257,7 @@ export const deliveryAttempts = sqliteTable(
 			t.deliveryId,
 			t.attemptNo,
 		),
+		index("delivery_attempts_started_idx").on(t.startedAt),
 		check(
 			"delivery_attempts_error_kind_check",
 			sql.raw(
@@ -338,3 +341,30 @@ export type DeliveryAttemptRow = typeof deliveryAttempts.$inferSelect;
 export type UserRow = typeof users.$inferSelect;
 export type AuditLogRow = typeof auditLogs.$inferSelect;
 export type TestDeliveryRow = typeof testDeliveries.$inferSelect;
+
+/**
+ * Hourly counters filled by the rollup job (spec §5–§6). No foreign keys:
+ * stats outlive archived events (M5). `hour` is the start of a UTC hour.
+ */
+export const statsHourly = sqliteTable(
+	"stats_hourly",
+	{
+		hour: integer("hour").notNull(),
+		projectId: text("project_id").notNull(),
+		sourceId: text("source_id").notNull(),
+		destinationId: text("destination_id").notNull(),
+		received: integer("received").notNull().default(0),
+		delivered: integer("delivered").notNull().default(0),
+		failedFinal: integer("failed_final").notNull().default(0),
+		dead: integer("dead").notNull().default(0),
+		attempts: integer("attempts").notNull().default(0),
+	},
+	(t) => [
+		primaryKey({
+			columns: [t.hour, t.projectId, t.sourceId, t.destinationId],
+		}),
+		index("stats_hourly_project_hour_idx").on(t.projectId, t.hour),
+	],
+);
+
+export type StatsHourlyRow = typeof statsHourly.$inferSelect;

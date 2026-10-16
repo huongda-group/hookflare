@@ -124,3 +124,30 @@ describe("0005_admin_security", () => {
 		).rejects.toThrow(/CHECK/);
 	});
 });
+
+describe("0006", () => {
+	it("only creates stats_hourly and indexes (no table rebuild)", () => {
+		const m = migration("0006");
+		for (const q of m.queries) {
+			expect(q.replace(/^--> statement-breakpoint\s*/, "").trim()).toMatch(
+				/^CREATE (TABLE|INDEX)/,
+			);
+		}
+		const all = m.queries.join("\n");
+		expect(all).toContain("`stats_hourly`");
+		expect(all).toContain("webhook_events_received_idx");
+		expect(all).toContain("delivery_attempts_started_idx");
+	});
+
+	it("upserts on the composite primary key", async () => {
+		const stmt = `INSERT INTO stats_hourly (hour, project_id, source_id, destination_id, received)
+			VALUES (0, 'prj_m', 'src_m', 'dst_m', 1)
+			ON CONFLICT (hour, project_id, source_id, destination_id) DO UPDATE SET received = received + excluded.received`;
+		await env.DB.prepare(stmt).run();
+		await env.DB.prepare(stmt).run();
+		const row = await env.DB.prepare(
+			"SELECT received, delivered FROM stats_hourly WHERE project_id = 'prj_m'",
+		).first();
+		expect(row).toEqual({ received: 2, delivered: 0 });
+	});
+});
