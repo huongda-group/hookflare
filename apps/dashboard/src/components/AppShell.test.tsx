@@ -45,28 +45,32 @@ describe("AppShell", () => {
 		expect(screen.getByText(/x@example.com/)).toBeInTheDocument();
 	});
 
-	it("keeps the page mounted under the session-expired banner", async () => {
-		const { queryClient } = renderApp("/");
-		await screen.findByText("admin@example.com");
+	it("keeps in-progress form input under the session-expired banner", async () => {
 		server.use(
-			http.get(
+			http.post(
 				apiUrl("/projects"),
 				() =>
-					new HttpResponse("<html/>", {
+					new HttpResponse("<html>Sign in</html>", {
 						headers: { "content-type": "text/html" },
 					}),
 			),
 		);
-		await queryClient
-			.fetchQuery({
-				queryKey: ["probe"],
-				queryFn: () => import("@/lib/api").then((m) => m.api.get("/projects")),
-			})
-			.catch(() => {});
+		const { user } = renderApp("/projects");
+		await user.click(
+			await screen.findByRole("button", { name: "New project" }),
+		);
+		await user.type(screen.getByLabelText("Name"), "Billing");
+		await user.type(screen.getByLabelText("Slug"), "billing");
+		await user.click(screen.getByRole("button", { name: "Create" }));
 		expect(await screen.findByRole("alert")).toHaveTextContent(
-			"Session expired",
+			"Session expired or network unavailable",
 		);
 		expect(screen.getByRole("button", { name: "Reload" })).toBeInTheDocument();
+		expect(
+			screen.getByRole("dialog", { name: "New project" }),
+		).toBeInTheDocument();
+		expect(screen.getByLabelText("Name")).toHaveValue("Billing");
+		expect(screen.getByLabelText("Slug")).toHaveValue("billing");
 		expect(screen.getByText("admin@example.com")).toBeInTheDocument();
 	});
 
@@ -99,5 +103,26 @@ describe("AppShell", () => {
 			})
 			.catch(() => {});
 		await waitFor(() => expect(meCalls).toBeGreaterThanOrEqual(2));
+	});
+
+	it("shows an error with Retry when /me fails with a non-403 error", async () => {
+		let fail = true;
+		server.use(
+			http.get(apiUrl("/me"), () =>
+				fail
+					? HttpResponse.json({ error: "internal" }, { status: 500 })
+					: HttpResponse.json({
+							email: "admin@example.com",
+							role: "admin",
+							permissions: ["events.read"],
+						}),
+			),
+		);
+		const { user } = renderApp("/");
+		await user.click(await screen.findByRole("button", { name: "Retry" }));
+		expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+		fail = false;
+		await user.click(screen.getByRole("button", { name: "Retry" }));
+		expect(await screen.findByText("admin@example.com")).toBeInTheDocument();
 	});
 });

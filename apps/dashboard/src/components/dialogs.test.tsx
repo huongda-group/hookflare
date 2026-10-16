@@ -2,7 +2,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { createQueryClient } from "@/router";
 import { apiUrl, server } from "@/test/server";
@@ -66,6 +66,40 @@ describe("ReplayDialog", () => {
 	});
 });
 
+describe("ReplayDialog result", () => {
+	it("keeps the sent count after the caller clears its selection", async () => {
+		server.use(
+			http.post(apiUrl("/failures/replay"), () =>
+				HttpResponse.json({
+					replayed: [
+						{ delivery_id: "dlv_1", new_delivery_id: "dlv_8", enqueued: true },
+						{ delivery_id: "dlv_2", new_delivery_id: "dlv_9", enqueued: true },
+					],
+					skipped: [],
+				}),
+			),
+		);
+		function Harness() {
+			const [ids, setIds] = useState(["dlv_1", "dlv_2"]);
+			return (
+				<ReplayDialog
+					open
+					onOpenChange={() => {}}
+					target={{ kind: "bulk", deliveryIds: ids }}
+					onDone={() => setIds([])}
+				/>
+			);
+		}
+		wrap(<Harness />);
+		await userEvent.type(screen.getByLabelText("Reason"), "backend fixed");
+		await userEvent.click(screen.getByRole("button", { name: "Replay 2" }));
+		expect(await screen.findByText("dlv_9")).toBeInTheDocument();
+		expect(
+			screen.getByRole("heading", { name: "Replay 2 deliveries" }),
+		).toBeInTheDocument();
+	});
+});
+
 describe("SecretRevealDialog", () => {
 	it("cannot close until the user confirms storing the secret", async () => {
 		const onClose = vi.fn();
@@ -83,6 +117,59 @@ describe("SecretRevealDialog", () => {
 		await userEvent.click(screen.getByLabelText("I have stored this secret"));
 		await userEvent.click(done);
 		expect(onClose).toHaveBeenCalled();
+	});
+
+	it("starts unticked for every new secret, whatever closed the last one", async () => {
+		const onClose = vi.fn();
+		const { rerender } = render(
+			<SecretRevealDialog
+				secret="whsec_one"
+				label="Secret"
+				onClose={onClose}
+			/>,
+		);
+		await userEvent.click(screen.getByLabelText("I have stored this secret"));
+		await userEvent.keyboard("{Escape}");
+		expect(onClose).toHaveBeenCalledTimes(1);
+		rerender(
+			<SecretRevealDialog secret={null} label="Secret" onClose={onClose} />,
+		);
+		rerender(
+			<SecretRevealDialog
+				secret="whsec_two"
+				label="Secret"
+				onClose={onClose}
+			/>,
+		);
+		expect(await screen.findByText("whsec_two")).toBeInTheDocument();
+		expect(
+			screen.getByLabelText("I have stored this secret"),
+		).not.toBeChecked();
+		expect(screen.getByRole("button", { name: "Done" })).toBeDisabled();
+		await userEvent.keyboard("{Escape}");
+		expect(onClose).toHaveBeenCalledTimes(1);
+	});
+
+	it("resets when the secret changes without closing", async () => {
+		const onClose = vi.fn();
+		const { rerender } = render(
+			<SecretRevealDialog
+				secret="whsec_one"
+				label="Secret"
+				onClose={onClose}
+			/>,
+		);
+		await userEvent.click(screen.getByLabelText("I have stored this secret"));
+		rerender(
+			<SecretRevealDialog
+				secret="whsec_two"
+				label="Secret"
+				onClose={onClose}
+			/>,
+		);
+		expect(
+			screen.getByLabelText("I have stored this secret"),
+		).not.toBeChecked();
 	});
 });
 
@@ -126,5 +213,81 @@ describe("RotateSecretDialog", () => {
 		);
 		await userEvent.click(screen.getByRole("button", { name: "Rotate" }));
 		await waitFor(() => expect(onRotated).toHaveBeenCalledWith("whsec_new"));
+	});
+
+	it("masks the supplied secret and clears every field after cancel", async () => {
+		const { rerender } = wrap(
+			<RotateSecretDialog
+				open
+				onOpenChange={() => {}}
+				resource="source"
+				id="src_1"
+				onRotated={() => {}}
+			/>,
+		);
+		const supplied = screen.getByLabelText(/New secret/);
+		expect(supplied).toHaveAttribute("type", "password");
+		expect(supplied).toHaveAttribute("autocomplete", "off");
+		await userEvent.type(supplied, "a-very-long-secret-value");
+		await userEvent.type(screen.getByLabelText("Reason (optional)"), "leak");
+		const grace = screen.getByLabelText("Grace period (hours)");
+		await userEvent.clear(grace);
+		await userEvent.type(grace, "2");
+		const props = {
+			onOpenChange: () => {},
+			resource: "source" as const,
+			id: "src_1",
+			onRotated: () => {},
+		};
+		const client = createQueryClient();
+		rerender(
+			<QueryClientProvider client={client}>
+				<RotateSecretDialog open={false} {...props} />
+			</QueryClientProvider>,
+		);
+		rerender(
+			<QueryClientProvider client={client}>
+				<RotateSecretDialog open {...props} />
+			</QueryClientProvider>,
+		);
+		expect(await screen.findByLabelText(/New secret/)).toHaveValue("");
+		expect(screen.getByLabelText("Reason (optional)")).toHaveValue("");
+		expect(screen.getByLabelText("Grace period (hours)")).toHaveValue(24);
+	});
+
+	it("clears the supplied secret after a successful rotation", async () => {
+		server.use(
+			http.post(apiUrl("/sources/src_1/rotate-secret"), () =>
+				HttpResponse.json({ id: "src_1" }),
+			),
+		);
+		function Harness() {
+			const [open, setOpen] = useState(true);
+			return (
+				<>
+					<button type="button" onClick={() => setOpen(true)}>
+						reopen
+					</button>
+					<RotateSecretDialog
+						open={open}
+						onOpenChange={setOpen}
+						resource="source"
+						id="src_1"
+						onRotated={() => {}}
+					/>
+				</>
+			);
+		}
+		wrap(<Harness />);
+		await userEvent.type(
+			screen.getByLabelText(/New secret/),
+			"a-very-long-secret-value",
+		);
+		await userEvent.click(screen.getByRole("button", { name: "Rotate" }));
+		await waitFor(() =>
+			expect(screen.queryByLabelText(/New secret/)).not.toBeInTheDocument(),
+		);
+		await userEvent.click(screen.getByRole("button", { name: "reopen" }));
+		expect(await screen.findByLabelText(/New secret/)).toHaveValue("");
 	});
 });

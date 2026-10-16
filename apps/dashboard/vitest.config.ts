@@ -11,6 +11,8 @@ export default mergeConfig(
 			environment: "jsdom",
 			include: ["src/**/*.test.{ts,tsx}"],
 			setupFiles: ["./src/test/setup.ts"],
+			// userEvent flows in jsdom can exceed 5 s when every workspace tests at once.
+			testTimeout: 15_000,
 		},
 	}),
 );

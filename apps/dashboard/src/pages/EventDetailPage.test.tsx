@@ -50,7 +50,9 @@ describe("Event Detail", () => {
 		const payloadSection = screen.getByText("Payload").closest("section");
 		expect(payloadSection).not.toBeNull();
 		expect(
-			await within(payloadSection as HTMLElement).findByRole("tree"),
+			await within(payloadSection as HTMLElement).findByRole("list", {
+				name: "JSON",
+			}),
 		).toBeInTheDocument();
 		expect(loads).toBe(1);
 	});
@@ -100,5 +102,23 @@ describe("Event Detail", () => {
 		expect(
 			screen.queryByRole("button", { name: "Replay" }),
 		).not.toBeInTheDocument();
+	});
+
+	it("shows an error with Retry for a non-404 failure", async () => {
+		let fail = true;
+		server.use(
+			http.get(apiUrl("/events/evt_1"), () =>
+				fail
+					? HttpResponse.json({ error: "internal" }, { status: 500 })
+					: HttpResponse.json(webhookEvent()),
+			),
+		);
+		const { user } = renderApp("/events/evt_1");
+		expect(await screen.findByText(/could not load/i)).toBeInTheDocument();
+		fail = false;
+		await user.click(screen.getByRole("button", { name: "Retry" }));
+		expect(
+			await screen.findByRole("heading", { name: "evt_1" }),
+		).toBeInTheDocument();
 	});
 });

@@ -28,7 +28,7 @@ export function TrendChart({
 				: { hour: "2-digit", minute: "2-digit" },
 		);
 	return (
-		<div className="h-64 w-full" aria-label="Event trend">
+		<figure className="h-64 w-full" aria-label="Event trend">
 			<ResponsiveContainer>
 				<LineChart data={data}>
 					<CartesianGrid strokeDasharray="3 3" />
@@ -51,6 +51,6 @@ export function TrendChart({
 					<Line type="monotone" dataKey="failed" stroke="#dc2626" dot={false} />
 				</LineChart>
 			</ResponsiveContainer>
-		</div>
+		</figure>
 	);
 }

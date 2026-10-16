@@ -72,6 +72,8 @@ export function EventsPage({
 					<Input
 						id="f-source"
 						className="w-44"
+						// Keyed on the URL value so back/forward refreshes the uncontrolled input.
+						key={`source_id-${search.source_id ?? ""}`}
 						defaultValue={search.source_id}
 						onBlur={(e) =>
 							setSearch({ source_id: e.target.value || undefined })
@@ -83,6 +85,8 @@ export function EventsPage({
 					<Input
 						id="f-dest"
 						className="w-44"
+						// Keyed on the URL value so back/forward refreshes the uncontrolled input.
+						key={`destination_id-${search.destination_id ?? ""}`}
 						defaultValue={search.destination_id}
 						onBlur={(e) =>
 							setSearch({ destination_id: e.target.value || undefined })
@@ -95,6 +99,8 @@ export function EventsPage({
 						id="f-http"
 						type="number"
 						className="w-24"
+						// Keyed on the URL value so back/forward refreshes the uncontrolled input.
+						key={`http_status-${search.http_status ?? ""}`}
 						defaultValue={search.http_status}
 						onBlur={(e) =>
 							setSearch({
@@ -110,6 +116,8 @@ export function EventsPage({
 					<Input
 						id="f-from"
 						type="datetime-local"
+						// Keyed on the URL value so back/forward refreshes the uncontrolled input.
+						key={`from-${search.from ?? ""}`}
 						defaultValue={search.from ? toLocalInput(search.from) : ""}
 						onBlur={(e) =>
 							setSearch({
@@ -125,6 +133,8 @@ export function EventsPage({
 					<Input
 						id="f-to"
 						type="datetime-local"
+						// Keyed on the URL value so back/forward refreshes the uncontrolled input.
+						key={`to-${search.to ?? ""}`}
 						defaultValue={search.to ? toLocalInput(search.to) : ""}
 						onBlur={(e) =>
 							setSearch({

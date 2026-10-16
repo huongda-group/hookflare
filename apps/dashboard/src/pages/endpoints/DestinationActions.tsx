@@ -36,6 +36,7 @@ export function DestinationActions({
 	};
 	const refresh = () => qc.invalidateQueries({ queryKey: qk.destinations.all });
 	return (
+		// biome-ignore lint/a11y/noStaticElementInteractions: only stops clicks and keys from bubbling to the clickable table row; the menu trigger inside is the interactive element.
 		<div
 			onClick={(e) => e.stopPropagation()}
 			onKeyDown={(e) => e.stopPropagation()}

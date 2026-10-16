@@ -11,7 +11,7 @@ describe("JsonViewer", () => {
 				contentType="application/json"
 			/>,
 		);
-		expect(screen.getByRole("tree")).toBeInTheDocument();
+		expect(screen.getByRole("list", { name: "JSON" })).toBeInTheDocument();
 		expect(screen.getByText('"o_1"')).toBeInTheDocument();
 		await userEvent.click(screen.getByRole("button", { name: /order/ }));
 		expect(screen.queryByText('"o_1"')).not.toBeInTheDocument();
@@ -37,7 +37,9 @@ describe("JsonViewer", () => {
 				contentType="application/x-www-form-urlencoded"
 			/>,
 		);
-		expect(screen.queryByRole("tree")).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("list", { name: "JSON" }),
+		).not.toBeInTheDocument();
 		expect(screen.getByText("a=1&b=2")).toBeInTheDocument();
 		expect(
 			screen.getByRole("button", { name: "Download" }),

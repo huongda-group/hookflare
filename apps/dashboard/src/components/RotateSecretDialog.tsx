@@ -24,13 +24,23 @@ type Props = {
 	onRotated: (secret: string | null) => void;
 };
 
-export function RotateSecretDialog({
-	open,
+export function RotateSecretDialog({ open, onOpenChange, ...rest }: Props) {
+	return (
+		<Dialog open={open} onOpenChange={onOpenChange}>
+			{/* DialogContent unmounts when closed, so the form state below resets on every close path. */}
+			<DialogContent>
+				<RotateSecretForm onOpenChange={onOpenChange} {...rest} />
+			</DialogContent>
+		</Dialog>
+	);
+}
+
+function RotateSecretForm({
 	onOpenChange,
 	resource,
 	id,
 	onRotated,
-}: Props) {
+}: Omit<Props, "open">) {
 	const qc = useQueryClient();
 	const [grace, setGrace] = useState("24");
 	const [supplied, setSupplied] = useState("");
@@ -58,69 +68,66 @@ export function RotateSecretDialog({
 		},
 	});
 	return (
-		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent>
-				<DialogHeader>
-					<DialogTitle>Rotate secret</DialogTitle>
-					<DialogDescription>
-						The previous secret keeps working for the grace period.
-					</DialogDescription>
-				</DialogHeader>
-				<Label htmlFor="grace">Grace period (hours)</Label>
-				<Input
-					id="grace"
-					type="number"
-					min={0}
-					max={168}
-					value={grace}
-					onChange={(e) => setGrace(e.target.value)}
-				/>
-				{grace === "0" && (
-					<p className="text-sm font-medium text-red-700">
-						Grace 0 revokes the current secret immediately.
-					</p>
-				)}
-				{!validGrace && (
-					<p className="text-sm text-red-700">
-						Enter a whole number from 0 to 168.
-					</p>
-				)}
-				{resource === "source" && (
-					<>
-						<Label htmlFor="supplied">
-							New secret (optional, 16–512 characters; leave empty to generate)
-						</Label>
-						<Input
-							id="supplied"
-							value={supplied}
-							onChange={(e) => setSupplied(e.target.value)}
-							autoComplete="off"
-						/>
-					</>
-				)}
-				<Label htmlFor="rotate-reason">Reason (optional)</Label>
-				<Textarea
-					id="rotate-reason"
-					maxLength={500}
-					value={reason}
-					onChange={(e) => setReason(e.target.value)}
-				/>
-				{m.error && (
-					<p className="text-sm text-red-700">{errorText(m.error)}</p>
-				)}
-				<DialogFooter>
-					<Button variant="outline" onClick={() => onOpenChange(false)}>
-						Cancel
-					</Button>
-					<Button
-						variant="destructive"
-						disabled={!validGrace || m.isPending}
-						onClick={() => m.mutate()}
-					>
-						Rotate
-					</Button>
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
+		<>
+			<DialogHeader>
+				<DialogTitle>Rotate secret</DialogTitle>
+				<DialogDescription>
+					The previous secret keeps working for the grace period.
+				</DialogDescription>
+			</DialogHeader>
+			<Label htmlFor="grace">Grace period (hours)</Label>
+			<Input
+				id="grace"
+				type="number"
+				min={0}
+				max={168}
+				value={grace}
+				onChange={(e) => setGrace(e.target.value)}
+			/>
+			{grace === "0" && (
+				<p className="text-sm font-medium text-red-700">
+					Grace 0 revokes the current secret immediately.
+				</p>
+			)}
+			{!validGrace && (
+				<p className="text-sm text-red-700">
+					Enter a whole number from 0 to 168.
+				</p>
+			)}
+			{resource === "source" && (
+				<>
+					<Label htmlFor="supplied">
+						New secret (optional, 16–512 characters; leave empty to generate)
+					</Label>
+					<Input
+						id="supplied"
+						type="password"
+						value={supplied}
+						onChange={(e) => setSupplied(e.target.value)}
+						autoComplete="off"
+					/>
+				</>
+			)}
+			<Label htmlFor="rotate-reason">Reason (optional)</Label>
+			<Textarea
+				id="rotate-reason"
+				maxLength={500}
+				value={reason}
+				onChange={(e) => setReason(e.target.value)}
+			/>
+			{m.error && <p className="text-sm text-red-700">{errorText(m.error)}</p>}
+			<DialogFooter>
+				<Button variant="outline" onClick={() => onOpenChange(false)}>
+					Cancel
+				</Button>
+				<Button
+					variant="destructive"
+					disabled={!validGrace || m.isPending}
+					onClick={() => m.mutate()}
+				>
+					Rotate
+				</Button>
+			</DialogFooter>
+		</>
 	);
 }

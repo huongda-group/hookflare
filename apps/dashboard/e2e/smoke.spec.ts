@@ -58,10 +58,14 @@ test("exit criteria: configure everything from the UI, then see the DLQ", async 
 		"aria-selected",
 		"true",
 	);
-	await expect(page.getByText(deliveryId)).toBeVisible();
+	await expect(
+		page.getByRole("row", { name: new RegExp(deliveryId) }),
+	).toBeVisible();
 	await page.getByRole("link", { name: eventId }).click();
 	await expect(page).toHaveURL(new RegExp(`/events/${eventId}$`));
-	await expect(page.getByText(/^dead$/i)).toBeVisible();
+	// Scoped to this delivery's timeline: "dead" also appears in badges elsewhere.
+	const timeline = page.locator("section").filter({ hasText: deliveryId });
+	await expect(timeline.locator('li[data-step="dead"]')).toBeVisible();
 
 	// run_worker_first: an unknown API path is the Worker's JSON 404, not index.html.
 	const nope = await page.request.get("/api/admin/v1/nope");

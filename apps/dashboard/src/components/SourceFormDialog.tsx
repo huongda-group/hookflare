@@ -126,6 +126,12 @@ export function SourceFormDialog({
 
 	const setAuthType = (t: Values["auth_type"]) => {
 		form.setValue("auth_type", t);
+		// Hidden fields keep their values (shouldUnregister is off), and the strict
+		// create schema rejects a `secret` key (even an undefined one) for
+		// auth_type "none" with an error no visible field shows. Remove the key,
+		// and every auth-specific error, on each switch.
+		form.unregister("secret");
+		form.clearErrors(["secret", "auth_config"]);
 		form.setValue(
 			"auth_config",
 			t === "hmac"

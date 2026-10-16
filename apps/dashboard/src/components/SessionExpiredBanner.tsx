@@ -15,8 +15,8 @@ export function SessionExpiredBanner() {
 			className="fixed inset-x-0 top-0 z-50 flex items-center justify-center gap-4 bg-amber-100 p-3 text-amber-900 shadow"
 		>
 			<span>
-				Session expired — sign in again to continue. Copy any unsaved input
-				first.
+				Session expired or network unavailable — reload to sign in again. Copy
+				any unsaved input first.
 			</span>
 			<Button size="sm" onClick={() => window.location.reload()}>
 				Reload

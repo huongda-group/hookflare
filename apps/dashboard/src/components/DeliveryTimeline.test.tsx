@@ -75,4 +75,19 @@ describe("DeliveryTimeline", () => {
 		});
 		expect(steps()).toEqual(["received", "pending"]);
 	});
+
+	it("shows an in-flight delivery as a pending step", () => {
+		renderTimeline({
+			receivedAt: T,
+			delivery: delivery({
+				status: "in_flight",
+				attempts: [],
+				completed_at: null,
+			}),
+		});
+		expect(steps()).toEqual(["received", "in_flight"]);
+		expect(
+			screen.getByText(/In flight — attempt in progress/),
+		).toBeInTheDocument();
+	});
 });

@@ -64,15 +64,18 @@ export function ReplayDialog({
 	const qc = useQueryClient();
 	const [reason, setReason] = useState("");
 	const [invalid, setInvalid] = useState(false);
-	const count = target.kind === "event" ? 1 : target.deliveryIds.length;
+	const selected = target.kind === "event" ? 1 : target.deliveryIds.length;
+	// The count travels as the mutation variable: callers may clear the
+	// selection in onDone, and the result view must still name what was sent.
 	const m = useMutation({
-		mutationFn: () => replay(target, reason.trim()),
+		mutationFn: (_count: number) => replay(target, reason.trim()),
 		onSuccess: () => {
 			void qc.invalidateQueries({ queryKey: qk.events.all });
 			void qc.invalidateQueries({ queryKey: qk.failures.all });
 			onDone?.();
 		},
 	});
+	const count = m.variables ?? selected;
 	const close = (o: boolean) => {
 		if (!o) {
 			m.reset();
@@ -152,7 +155,7 @@ export function ReplayDialog({
 								onClick={() => {
 									if (!reason.trim()) return setInvalid(true);
 									setInvalid(false);
-									m.mutate();
+									m.mutate(selected);
 								}}
 							>
 								Replay {count}

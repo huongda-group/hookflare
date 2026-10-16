@@ -83,4 +83,31 @@ describe("Projects", () => {
 			expect(screen.getByText("Billing")).toBeInTheDocument(),
 		);
 	});
+
+	it("shows the current name when Edit is reopened after a rename", async () => {
+		let current = project();
+		server.use(
+			http.get(apiUrl("/projects/prj_1"), () => HttpResponse.json(current)),
+			http.patch(apiUrl("/projects/prj_1"), async ({ request }) => {
+				current = project((await request.json()) as object);
+				return HttpResponse.json(current);
+			}),
+			http.get(apiUrl("/overview"), () => HttpResponse.error()),
+		);
+		const { user } = renderApp("/projects/prj_1");
+		await user.click(await screen.findByRole("button", { name: "Edit" }));
+		const name = screen.getByLabelText("Name");
+		expect(name).toHaveValue("Payments");
+		await user.clear(name);
+		await user.type(name, "Billing");
+		await user.click(screen.getByRole("button", { name: "Save" }));
+		expect(
+			await screen.findByRole("heading", { name: "Billing" }),
+		).toBeInTheDocument();
+		await waitFor(() =>
+			expect(screen.queryByLabelText("Name")).not.toBeInTheDocument(),
+		);
+		await user.click(screen.getByRole("button", { name: "Edit" }));
+		expect(screen.getByLabelText("Name")).toHaveValue("Billing");
+	});
 });

@@ -47,6 +47,11 @@ export function DeliveryTimeline({
 						Retrying — next attempt <TimeText ms={delivery.next_attempt_at} />
 					</li>
 				)}
+				{delivery.status === "in_flight" && (
+					<li data-step="in_flight" className="text-neutral-500">
+						In flight — attempt in progress
+					</li>
+				)}
 				{(delivery.status === "paused" ||
 					delivery.status === "queued" ||
 					delivery.status === "pending") && (

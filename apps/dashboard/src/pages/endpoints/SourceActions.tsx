@@ -27,6 +27,7 @@ export function SourceActions({ source: s }: { source: Source }) {
 	};
 	const next = s.status === "active" ? "disabled" : "active";
 	return (
+		// biome-ignore lint/a11y/noStaticElementInteractions: only stops clicks and keys from bubbling to the clickable table row; the menu trigger inside is the interactive element.
 		<div
 			onClick={(e) => e.stopPropagation()}
 			onKeyDown={(e) => e.stopPropagation()}

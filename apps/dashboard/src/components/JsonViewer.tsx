@@ -26,7 +26,10 @@ function parse(
 	return { ok: false, text: props.text };
 }
 
-/** Text nodes only: values are never interpreted as markup (spec §11). */
+/**
+ * Nested lists with disclosure buttons (each button carries aria-expanded),
+ * rather than an ARIA tree that would need roving-focus keyboard handling.
+ * Text nodes only: values are never interpreted as markup (spec §11). */
 export function JsonViewer(props: Props) {
 	const parsed = parse(props);
 	if (!parsed.ok) {
@@ -58,7 +61,7 @@ export function JsonViewer(props: Props) {
 	const openDepth = parsed.size > BIG ? 1 : Number.POSITIVE_INFINITY;
 	return (
 		<ul
-			role="tree"
+			aria-label="JSON"
 			className="max-h-[480px] overflow-auto rounded bg-neutral-50 p-3 font-mono text-xs"
 		>
 			<Node name={null} value={parsed.value} depth={0} openDepth={openDepth} />
@@ -82,7 +85,7 @@ function Node({
 		name === null ? null : <span className="text-purple-700">{name}: </span>;
 	if (value === null || typeof value !== "object") {
 		return (
-			<li role="treeitem" aria-selected={false} className="pl-4">
+			<li className="pl-4">
 				{label}
 				<span
 					className={
@@ -99,12 +102,7 @@ function Node({
 		: Object.entries(value);
 	const [l, r] = Array.isArray(value) ? ["[", "]"] : ["{", "}"];
 	return (
-		<li
-			role="treeitem"
-			aria-selected={false}
-			aria-expanded={open}
-			className="pl-4"
-		>
+		<li className="pl-4">
 			<button
 				type="button"
 				aria-expanded={open}
@@ -117,7 +115,7 @@ function Node({
 			</button>
 			{open && (
 				<>
-					<ul role="group">
+					<ul>
 						{entries.map(([k, v]) => (
 							<Node
 								key={k}

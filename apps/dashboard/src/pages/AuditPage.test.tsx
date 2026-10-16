@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { T } from "@/test/fixtures";
@@ -29,7 +29,7 @@ describe("Audit", () => {
 		expect(await screen.findByText("destination.updated")).toBeInTheDocument();
 		expect(seen.get("action")).toBe("destination.updated");
 		await user.click(screen.getByRole("button", { name: "Show diff" }));
-		expect(screen.getByRole("tree")).toBeInTheDocument();
+		expect(screen.getByRole("list", { name: "JSON" })).toBeInTheDocument();
 	});
 
 	it("tells non-admins they cannot view the audit log", async () => {
@@ -37,5 +37,18 @@ describe("Audit", () => {
 		expect(
 			await screen.findByText(/requires the admin role/i),
 		).toBeInTheDocument();
+	});
+
+	it("refreshes filter inputs on back/forward", async () => {
+		const { router } = renderApp("/audit?action=one");
+		expect(await screen.findByLabelText("Action")).toHaveValue("one");
+		await router.navigate({ to: "/audit", search: { action: "two" } });
+		await waitFor(() =>
+			expect(screen.getByLabelText("Action")).toHaveValue("two"),
+		);
+		router.history.back();
+		await waitFor(() =>
+			expect(screen.getByLabelText("Action")).toHaveValue("one"),
+		);
 	});
 });

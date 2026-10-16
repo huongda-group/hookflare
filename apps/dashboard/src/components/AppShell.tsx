@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ApiError } from "@/lib/api";
 import { useCan } from "@/lib/permissions";
 import { useMeQuery } from "@/lib/queries/me";
+import { LoadError } from "./LoadError";
 import { NoAccess } from "./NoAccess";
 import { SessionExpiredBanner } from "./SessionExpiredBanner";
 
@@ -38,6 +39,19 @@ export function AppShell() {
 	if (me.error instanceof ApiError && me.error.status === 403) {
 		const email = me.error.body?.email;
 		return <NoAccess email={typeof email === "string" ? email : undefined} />;
+	}
+	if (!me.data && me.isError) {
+		return (
+			<>
+				<SessionExpiredBanner />
+				<LoadError
+					what="your account"
+					error={me.error}
+					retrying={me.isFetching}
+					onRetry={() => void me.refetch()}
+				/>
+			</>
+		);
 	}
 	if (!me.data) {
 		return (

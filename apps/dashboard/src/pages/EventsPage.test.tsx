@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { eventSummary } from "@/test/fixtures";
@@ -59,5 +59,18 @@ describe("Events", () => {
 		expect(
 			screen.queryByRole("button", { name: "Load more" }),
 		).not.toBeInTheDocument();
+	});
+
+	it("refreshes filter inputs on back/forward", async () => {
+		const { router } = renderApp("/events?source_id=src_1");
+		expect(await screen.findByLabelText("Source ID")).toHaveValue("src_1");
+		await router.navigate({ to: "/events", search: { source_id: "src_2" } });
+		await waitFor(() =>
+			expect(screen.getByLabelText("Source ID")).toHaveValue("src_2"),
+		);
+		router.history.back();
+		await waitFor(() =>
+			expect(screen.getByLabelText("Source ID")).toHaveValue("src_1"),
+		);
 	});
 });

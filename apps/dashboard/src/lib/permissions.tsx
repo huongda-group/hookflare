@@ -19,5 +19,5 @@ export function Can({
 	permission: Permission;
 	children: ReactNode;
 }) {
-	return useCan(permission) ? <>{children}</> : null;
+	return useCan(permission) ? children : null;
 }

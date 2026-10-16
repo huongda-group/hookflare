@@ -2,6 +2,7 @@ import { useState } from "react";
 import { DeliveryTimeline } from "@/components/DeliveryTimeline";
 import { IdText } from "@/components/IdText";
 import { JsonViewer } from "@/components/JsonViewer";
+import { LoadError } from "@/components/LoadError";
 import { PayloadPanel } from "@/components/PayloadPanel";
 import { ReplayDialog } from "@/components/ReplayDialog";
 import { TimeText } from "@/components/TimeText";
@@ -16,6 +17,15 @@ export function EventDetailPage({ eventId }: { eventId: string }) {
 	const [replaying, setReplaying] = useState(false);
 	if (event.error instanceof ApiError && event.error.status === 404)
 		return <p>Event {eventId} was not found.</p>;
+	if (!event.data && event.isError)
+		return (
+			<LoadError
+				what={`event ${eventId}`}
+				error={event.error}
+				retrying={event.isFetching}
+				onRetry={() => void event.refetch()}
+			/>
+		);
 	if (!event.data) return <p className="text-neutral-500">Loading…</p>;
 	const e = event.data;
 	const deliveries = [...e.deliveries].sort(
