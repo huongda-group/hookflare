@@ -15,11 +15,13 @@ export type LimiterStub = {
 	release(slotId: string): Promise<void>;
 };
 
-export const IN_FLIGHT_WAIT_MIN_MS = 5_000;
-export const IN_FLIGHT_WAIT_MAX_MS = 30_000;
-
-const clamp = (v: number, lo: number, hi: number) =>
-	Math.min(hi, Math.max(lo, v));
+/**
+ * In-flight rejections wait at most this long: a slot is usually released when its
+ * delivery finishes, long before its lease expires.
+ */
+export const IN_FLIGHT_RETRY_MS = 5_000;
+/** Rate rejections are spread over successive token times, up to this far ahead. */
+export const RATE_RETRY_MAX_MS = 30_000;
 
 /**
  * Spec §5.2. A pure counter: the consumer passes the limits on every call,
@@ -37,7 +39,8 @@ export class DestinationLimiter
 		this.sql = ctx.storage.sql;
 		this.sql.exec(
 			`CREATE TABLE IF NOT EXISTS slots (id TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);
-			 CREATE TABLE IF NOT EXISTS bucket (k INTEGER PRIMARY KEY CHECK (k = 0), tokens REAL NOT NULL, at INTEGER NOT NULL);`,
+			 CREATE TABLE IF NOT EXISTS bucket (k INTEGER PRIMARY KEY CHECK (k = 0), tokens REAL NOT NULL, at INTEGER NOT NULL);
+			 CREATE TABLE IF NOT EXISTS rate_hint (k INTEGER PRIMARY KEY CHECK (k = 0), next_at INTEGER NOT NULL);`,
 		);
 	}
 
@@ -65,10 +68,9 @@ export class DestinationLimiter
 					return {
 						ok: false,
 						reason: "in_flight",
-						retryAfterMs: clamp(
-							(earliest ?? now) - now,
-							IN_FLIGHT_WAIT_MIN_MS,
-							IN_FLIGHT_WAIT_MAX_MS,
+						retryAfterMs: Math.min(
+							Math.max(0, (earliest ?? now) - now),
+							IN_FLIGHT_RETRY_MS,
 						),
 					};
 				}
@@ -89,7 +91,7 @@ export class DestinationLimiter
 					return {
 						ok: false,
 						reason: "rate",
-						retryAfterMs: Math.ceil(((1 - tokens) / cap) * 1000),
+						retryAfterMs: this.rateHint(tokens, cap, now),
 					};
 				}
 				this.saveBucket(tokens - 1, now);
@@ -108,6 +110,28 @@ export class DestinationLimiter
 
 	releaseSlot(slotId: string): void {
 		this.sql.exec("DELETE FROM slots WHERE id = ?", slotId);
+	}
+
+	/**
+	 * Each rejected caller is told a later token time than the one before, so a
+	 * backlog returns spread over time instead of all at the next token. A hint
+	 * reserves nothing: whoever comes first when a token is back takes it.
+	 */
+	private rateHint(tokens: number, ratePerS: number, now: number): number {
+		const intervalMs = 1000 / ratePerS;
+		const nextToken = now + Math.ceil((1 - tokens) * intervalMs);
+		const row = this.sql
+			.exec<{ next_at: number }>("SELECT next_at FROM rate_hint WHERE k = 0")
+			.toArray()[0];
+		const at = Math.min(
+			Math.max(row?.next_at ?? 0, nextToken),
+			now + RATE_RETRY_MAX_MS,
+		);
+		this.sql.exec(
+			"INSERT INTO rate_hint (k, next_at) VALUES (0, ?) ON CONFLICT (k) DO UPDATE SET next_at = excluded.next_at",
+			Math.ceil(at + intervalMs),
+		);
+		return at - now;
 	}
 
 	private saveBucket(tokens: number, at: number): void {

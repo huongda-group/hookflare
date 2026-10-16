@@ -5,11 +5,15 @@ import { createLogger } from "../../src/core/log";
 import { clearSsrfCache } from "../../src/core/ssrf";
 import {
 	LEASE_GRACE_MS,
+	LIMITER_TIMEOUT_MS,
 	limitedDelaySeconds,
 	processDelivery,
 } from "../../src/delivery/consumer";
+import type { AcquireResult } from "../../src/delivery/limiter";
 import type { Deps } from "../../src/deps";
-import { recordingQueue, testDeps } from "../helpers/deps";
+import { reconcile } from "../../src/jobs/reconcile";
+import { type RecordingQueue, recordingQueue, testDeps } from "../helpers/deps";
+import { faultyDeps } from "../helpers/faults";
 import { fakeLimiter } from "../helpers/limiter";
 import { seedDelivery, seedPipeline } from "../helpers/seed";
 
@@ -190,5 +194,169 @@ describe("processDelivery with a limiter (spec §5.3)", () => {
 			action: "ack",
 		});
 		expect((await row(deps, deliveryId)).d.status).toBe("delivered");
+	});
+
+	it("touches only enqueued_at on rejection, so reconcile never duplicates a limited delivery", async () => {
+		const T0 = 1_800_000_000_000;
+		let t = T0;
+		const fake = fakeLimiter([
+			{ ok: false, reason: "in_flight", retryAfterMs: 5_000 },
+		]);
+		const deps = testDeps({
+			limiter: fake.limiter,
+			queue: recordingQueue(),
+			now: () => t,
+		});
+		const queue = deps.queue as RecordingQueue;
+		const p = await seedPipeline(deps, { destination: { maxInFlight: 1 } });
+		const queued = await seedDelivery(deps, p, { status: "queued" });
+		const retrying = await seedDelivery(deps, p, {
+			delivery: { status: "retrying", nextAttemptAt: T0, attemptCount: 2 },
+		});
+		const ids = [queued.deliveryId, retrying.deliveryId];
+		// 40 simulated minutes: the consumer keeps re-sending, reconcile runs every minute.
+		for (let m = 0; m <= 40; m++) {
+			t = T0 + m * 60_000;
+			for (const id of ids) {
+				expect(await processDelivery(deps, id, logger)).toEqual({
+					action: "ack",
+				});
+			}
+			queue.sent.length = 0;
+			await reconcile(deps);
+			expect(queue.sent.filter((s) => ids.includes(s.deliveryId))).toEqual([]);
+		}
+		for (const [id, status, count] of [
+			[queued.deliveryId, "queued", 0],
+			[retrying.deliveryId, "retrying", 2],
+		] as const) {
+			const { d, attempts } = await row(deps, id);
+			expect(d).toMatchObject({
+				status,
+				attemptCount: count,
+				enqueuedAt: t,
+				leaseUntil: null,
+			});
+			expect(attempts).toHaveLength(0);
+		}
+	});
+
+	it("still acks a rejection when the enqueued_at touch fails", async () => {
+		const fake = fakeLimiter([
+			{ ok: false, reason: "rate", retryAfterMs: 500 },
+		]);
+		const queue = recordingQueue();
+		const base = testDeps({ limiter: fake.limiter, queue });
+		const p = await seedPipeline(base, { destination: { rateLimitPerS: 1 } });
+		const { deliveryId } = await seedDelivery(base, p, {
+			delivery: { status: "queued", enqueuedAt: 1_000 },
+		});
+		const deps = faultyDeps(base, { d1: [{ match: /^update "deliveries"/i }] });
+		expect(await processDelivery(deps, deliveryId, logger)).toEqual({
+			action: "ack",
+		});
+		expect(queue.sent).toEqual([{ deliveryId }]);
+		expect((await row(base, deliveryId)).d.enqueuedAt).toBe(1_000);
+	});
+
+	it("rejects before loading the payload, resolving DNS, or sending (step 7a order)", async () => {
+		const fake = fakeLimiter([
+			{ ok: false, reason: "in_flight", retryAfterMs: 5_000 },
+		]);
+		const base = testDeps({ limiter: fake.limiter });
+		const p = await seedPipeline(base, { destination: { maxInFlight: 1 } });
+		const { deliveryId } = await seedDelivery(base, p, {
+			body: new Uint8Array(70 * 1024),
+		});
+		const deps = faultyDeps(base, { r2: [] });
+		expect(await processDelivery(deps, deliveryId, logger)).toEqual({
+			action: "ack",
+		});
+		expect(deps.r2Log).toEqual([]);
+		expect(deps.resolveDns).not.toHaveBeenCalled();
+		expect(deps.fetch).not.toHaveBeenCalled();
+	});
+
+	it("releases the slot when the SSRF check blocks the destination", async () => {
+		const fake = fakeLimiter();
+		const deps = testDeps({
+			limiter: fake.limiter,
+			resolveDns: vi.fn(async () => ["10.0.0.5"]),
+		});
+		const { deliveryId } = await seedLimited(deps, { maxInFlight: 1 });
+		expect(await processDelivery(deps, deliveryId, logger)).toEqual({
+			action: "ack",
+		});
+		expect((await row(deps, deliveryId)).d.status).toBe("failed_final");
+		expect(fake.releases).toEqual(["slot-1"]);
+	});
+
+	it("releases the slot when loading the R2 payload fails", async () => {
+		const fake = fakeLimiter();
+		const base = testDeps({ limiter: fake.limiter });
+		const p = await seedPipeline(base, { destination: { maxInFlight: 1 } });
+		const { deliveryId } = await seedDelivery(base, p, {
+			body: new Uint8Array(70 * 1024),
+		});
+		const deps = faultyDeps(base, { r2: [{ match: /^get / }] });
+		expect((await processDelivery(deps, deliveryId, logger)).action).toBe(
+			"retry",
+		);
+		expect(fake.releases).toEqual(["slot-1"]);
+	});
+
+	it("gives up on a release that does not answer within 2 s", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		try {
+			const deps = testDeps();
+			const { deliveryId } = await seedLimited(deps, { maxInFlight: 1 });
+			deps.limiter = () => ({
+				async acquire() {
+					return { ok: true, slotId: "slot-h" };
+				},
+				release: () => new Promise<void>(() => {}),
+			});
+			let settled = false;
+			const pending = processDelivery(deps, deliveryId, logger).then((r) => {
+				settled = true;
+				return r;
+			});
+			await vi.advanceTimersByTimeAsync(LIMITER_TIMEOUT_MS + 1);
+			expect(settled).toBe(true);
+			expect(await pending).toEqual({ action: "ack" });
+			expect((await row(deps, deliveryId)).d.status).toBe("delivered");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("releases a slot granted after the acquire timed out", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		try {
+			const releases: string[] = [];
+			const deps = testDeps();
+			const { deliveryId } = await seedLimited(deps, { maxInFlight: 1 });
+			deps.limiter = () => ({
+				acquire: () =>
+					new Promise<AcquireResult>((resolve) =>
+						setTimeout(
+							() => resolve({ ok: true, slotId: "slot-late" }),
+							LIMITER_TIMEOUT_MS + 500,
+						),
+					),
+				async release(id) {
+					releases.push(id);
+				},
+			});
+			const pending = processDelivery(deps, deliveryId, logger);
+			await vi.advanceTimersByTimeAsync(LIMITER_TIMEOUT_MS + 1);
+			expect((await pending).action).toBe("retry");
+			expect(releases).toEqual([]);
+			await vi.advanceTimersByTimeAsync(1_000);
+			expect(releases).toEqual(["slot-late"]);
+			expect((await row(deps, deliveryId)).d.attemptCount).toBe(0);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });
