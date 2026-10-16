@@ -112,20 +112,8 @@ export async function planRun(
 		.orderBy(archiveBatches.createdAt);
 	const resumedDays = new Set<string>();
 	for (const b of unfinished) {
-		if (b.workflowInstanceId !== instanceId) {
-			if (await isRunning(b.workflowInstanceId)) continue;
-			const adopted = await deps.db
-				.update(archiveBatches)
-				.set({ workflowInstanceId: instanceId })
-				.where(
-					and(
-						eq(archiveBatches.id, b.id),
-						eq(archiveBatches.workflowInstanceId, b.workflowInstanceId),
-					),
-				)
-				.returning({ id: archiveBatches.id });
-			if (adopted.length === 0) continue;
-		}
+		const foreign = b.workflowInstanceId !== instanceId;
+		if (foreign && (await isRunning(b.workflowInstanceId))) continue;
 		const built = await builtParts(deps, b.id);
 		let maxParts = built;
 		if (b.status === "building") {
@@ -139,7 +127,21 @@ export async function planRun(
 			resumedDays.add(`${b.kind}:${b.day}`);
 		}
 		const cost = estimateSteps(b.kind, maxParts);
+		// Budget first: a batch adopted but not run would look freshly owned.
 		if (cost > budget) continue;
+		if (foreign) {
+			const adopted = await deps.db
+				.update(archiveBatches)
+				.set({ workflowInstanceId: instanceId })
+				.where(
+					and(
+						eq(archiveBatches.id, b.id),
+						eq(archiveBatches.workflowInstanceId, b.workflowInstanceId),
+					),
+				)
+				.returning({ id: archiveBatches.id });
+			if (adopted.length === 0) continue;
+		}
 		budget -= cost;
 		batches.push({
 			id: b.id,
@@ -183,8 +185,9 @@ export async function planRun(
 		// A retried plan step already created (or resumed) this day's batch.
 		if (resumedDays.has(`events:${day}`)) continue;
 		if (!(await create("events", day, partsFor(d.count, d.bytes)))) {
+			// Audit days still get what is left of the budget.
 			logger.info("archive.budget_reached", { next_day: day });
-			return { ok: true, now, cut, storage, batches };
+			break;
 		}
 	}
 

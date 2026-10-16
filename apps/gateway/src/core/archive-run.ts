@@ -42,8 +42,9 @@ export async function startArchiveRun(
 
 /**
  * Unknown instances (expired from Workflows retention) count as not running.
- * Any other error counts as running: adopting a live instance's batches would
- * let two instances work on the same batch.
+ * Any other error, and the Workflows status `unknown`, count as running:
+ * adopting a live instance's batches would let two instances work on the
+ * same batch.
  */
 export async function isArchiveRunning(
 	deps: Deps,
@@ -51,7 +52,10 @@ export async function isArchiveRunning(
 ): Promise<boolean> {
 	try {
 		const { status } = await (await deps.archive.get(instanceId)).status();
-		return (ARCHIVE_RUNNING as readonly string[]).includes(status);
+		return (
+			status === "unknown" ||
+			(ARCHIVE_RUNNING as readonly string[]).includes(status)
+		);
 	} catch (err) {
 		return !/not.?found/i.test(String(err));
 	}

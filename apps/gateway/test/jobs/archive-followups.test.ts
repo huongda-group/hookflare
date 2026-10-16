@@ -12,7 +12,7 @@ import {
 } from "../../src/core/db/schema";
 import { createLogger } from "../../src/core/log";
 import { buildEventPart } from "../../src/jobs/archive/part";
-import { planRun } from "../../src/jobs/archive/plan";
+import { estimateSteps, planRun } from "../../src/jobs/archive/plan";
 import { expireArchives } from "../../src/jobs/archive/retention";
 import { verifyBatch } from "../../src/jobs/archive/verify";
 import { isolateArchive, listKeys, seedBatch } from "../helpers/archive";
@@ -134,6 +134,48 @@ describe("planRun follow-ups", () => {
 	});
 });
 
+describe("planRun budget (re-review)", () => {
+	it("still plans audit days when the events backlog exceeds the budget", async () => {
+		const p = await seedPipeline(deps);
+		for (const age of [40, 41])
+			await seedDelivery(deps, p, {
+				status: "delivered",
+				event: { receivedAt: NOW - age * DAY_MS },
+			});
+		await insertAudit("aud_starved", Date.UTC(2025, 5, 3));
+		try {
+			// Room for one events batch and one audit batch, not two events batches.
+			const stepBudget =
+				10 + estimateSteps("events", 1) + estimateSteps("audit", 1);
+			const plan = await planRun(deps, "inst-starve", never, logger, {
+				stepBudget,
+				maxPartsPerBatch: 200,
+			});
+			if (!plan.ok) throw new Error("expected a plan");
+			expect(plan.batches.filter((b) => b.kind === "events")).toHaveLength(1);
+			expect(
+				plan.batches.filter((b) => b.kind === "audit").map((b) => b.id),
+			).toHaveLength(1);
+		} finally {
+			await deps.db.delete(auditLogs).where(eq(auditLogs.id, "aud_starved"));
+		}
+	});
+
+	it("does not adopt an abandoned batch it skips for budget", async () => {
+		const abandoned = await seedBatch(deps, {
+			workflowInstanceId: "dead-inst",
+			createdAt: NOW - 3 * DAY_MS,
+		});
+		const plan = await planRun(deps, "inst-small", never, logger, {
+			stepBudget: 10 + estimateSteps("events", 1) - 1,
+			maxPartsPerBatch: 200,
+		});
+		if (!plan.ok) throw new Error("expected a plan");
+		expect(plan.batches.map((b) => b.id)).not.toContain(abandoned.id);
+		expect((await batchRow(abandoned.id)).workflowInstanceId).toBe("dead-inst");
+	});
+});
+
 describe("failed verify releases the batch (I6)", () => {
 	it("clears the marks, re-archives the day, and retention removes the failed files", async () => {
 		const p = await seedPipeline(deps);
@@ -185,5 +227,10 @@ describe("isArchiveRunning (Minor 8)", () => {
 			} as unknown as Workflow,
 		});
 		expect(await isArchiveRunning(broken, "x")).toBe(true);
+	});
+
+	it("treats an instance in status unknown as running", async () => {
+		const unknown = testDeps({ archive: fakeArchive("unknown") });
+		expect(await isArchiveRunning(unknown, "x")).toBe(true);
 	});
 });

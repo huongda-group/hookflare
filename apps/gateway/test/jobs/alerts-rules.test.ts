@@ -219,6 +219,24 @@ describe("archive_stuck", () => {
 		});
 		expect(a.details.batch_ids).toEqual([failed.id]);
 	});
+	it("is active for a batch verified more than 48 h ago that never purged", async () => {
+		const { archiveStuck } = await import("../../src/jobs/alerts/rules");
+		const { isolateArchive, seedBatch } = await import("../helpers/archive");
+		await isolateArchive(deps);
+		await seedBatch(deps, {
+			status: "verified",
+			createdAt: NOW - 100 * 3_600_000,
+			verifiedAt: NOW - 47 * 3_600_000,
+		});
+		expect(await archiveStuck(deps.db, NOW)).toEqual([]);
+		const stale = await seedBatch(deps, {
+			status: "verified",
+			createdAt: NOW - 100 * 3_600_000,
+			verifiedAt: NOW - 49 * 3_600_000,
+		});
+		const [a] = await archiveStuck(deps.db, NOW);
+		expect(a.details.batch_ids).toEqual([stale.id]);
+	});
 	it("ignores a failed batch once a later batch of the same day succeeds", async () => {
 		const { archiveStuck } = await import("../../src/jobs/alerts/rules");
 		const { isolateArchive, seedBatch } = await import("../helpers/archive");

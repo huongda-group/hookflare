@@ -1,6 +1,8 @@
+import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { clearAccessKeyCache } from "../../src/admin/auth/access";
-import { archiveParts } from "../../src/core/db/schema";
+import { archiveParts, auditLogs } from "../../src/core/db/schema";
+import { ARCHIVE_LAST_RUN_KEY, upsertSetting } from "../../src/core/settings";
 import { adminApp, auditRows } from "../helpers/admin";
 import { isolateArchive, seedBatch } from "../helpers/archive";
 import { fakeArchive, testDeps } from "../helpers/deps";
@@ -125,6 +127,34 @@ describe("archives API (spec §7.6)", () => {
 		expect((await auditRows(deps, instance_id)).map((a) => a.action)).toEqual([
 			"archive.run_started",
 		]);
+	});
+
+	it("refuses a manual run while the last run is still running", async () => {
+		const running = fakeArchive("running");
+		const busy = testDeps({ archive: running });
+		await upsertSetting(
+			busy.db,
+			ARCHIVE_LAST_RUN_KEY,
+			{ instance_id: "archive-live", started_at: 1 },
+			1,
+		);
+		const started = async () =>
+			(
+				await busy.db
+					.select()
+					.from(auditLogs)
+					.where(eq(auditLogs.action, "archive.run_started"))
+			).length;
+		const before = await started();
+		const res = await (await adminApp(busy)).request(
+			"POST",
+			"/archives/run",
+			{},
+		);
+		expect(res.status).toBe(409);
+		expect(await res.json()).toEqual({ error: "archive_running" });
+		expect(running.created).toEqual([]);
+		expect(await started()).toBe(before);
 	});
 
 	it("logs the instance id when the audit write fails after the run starts", async () => {

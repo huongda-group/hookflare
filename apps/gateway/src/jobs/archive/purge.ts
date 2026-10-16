@@ -3,6 +3,7 @@ import { type Cutoffs, DAY_MS, eligibleSql } from "../../core/db/archive";
 import {
 	archiveBatches,
 	archiveParts,
+	auditLogs,
 	deliveries,
 	deliveryAttempts,
 	webhookEvents,
@@ -11,7 +12,10 @@ import type { Deps } from "../../deps";
 import { dayStartOf } from "./keys";
 
 export const PURGE_CHUNK = 500;
-/** IN-list slice: with the mark and the cut-offs it stays under D1's 100-param cap. */
+/**
+ * IN-list slice: 90 IDs + 2 mark + 2 cut-off + 1 verified guard = 95 params,
+ * under D1's 100-param cap.
+ */
 const ID_SLICE = 90;
 
 export type PurgeRow = { id: string; r2Key: string | null };
@@ -38,6 +42,13 @@ function slices<T>(items: T[]): T[][] {
 
 const markSql = (batchId: string, partNo: number): SQL =>
 	sql`e.archive_batch_id = ${batchId} AND e.archive_part = ${partNo}`;
+
+/**
+ * Repeats requireVerified inside the delete's own transaction: a batch that
+ * leaves `verified` between the check and the delete deletes nothing.
+ */
+const verifiedSql = (batchId: string): SQL =>
+	sql`EXISTS (SELECT 1 FROM archive_batches WHERE id = ${batchId} AND status = 'verified')`;
 
 /**
  * Spec §7.4 `purge`, step 1 of 3. Lists the next chunk of events of the part
@@ -67,7 +78,8 @@ export async function selectPurgeChunk(
 /**
  * Step 2 of 3, D1. Deletes only the selected IDs, and every statement repeats
  * the mark and eligibility, so an event that was unmarked (replay) or got a
- * live delivery after the part was built survives (M5-17). One db.batch is
+ * live delivery after the part was built survives (M5-17), and the batch
+ * status, so a batch that left `verified` deletes nothing. One db.batch is
  * one transaction; a retry matches no rows.
  */
 export async function deletePurgeChunk(
@@ -83,7 +95,7 @@ export async function deletePurgeChunk(
 		const target = sql`SELECT e.id FROM webhook_events e WHERE e.id IN (${sql.join(
 			slice.map((id) => sql`${id}`),
 			sql`, `,
-		)}) AND ${markSql(batchId, partNo)} AND ${eligibleSql(cut, "e")}`;
+		)}) AND ${markSql(batchId, partNo)} AND ${eligibleSql(cut, "e")} AND ${verifiedSql(batchId)}`;
 		return [
 			deps.db
 				.delete(deliveryAttempts)
@@ -148,9 +160,15 @@ export async function purgeAuditPart(
 		.get();
 	if (!part) return 0;
 	const from = dayStartOf(batch.day);
-	const r = await deps.db.run(sql`
-		DELETE FROM audit_logs WHERE at >= ${from} AND at < ${from + DAY_MS} AND id >= ${part.firstId} AND id <= ${part.lastId}`);
-	return (r as unknown as { meta: { changes: number } }).meta.changes;
+	const [deleted] = await deps.db.batch([
+		deps.db
+			.delete(auditLogs)
+			.where(
+				sql`at >= ${from} AND at < ${from + DAY_MS} AND id >= ${part.firstId} AND id <= ${part.lastId} AND ${verifiedSql(batchId)}`,
+			)
+			.returning({ id: auditLogs.id }),
+	]);
+	return deleted.length;
 }
 
 /** Every part the batch has a row for; verify covered exactly these. */

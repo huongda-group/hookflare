@@ -45,7 +45,7 @@ export async function runArchive(
 			for (let n = 1; n <= b.maxParts; n++) {
 				const r = await step(`part:${b.id}:${n}`, () =>
 					b.kind === "events"
-						? buildEventPart(deps(), b.id, n, plan.cut)
+						? buildEventPart(deps(), b.id, n, plan.cut, logger)
 						: buildAuditPart(deps(), b.id, n),
 				);
 				if (r.itemCount === 0) break;

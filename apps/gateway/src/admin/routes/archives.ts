@@ -16,7 +16,11 @@ import {
 } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppBindings } from "../../app";
-import { startArchiveRun } from "../../core/archive-run";
+import {
+	ARCHIVE_RUNNING,
+	readLastRun,
+	startArchiveRun,
+} from "../../core/archive-run";
 import { countEligible, cutoffsFor } from "../../core/db/archive";
 import { archiveBatches, archiveParts } from "../../core/db/schema";
 import { newId } from "../../core/ids";
@@ -134,6 +138,11 @@ export function archiveRoutes() {
 
 	routes.post("/run", requirePermission("settings.manage"), async (c) => {
 		const deps = c.var.deps;
+		// Plan never adopts a live instance's batches, but two concurrent runs
+		// still race for the same days; refuse until the last one ends.
+		const last = await readLastRun(deps);
+		if (last && (ARCHIVE_RUNNING as readonly string[]).includes(last.status))
+			return c.json({ error: "archive_running" }, 409);
 		const instanceId = `archive-manual-${newId("arb").slice(4).toLowerCase()}`;
 		await startArchiveRun(deps, instanceId, "manual", c.var.logger);
 		// The run is already started and cannot share a transaction with the

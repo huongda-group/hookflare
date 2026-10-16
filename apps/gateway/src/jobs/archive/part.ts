@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import {
 	type Cutoffs,
 	countMarked,
@@ -10,6 +10,7 @@ import {
 	archiveParts,
 	webhookEvents,
 } from "../../core/db/schema";
+import { createLogger, type Logger } from "../../core/log";
 import type { Deps } from "../../deps";
 import { batchPrefix, dayStartOf, partKey } from "./keys";
 import { base64, groupBy, gzipLines, sha256Hex, toBytes } from "./ndjson";
@@ -52,15 +53,26 @@ async function loadBatch(deps: Deps, batchId: string): Promise<Batch> {
 	return b;
 }
 
+/** What eventLines actually wrote, and the events it left out. */
+type LineTally = {
+	written: number;
+	first: string | null;
+	last: string | null;
+	missing: string[];
+};
+
 /**
  * Spec §7.4 `part`. Reuses an existing mark, otherwise marks the next slice;
  * the R2 key is deterministic and the put overwrites, so a retry is safe.
+ * An event whose R2 payload is gone is left out of the file and unmarked, so
+ * it stays in D1 instead of being purged without its body.
  */
 export async function buildEventPart(
 	deps: Deps,
 	batchId: string,
 	partNo: number,
 	cut: Cutoffs,
+	logger: Logger = createLogger(deps.env),
 ): Promise<PartResult> {
 	const batch = await loadBatch(deps, batchId);
 	// A verified batch must not change under its manifest.
@@ -78,18 +90,31 @@ export async function buildEventPart(
 	}
 	if (n === 0) return { itemCount: 0, bytes: 0 };
 
-	const [range] = await deps.db.all<{
-		first: string;
-		last: string;
-		n: number;
-	}>(sql`
-		SELECT MIN(id) AS first, MAX(id) AS last, COUNT(*) AS n FROM webhook_events
-		WHERE archive_batch_id = ${batchId} AND archive_part = ${partNo}`);
+	let range: { first: string; last: string; n: number };
 	let key: string | null = null;
 	let bytes = 0;
 	let sha: string | null = null;
 	if (batch.withFiles) {
-		const gz = await gzipLines(eventLines(deps, batchId, partNo));
+		const tally: LineTally = {
+			written: 0,
+			first: null,
+			last: null,
+			missing: [],
+		};
+		const gz = await gzipLines(eventLines(deps, batchId, partNo, tally));
+		// Unmark before the put: a retry then rebuilds the same file without them.
+		await unmarkPartEvents(deps, batchId, partNo, tally.missing);
+		for (const id of tally.missing)
+			logger.error("archive.payload_missing", {
+				batch_id: batchId,
+				part_no: partNo,
+				event_id: id,
+			});
+		// The run loop stops at an empty part, and verify needs no row for it.
+		const { first, last, written } = tally;
+		if (written === 0 || first === null || last === null)
+			return { itemCount: 0, bytes: 0 };
+		range = { first, last, n: written };
 		key = partKey(batchPrefix("events", batch.day, batchId), partNo);
 		sha = await sha256Hex(gz);
 		await deps.payloads.put(key, gz, {
@@ -98,6 +123,10 @@ export async function buildEventPart(
 			customMetadata: { item_count: String(range.n) },
 		});
 		bytes = gz.byteLength;
+	} else {
+		[range] = await deps.db.all<{ first: string; last: string; n: number }>(sql`
+			SELECT MIN(id) AS first, MAX(id) AS last, COUNT(*) AS n FROM webhook_events
+			WHERE archive_batch_id = ${batchId} AND archive_part = ${partNo}`);
 	}
 	const row = {
 		batchId,
@@ -119,11 +148,42 @@ export async function buildEventPart(
 	return { itemCount: range.n, bytes };
 }
 
-/** One line per marked event, built page by page so memory stays bounded. */
+/** Clears this part's mark on the given events; 90 IDs + 2 = 92 params. */
+async function unmarkPartEvents(
+	deps: Deps,
+	batchId: string,
+	partNo: number,
+	ids: string[],
+): Promise<void> {
+	if (ids.length === 0) return;
+	const stmts = [];
+	for (let i = 0; i < ids.length; i += PAGE) {
+		stmts.push(
+			deps.db
+				.update(webhookEvents)
+				.set({ archiveBatchId: null, archivePart: null })
+				.where(
+					and(
+						inArray(webhookEvents.id, ids.slice(i, i + PAGE)),
+						eq(webhookEvents.archiveBatchId, batchId),
+						eq(webhookEvents.archivePart, partNo),
+					),
+				),
+		);
+	}
+	await deps.db.batch(stmts as [(typeof stmts)[0], ...typeof stmts]);
+}
+
+/**
+ * One line per marked event, built page by page so memory stays bounded.
+ * An event whose R2 payload is gone gets no line; it is listed in
+ * `tally.missing` instead.
+ */
 async function* eventLines(
 	deps: Deps,
 	batchId: string,
 	partNo: number,
+	tally: LineTally,
 ): AsyncGenerator<string> {
 	let after = "";
 	for (;;) {
@@ -163,8 +223,15 @@ async function* eventLines(
 			let payload: Uint8Array | null = bodyOf.get(ev.id) ?? null;
 			if (ev.r2_key) {
 				const obj = await deps.payloads.get(ev.r2_key);
-				payload = obj ? new Uint8Array(await obj.arrayBuffer()) : null;
+				if (!obj) {
+					tally.missing.push(ev.id);
+					continue;
+				}
+				payload = new Uint8Array(await obj.arrayBuffer());
 			}
+			tally.written++;
+			tally.first ??= ev.id;
+			tally.last = ev.id;
 			yield JSON.stringify({
 				v: 1,
 				event: ev,

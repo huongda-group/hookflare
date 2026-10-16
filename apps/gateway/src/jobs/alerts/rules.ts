@@ -231,7 +231,8 @@ export const ARCHIVE_STUCK_AFTER_MS = 48 * 3_600_000;
 /**
  * Spec §7.4 monitoring: a failed batch needs an operator until a later batch of
  * the same kind and day succeeds (failed days are retried); one stuck in
- * building is a dead run.
+ * building is a dead run, and one verified long ago but never purged means
+ * purge keeps failing.
  */
 export async function archiveStuck(
 	db: Db,
@@ -244,6 +245,7 @@ export async function archiveStuck(
 				WHERE r.kind = b.kind AND r.day = b.day AND r.created_at > b.created_at
 					AND r.status IN ('verified', 'purged', 'expired')))
 			OR (b.status = 'building' AND b.created_at < ${now - ARCHIVE_STUCK_AFTER_MS})
+			OR (b.status = 'verified' AND b.verified_at < ${now - ARCHIVE_STUCK_AFTER_MS})
 		ORDER BY b.created_at DESC LIMIT 20`);
 	if (rows.length === 0) return [];
 	return [

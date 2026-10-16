@@ -1,17 +1,20 @@
 import { eq, sql } from "drizzle-orm";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { cutoffsFor, DAY_MS } from "../../src/core/db/archive";
 import {
 	archiveBatches,
 	archiveParts,
+	auditLogs,
 	deliveries,
 	webhookEvents,
 } from "../../src/core/db/schema";
-import { buildEventPart } from "../../src/jobs/archive/part";
+import { gunzipToLines } from "../../src/jobs/archive/ndjson";
+import { buildAuditPart, buildEventPart } from "../../src/jobs/archive/part";
 import {
 	deleteGonePayloads,
 	deletePurgeChunk,
 	finishBatch,
+	purgeAuditPart,
 	selectPurgeChunk,
 } from "../../src/jobs/archive/purge";
 import { verifyBatch } from "../../src/jobs/archive/verify";
@@ -233,5 +236,125 @@ describe("purge", () => {
 		// The skipped event's payload object survives; the other one is gone.
 		expect(await deps.payloads.head(victimKey)).not.toBeNull();
 		expect(await deps.payloads.head(other.r2Key)).toBeNull();
+	});
+});
+
+describe("purge re-checks the batch inside the delete transaction (re-review)", () => {
+	const unverify = (batchId: string) => () =>
+		deps.db
+			.update(archiveBatches)
+			.set({ status: "failed" })
+			.where(eq(archiveBatches.id, batchId));
+
+	it("deletes no event when the batch leaves verified after requireVerified", async () => {
+		const { batch, events } = await built();
+		await verifyBatch(deps, batch.id);
+		const sel = await selectPurgeChunk(deps, batch.id, 1, cut, "");
+		beforeNextBatch(deps, unverify(batch.id));
+		const deleted = await deletePurgeChunk(
+			deps,
+			batch.id,
+			1,
+			cut,
+			sel.rows.map((r) => r.id),
+		);
+		expect(deleted).toBe(0);
+		for (const e of events) expect(await eventExists(e.eventId)).toBe(true);
+		expect(
+			await deps.db
+				.select()
+				.from(deliveries)
+				.where(eq(deliveries.id, events[0].deliveryId)),
+		).toHaveLength(1);
+	});
+
+	it("deletes no audit row when the batch leaves verified after requireVerified", async () => {
+		await deps.db.insert(auditLogs).values({
+			id: "aud_purge_race",
+			actorEmail: "purge@test",
+			action: "settings.updated",
+			resourceType: "settings",
+			resourceId: "x",
+			at: DAY_START + 1,
+		});
+		try {
+			const batch = await seedBatch(deps, { kind: "audit", day: "2026-01-02" });
+			await buildAuditPart(deps, batch.id, 1);
+			expect(await verifyBatch(deps, batch.id)).toEqual({ ok: true });
+			beforeNextBatch(deps, unverify(batch.id));
+			expect(await purgeAuditPart(deps, batch.id, 1)).toBe(0);
+			expect(
+				await deps.db
+					.select()
+					.from(auditLogs)
+					.where(eq(auditLogs.id, "aud_purge_race")),
+			).toHaveLength(1);
+		} finally {
+			await deps.db.delete(auditLogs).where(eq(auditLogs.id, "aud_purge_race"));
+		}
+	});
+});
+
+describe("missing R2 payload (re-review)", () => {
+	it("leaves the event out of the part, unmarks it, and purge keeps it", async () => {
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const p = await seedPipeline(deps);
+			const lost = await seedDelivery(deps, p, {
+				status: "delivered",
+				body: big(),
+				event: { receivedAt: DAY_START + 1 },
+			});
+			const kept = await seedDelivery(deps, p, {
+				status: "delivered",
+				body: big(),
+				event: { receivedAt: DAY_START + 2 },
+			});
+			const [ev] = await deps.db
+				.select()
+				.from(webhookEvents)
+				.where(eq(webhookEvents.id, lost.eventId));
+			if (!ev.r2Key) throw new Error("test setup: event has no r2 key");
+			await deps.payloads.delete(ev.r2Key);
+
+			const batch = await seedBatch(deps, { day: "2026-01-02" });
+			expect(await buildEventPart(deps, batch.id, 1, cut)).toMatchObject({
+				itemCount: 1,
+			});
+			const [after] = await deps.db
+				.select()
+				.from(webhookEvents)
+				.where(eq(webhookEvents.id, lost.eventId));
+			expect(after).toMatchObject({ archiveBatchId: null, archivePart: null });
+			const [part] = await deps.db
+				.select()
+				.from(archiveParts)
+				.where(eq(archiveParts.batchId, batch.id));
+			expect(part).toMatchObject({
+				itemCount: 1,
+				firstId: kept.eventId,
+				lastId: kept.eventId,
+			});
+			const obj = await deps.payloads.get(part.r2Key as string);
+			const lines = await gunzipToLines(
+				new Uint8Array(await (obj as R2ObjectBody).arrayBuffer()),
+			);
+			expect(lines.map((l) => JSON.parse(l).event.id)).toEqual([kept.eventId]);
+			expect(
+				errorSpy.mock.calls.some(
+					(c) =>
+						String(c[0]).includes("archive.payload_missing") &&
+						String(c[0]).includes(lost.eventId),
+				),
+			).toBe(true);
+
+			expect(await verifyBatch(deps, batch.id)).toEqual({ ok: true });
+			expect(await status(batch.id)).toMatchObject({ itemCount: 1 });
+			expect((await purgeD1(batch.id)).deleted).toBe(1);
+			expect(await eventExists(lost.eventId)).toBe(true);
+			expect(await eventExists(kept.eventId)).toBe(false);
+		} finally {
+			errorSpy.mockRestore();
+		}
 	});
 });

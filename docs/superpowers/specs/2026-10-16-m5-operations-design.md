@@ -91,6 +91,12 @@
 | §7.4 failed batch "needs an operator" | A failed verify clears the batch's marks in the same batch as the status change; retention removes its files (`with_files = 0`); the day is archived again; `archive_stuck` ignores a failed batch once a later batch of the same kind and day succeeds | Marks pinned the events in D1 forever |
 | §7.4 one batch per day | A batch holds at most `min(200, step budget)` parts, estimated from items and bytes; the rest of the day goes to later batches | A very large day blocked every later day |
 | §7.3 audit day eligible when any row is past the cutoff | Only once the whole UTC day is past `audit_retention_days` | Rows were purged up to ~21 h early |
+| §7.6 `POST /archives/run` | `409 { error: "archive_running" }` while the last run is queued, running, waiting, or paused; nothing starts and no audit row is written | Two runs raced for the same days |
+| §7.4 `purge` re-checks | Every events and audit delete also requires `EXISTS (archive_batches … status = 'verified')` in the same transaction | A batch that left `verified` after the pre-check could still be purged |
+| §7.4 plan step budget | An events day that does not fit ends event planning only; audit days still use the remaining budget | An events backlog starved audit archival indefinitely |
+| §7.4 plan adoption | An abandoned batch is adopted only after it fits the budget; a Workflows status `unknown` counts as running | A batch skipped for budget looked freshly owned; an `unknown` instance could still be live. `archive_stuck` still measures `building` from `created_at` (no adoption-time column) |
+| §6.2 `archive_stuck` | Also active for a batch `verified` more than 48 h ago (`verified_at`) and never purged | Repeated purge failures were silent |
+| §7.4 `part` missing R2 payload | An event whose R2 payload is gone gets no line; it is unmarked (stays in D1) and logged as `archive.payload_missing`; `item_count`, first/last ID, and the manifest count only written lines. Later parts and batches re-mark it and drop it again | Its line had `payload_b64: null`, verify passed, and purge deleted the event without its body |
 
 ## 4. Layout
 
