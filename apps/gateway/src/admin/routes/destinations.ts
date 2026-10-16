@@ -1,12 +1,15 @@
 import {
 	createDestinationRequest,
 	type Destination,
+	type DestinationStats,
 	listQuery,
 	operateRequest,
 	type Page,
 	pageQuery,
 	patchDestinationRequest,
+	RANGE_HOURS,
 	rotateDestinationSecretRequest,
+	statsQuery,
 	type TestDelivery,
 	testDeliveryRequest,
 } from "@hookflare/shared";
@@ -37,6 +40,7 @@ import {
 	type TestErrorKind,
 	testDeliveries,
 } from "../../core/db/schema";
+import { destinationStats, statsWindow } from "../../core/db/stats";
 import {
 	listTestDeliveries,
 	toTestDelivery,
@@ -71,6 +75,7 @@ import {
 	readOptionalJson,
 	readQuery,
 } from "../http";
+import { successRate } from "./overview";
 
 /** Standard Webhooks secret: whsec_ + base64(32 random bytes). */
 function generateSigningSecret(): string {
@@ -240,6 +245,29 @@ export function destinationRoutes() {
 			data,
 			next_cursor: nextCursor,
 		} satisfies Page<Destination>);
+	});
+
+	routes.get("/stats", requirePermission("events.read"), async (c) => {
+		const q = readQuery(c, statsQuery);
+		if (!q.ok) return q.response;
+		const { db, now } = c.var.deps;
+		const rows = await destinationStats(db, {
+			...statsWindow(now(), RANGE_HOURS[q.value.range]),
+			projectId: q.value.project_id,
+		});
+		return c.json({
+			data: rows.map(
+				(r): DestinationStats => ({
+					destination_id: r.destinationId,
+					delivered: r.delivered,
+					failed: r.failed,
+					success_rate: successRate(r.delivered, r.failed),
+					last_delivery_at: r.lastDeliveryAt,
+					last_http_status: r.lastHttpStatus,
+					last_error: r.lastError,
+				}),
+			),
+		});
 	});
 
 	routes.get("/:id", requirePermission("events.read"), async (c) => {
