@@ -106,3 +106,10 @@ export const api = {
 	delete: (path: string) =>
 		apiRaw(path, { method: "DELETE" }).then(() => undefined),
 };
+
+export type BackupRunResult = { backup_id: string; instance_id: string };
+
+/** Starts a manual backup run (202) or throws ApiError backup_running (409). */
+export function runBackupNow(): Promise<BackupRunResult> {
+	return api.post<BackupRunResult>("/backups/run", {});
+}
