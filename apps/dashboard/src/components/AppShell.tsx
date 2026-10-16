@@ -1,6 +1,7 @@
 import type { Permission } from "@hookflare/shared";
 import { Link, Outlet } from "@tanstack/react-router";
 import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { ApiError } from "@/lib/api";
 import { useCan } from "@/lib/permissions";
 import { useMeQuery } from "@/lib/queries/me";
@@ -62,7 +63,9 @@ export function AppShell() {
 				</div>
 			</aside>
 			<main className="flex-1 p-6">
-				<Outlet />
+				<TooltipProvider>
+					<Outlet />
+				</TooltipProvider>
 			</main>
 			<Toaster />
 		</div>
