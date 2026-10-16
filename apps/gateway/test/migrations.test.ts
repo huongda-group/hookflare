@@ -189,3 +189,13 @@ describe("0008_alerts", () => {
 		await expect(ins("alr_mig4", "open")).rejects.toThrow(/UNIQUE/);
 	});
 });
+
+describe("0009_archive", () => {
+	it("0009 adds archive tables and marks without rebuilding webhook_events", () => {
+		const sql = migration("0009_archive").queries.join("\n");
+		expect(sql).not.toMatch(/__new_/);
+		expect(sql).toMatch(/CREATE TABLE `archive_batches`/);
+		expect(sql).toMatch(/ADD `archive_batch_id` text/);
+		expect(sql).toMatch(/CREATE INDEX `webhook_events_archive_mark_idx`/);
+	});
+});

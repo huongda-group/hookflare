@@ -2,8 +2,11 @@ import {
 	type AlertRules,
 	alertRulesSchema,
 	DEFAULT_ALERT_RULES,
+	DEFAULT_STORAGE_SETTINGS,
 	type RetryDefaults,
 	retryDefaultsSchema,
+	type StorageSettings,
+	storageSettingsSchema,
 } from "@hookflare/shared";
 import { eq, sql } from "drizzle-orm";
 import type { Db, Deps } from "../deps";
@@ -99,6 +102,14 @@ export const ALERT_RULES_SETTING: SettingSpec<AlertRules> = {
 	schema: alertRulesSchema,
 	fallback: DEFAULT_ALERT_RULES,
 };
+
+export const STORAGE_SETTING: SettingSpec<StorageSettings> = {
+	key: "storage",
+	schema: storageSettingsSchema,
+	fallback: DEFAULT_STORAGE_SETTINGS,
+};
+/** { instance_id, started_at }; the status is read live from Workflows. */
+export const ARCHIVE_LAST_RUN_KEY = "archive.last_run";
 
 /** A missing, unparsable, or out-of-bounds row means the fallback; callers decide whether corrupt matters. */
 export async function readSetting<T>(

@@ -2,6 +2,7 @@ import {
 	type AlertRules,
 	patchSettingsRequest,
 	type Settings,
+	type StorageSettings,
 } from "@hookflare/shared";
 import { Hono } from "hono";
 import type { AppBindings } from "../../app";
@@ -12,6 +13,7 @@ import {
 	RETRY_DEFAULTS_KEY,
 	readRetryDefaults,
 	readSetting,
+	STORAGE_SETTING,
 	toRetryDefaults,
 	upsertSetting,
 } from "../../core/settings";
@@ -20,11 +22,12 @@ import { requirePermission } from "../auth/permission";
 import { readJson } from "../http";
 
 async function readAll(db: Db) {
-	const [retry, alertRules] = await Promise.all([
+	const [retry, alertRules, storage] = await Promise.all([
 		readRetryDefaults(db),
 		readSetting(db, ALERT_RULES_SETTING),
+		readSetting(db, STORAGE_SETTING),
 	]);
-	return { retry, alertRules };
+	return { retry, alertRules, storage };
 }
 
 function toSettings(s: Awaited<ReturnType<typeof readAll>>): Settings {
@@ -33,6 +36,9 @@ function toSettings(s: Awaited<ReturnType<typeof readAll>>): Settings {
 		updated_at: s.retry.updatedAt,
 		alert_rules: s.alertRules.value,
 		alert_rules_updated_at: s.alertRules.updatedAt,
+		storage: s.storage.value,
+		storage_updated_at: s.storage.updatedAt,
+		archive_last_run: null,
 	};
 }
 
@@ -46,7 +52,8 @@ export function settingsRoutes() {
 			c.var.logger.warn("settings.retry_defaults_invalid", {});
 		if (s.alertRules.corrupt)
 			c.var.logger.warn("settings.alert_rules_invalid", {});
-		return c.json(toSettings(s));
+		if (s.storage.corrupt) c.var.logger.warn("settings.storage_invalid", {});
+		return c.json({ ...toSettings(s), archive_last_run: null });
 	});
 
 	routes.patch("/", requirePermission("settings.manage"), async (c) => {
@@ -78,6 +85,14 @@ export function settingsRoutes() {
 				before: before.alertRules.value,
 				after: body.value.alert_rules satisfies AlertRules,
 				version: before.alertRules.updatedAt,
+			});
+		}
+		if (body.value.storage) {
+			sections.push({
+				key: STORAGE_SETTING.key,
+				before: before.storage.value,
+				after: body.value.storage satisfies StorageSettings,
+				version: before.storage.updatedAt,
 			});
 		}
 		const stmts = sections.flatMap((s) => {

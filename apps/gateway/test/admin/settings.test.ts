@@ -1,4 +1,8 @@
-import { DEFAULT_ALERT_RULES, type Settings } from "@hookflare/shared";
+import {
+	DEFAULT_ALERT_RULES,
+	DEFAULT_STORAGE_SETTINGS,
+	type Settings,
+} from "@hookflare/shared";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { clearAccessKeyCache } from "../../src/admin/auth/access";
@@ -7,6 +11,7 @@ import {
 	ALERT_RULES_SETTING,
 	clearSettingsCache,
 	RETRY_DEFAULTS_KEY,
+	STORAGE_SETTING,
 	upsertRetryDefaults,
 } from "../../src/core/settings";
 import { adminApp, auditRows, beforeNextBatch } from "../helpers/admin";
@@ -27,6 +32,7 @@ beforeEach(async () => {
 	await deps.db
 		.delete(settings)
 		.where(eq(settings.key, ALERT_RULES_SETTING.key));
+	await deps.db.delete(settings).where(eq(settings.key, STORAGE_SETTING.key));
 	// Same fixed resource ID in every test: drop audit rows too so the
 	// batch-atomicity test sees only rows written by its own request.
 	await deps.db
@@ -52,6 +58,9 @@ describe("GET /settings", () => {
 			updated_at: null,
 			alert_rules: DEFAULT_ALERT_RULES,
 			alert_rules_updated_at: null,
+			storage: DEFAULT_STORAGE_SETTINGS,
+			storage_updated_at: null,
+			archive_last_run: null,
 		} satisfies Settings);
 	});
 });
@@ -180,5 +189,19 @@ describe("PATCH /settings", () => {
 		const api = await adminApp(testDeps());
 		const res = await api.request("PATCH", "/settings", {});
 		expect(res.status).toBe(400);
+	});
+
+	it("returns storage defaults and validates failed ≥ hot", async () => {
+		const app = await adminApp(testDeps());
+		const got = await (await app.request("GET", "/settings")).json<Settings>();
+		expect(got.storage).toEqual(DEFAULT_STORAGE_SETTINGS);
+		const bad = await app.request("PATCH", "/settings", {
+			storage: { ...DEFAULT_STORAGE_SETTINGS, hot_retention_days: 100 },
+		});
+		expect(bad.status).toBe(400);
+		const ok = await app.request("PATCH", "/settings", {
+			storage: { ...DEFAULT_STORAGE_SETTINGS, archive_enabled: false },
+		});
+		expect((await ok.json<Settings>()).storage.archive_enabled).toBe(false);
 	});
 });

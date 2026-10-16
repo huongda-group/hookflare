@@ -667,14 +667,95 @@ export type AlertNotification = {
 export type AlertDetail = Alert & { notifications: AlertNotification[] };
 export type ChannelTestResult = { ok: boolean; error: string | null };
 
+/** Spec §7.2. */
+export const storageSettingsSchema = z
+	.strictObject({
+		archive_enabled: z.boolean(),
+		hot_retention_days: z.number().int().min(1).max(3_650),
+		failed_retention_days: z.number().int().min(1).max(3_650),
+		archive_retention_days: z.number().int().min(30).max(36_500).nullable(),
+		audit_retention_days: z.number().int().min(30).max(36_500),
+	})
+	.refine((v) => v.failed_retention_days >= v.hot_retention_days, {
+		path: ["failed_retention_days"],
+		message: "Must be at least the hot retention",
+	});
+export type StorageSettings = z.infer<typeof storageSettingsSchema>;
+export const DEFAULT_STORAGE_SETTINGS: StorageSettings = {
+	archive_enabled: true,
+	hot_retention_days: 30,
+	failed_retention_days: 90,
+	archive_retention_days: null,
+	audit_retention_days: 365,
+};
+
+export const ARCHIVE_KINDS = ["events", "audit"] as const;
+export const ARCHIVE_STATUSES = [
+	"building",
+	"verified",
+	"purged",
+	"failed",
+	"expired",
+] as const;
+const archiveDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+export const archivesQuery = z.object({
+	limit: z.coerce.number().int().min(1).max(50).default(20),
+	cursor: z.string().max(64).optional(),
+	kind: z.enum(ARCHIVE_KINDS).optional(),
+	status: z.enum(ARCHIVE_STATUSES).optional(),
+	from_day: archiveDay.optional(),
+	to_day: archiveDay.optional(),
+});
+export const archivePreviewQuery = z.object({
+	hot_retention_days: z.coerce.number().int().min(1).max(3_650),
+	failed_retention_days: z.coerce.number().int().min(1).max(3_650),
+});
+export type ArchivePreview = { eligible: number; currently_eligible: number };
+
+export type ArchivePart = {
+	part_no: number;
+	item_count: number;
+	bytes: number;
+	sha256: string | null;
+	first_id: string;
+	last_id: string;
+	downloadable: boolean;
+};
+export type ArchiveBatch = {
+	id: string;
+	kind: (typeof ARCHIVE_KINDS)[number];
+	day: string;
+	status: (typeof ARCHIVE_STATUSES)[number];
+	with_files: boolean;
+	part_count: number;
+	item_count: number;
+	bytes: number;
+	workflow_instance_id: string;
+	error: string | null;
+	created_at: number;
+	verified_at: number | null;
+	purged_at: number | null;
+	parts: ArchivePart[];
+};
+export type ArchiveLastRun = {
+	instance_id: string;
+	status: string;
+	started_at: number;
+};
+
 export const patchSettingsRequest = z
 	.strictObject({
 		retry_defaults: retryDefaultsSchema.optional(),
 		alert_rules: alertRulesSchema.optional(),
+		storage: storageSettingsSchema.optional(),
 		...optionalReason,
 	})
 	.refine(
-		(v) => v.retry_defaults !== undefined || v.alert_rules !== undefined,
+		(v) =>
+			v.retry_defaults !== undefined ||
+			v.alert_rules !== undefined ||
+			v.storage !== undefined,
 		{
 			message: "Send at least one settings section",
 		},
@@ -685,6 +766,9 @@ export type Settings = {
 	updated_at: number | null;
 	alert_rules: AlertRules;
 	alert_rules_updated_at: number | null;
+	storage: StorageSettings;
+	storage_updated_at: number | null;
+	archive_last_run: ArchiveLastRun | null;
 };
 
 /** Non-terminal statuses counted live by the Overview. */

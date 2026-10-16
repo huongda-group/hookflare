@@ -49,6 +49,14 @@ export const NOTIFICATION_STATUSES = [
 	"sent",
 	"failed",
 ] as const;
+export const ARCHIVE_KINDS = ["events", "audit"] as const;
+export const ARCHIVE_STATUSES = [
+	"building",
+	"verified",
+	"purged",
+	"failed",
+	"expired",
+] as const;
 
 export type AuthType = (typeof AUTH_TYPES)[number];
 export type EventIdFrom = (typeof EVENT_ID_FROM)[number];
@@ -204,11 +212,18 @@ export const webhookEvents = sqliteTable(
 		bodyInline: bytes("body_inline").notNull(),
 		/** Set when the body is in R2 (> 64 KiB); body_inline is then empty. */
 		r2Key: text("r2_key"),
+		/** M5-17 mark: the batch and part this event is being archived in. Replay clears it. */
+		archiveBatchId: text("archive_batch_id"),
+		archivePart: integer("archive_part"),
 	},
 	(t) => [
 		index("webhook_events_source_received_idx").on(t.sourceId, t.receivedAt),
 		index("webhook_events_project_received_idx").on(t.projectId, t.receivedAt),
 		index("webhook_events_received_idx").on(t.receivedAt),
+		index("webhook_events_archive_mark_idx").on(
+			t.archiveBatchId,
+			t.archivePart,
+		),
 		uniqueIndex("webhook_events_source_provider_uq")
 			.on(t.sourceId, t.providerEventId)
 			.where(sql`provider_event_id IS NOT NULL`),
@@ -475,3 +490,51 @@ export const alertNotifications = sqliteTable(
 export type AlertChannelRow = typeof alertChannels.$inferSelect;
 export type AlertRow = typeof alerts.$inferSelect;
 export type AlertNotificationRow = typeof alertNotifications.$inferSelect;
+
+/** M5-18: one day is archived more than once, so batches are keyed by ID. */
+export const archiveBatches = sqliteTable(
+	"archive_batches",
+	{
+		id: text("id").primaryKey(),
+		kind: text("kind", { enum: ARCHIVE_KINDS }).notNull(),
+		/** UTC day, YYYY-MM-DD. */
+		day: text("day").notNull(),
+		status: text("status", { enum: ARCHIVE_STATUSES }).notNull(),
+		withFiles: integer("with_files", { mode: "boolean" }).notNull(),
+		partCount: integer("part_count").notNull().default(0),
+		itemCount: integer("item_count").notNull().default(0),
+		bytes: integer("bytes").notNull().default(0),
+		workflowInstanceId: text("workflow_instance_id").notNull(),
+		error: text("error"),
+		createdAt: integer("created_at").notNull(),
+		verifiedAt: integer("verified_at"),
+		purgedAt: integer("purged_at"),
+	},
+	(t) => [
+		check("archive_batches_kind_check", inList("kind", ARCHIVE_KINDS)),
+		check("archive_batches_status_check", inList("status", ARCHIVE_STATUSES)),
+		index("archive_batches_status_idx").on(t.status),
+		index("archive_batches_day_idx").on(t.day),
+	],
+);
+
+export const archiveParts = sqliteTable(
+	"archive_parts",
+	{
+		batchId: text("batch_id")
+			.notNull()
+			.references(() => archiveBatches.id),
+		partNo: integer("part_no").notNull(),
+		/** NULL when the batch has no files (archive_enabled = false, M5-21). */
+		r2Key: text("r2_key"),
+		itemCount: integer("item_count").notNull(),
+		bytes: integer("bytes").notNull(),
+		sha256: text("sha256"),
+		firstId: text("first_id").notNull(),
+		lastId: text("last_id").notNull(),
+	},
+	(t) => [primaryKey({ columns: [t.batchId, t.partNo] })],
+);
+
+export type ArchiveBatchRow = typeof archiveBatches.$inferSelect;
+export type ArchivePartRow = typeof archiveParts.$inferSelect;

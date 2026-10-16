@@ -45,6 +45,15 @@ export const DEFAULT_SETTINGS: Settings = {
 		reminder_s: 3600,
 	},
 	alert_rules_updated_at: null,
+	storage: {
+		archive_enabled: true,
+		hot_retention_days: 30,
+		failed_retention_days: 90,
+		archive_retention_days: null,
+		audit_retention_days: 365,
+	},
+	storage_updated_at: null,
+	archive_last_run: null,
 };
 
 const empty = { data: [], next_cursor: null };

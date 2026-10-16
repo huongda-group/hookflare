@@ -8,6 +8,7 @@ import {
 	createSourceRequest,
 	createUserRequest,
 	DEFAULT_ALERT_RULES,
+	DEFAULT_STORAGE_SETTINGS,
 	eventIdConfigError,
 	eventSearchQuery,
 	isAllowedAlertUrl,
@@ -22,6 +23,7 @@ import {
 	rotateDestinationSecretRequest,
 	rotateSourceSecretRequest,
 	statsQuery,
+	storageSettingsSchema,
 } from "../src/admin";
 
 const base = { project_id: "prj_1", destination_id: "dst_1", name: "Stripe" };
@@ -450,5 +452,35 @@ describe("alert schemas", () => {
 			patchSettingsRequest.safeParse({ alert_rules: DEFAULT_ALERT_RULES })
 				.success,
 		).toBe(true);
+	});
+});
+
+describe("storage settings", () => {
+	it("accepts the defaults and enforces failed ≥ hot", () => {
+		expect(
+			storageSettingsSchema.safeParse(DEFAULT_STORAGE_SETTINGS).success,
+		).toBe(true);
+		const bad = storageSettingsSchema.safeParse({
+			...DEFAULT_STORAGE_SETTINGS,
+			hot_retention_days: 40,
+			failed_retention_days: 30,
+		});
+		expect(bad.success).toBe(false);
+		if (!bad.success)
+			expect(bad.error.issues[0].path).toEqual(["failed_retention_days"]);
+	});
+	it("allows null archive retention (forever) but not below 30 days", () => {
+		expect(
+			storageSettingsSchema.safeParse({
+				...DEFAULT_STORAGE_SETTINGS,
+				archive_retention_days: null,
+			}).success,
+		).toBe(true);
+		expect(
+			storageSettingsSchema.safeParse({
+				...DEFAULT_STORAGE_SETTINGS,
+				archive_retention_days: 29,
+			}).success,
+		).toBe(false);
 	});
 });
