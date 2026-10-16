@@ -12,6 +12,11 @@ Pages:
 - [migrations.md](migrations.md) — expand → deploy → contract, with a worked
   rename example.
 - [rollback.md](rollback.md) — decide whether to roll back, run it, verify.
+- [backup-restore.md](backup-restore.md) — restore D1 via Time Travel
+  (path A) or from the R2 copy (path B), and what a D1 restore means
+  for R2.
+- [secrets.md](secrets.md) — store `SECRETS_KEY`, re-enter secrets after
+  a restore, rotate a leaked secret.
 - `drills/` — dated records of every drill run against staging.
 
 > [!NOTE]
@@ -25,7 +30,7 @@ Pages:
 | Drill | Date | Result |
 |---|---|---|
 | Rollback drill ([template](drills/2026-10-XX-rollback.md)) | pending | PENDING — live staging drill not yet run |
-| Restore drill (M6c) | pending | not yet run |
+| Restore drill ([template](drills/2026-10-XX-restore.md)) | pending | PENDING — live staging drill not yet run |
 | Production rollout (M6d) | pending | not yet run |
 
 ## Glossary

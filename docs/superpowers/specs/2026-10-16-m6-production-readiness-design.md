@@ -69,6 +69,12 @@
 | M0 `pnpm run deploy` = build, migrate, deploy | Now also records restore points and runs the smoke test | M6-8 |
 | Roadmap M6 "scheduled exports" | A table-by-table copy to R2 instead of the D1 export API | M6-12: the export API blocks the database while it runs |
 | M0 compatibility flags (`nodejs_compat` only) | Adds `global_fetch_strictly_public` | M6-22 |
+| Roadmap §5.1 parity test (`apps/gateway/test/config-parity.test.ts`, Vitest) | Lives in `scripts/test/config-parity.test.mjs` (node:test); `preview_database_id` added to the ignored keys | Scripts are plain node, not gateway code; the staging database needs a preview ID the prod config lacks |
+| Roadmap §7.1 "5,000 rows per step" for every table | BLOB-bearing tables page at 250 rows per step (`BLOB_PAGE_SIZE` in `jobs/backup/tables.ts`) | A 5,000-row BLOB page would blow the per-step read budget; small BLOB pages keep the nightly read cheap |
+| Roadmap §7.4 hardcoded restore order (projects, destinations, sources, …) | `tableOrder` in `scripts/lib/restore-sql.mjs` sorts tables topologically from the manifest's foreign keys (self-references ignored; forward self-references pre-collected) | Schema changes must not require a restore-script change; the manifest already carries the FK graph |
+| Roadmap §7.4 "turns rows into `INSERT` statements" | Rows whose `INSERT` would exceed 90 k chars become `INSERT` with empty BLOBs plus chunked `UPDATE … SET c = CAST(c \|\| X'…' AS BLOB)` appends (32 KiB of bytes per chunk) | D1 rejects oversized statements; chunked appends keep large payloads restorable |
+| Roadmap §7.4 verify (integrity, row counts, migrations) | `verify-restore.mjs` also checks per-column BLOB byte totals against the manifest minus orphaned BLOBs | Row counts alone cannot catch a truncated payload; the manifest already records `blob_bytes` |
+| Roadmap §9 "scripts are exercised by the drills, not by CI" | `scripts/test/fixtures/` holds checked-in `time-travel-info.json` and `deployments-list.json`; the staging names in the deploy tests come from those fixtures | Drills still exercise the scripts end to end; fixtures let CI cover the parsing and decision logic without live wrangler output |
 
 ## 4. Repository layout
 
