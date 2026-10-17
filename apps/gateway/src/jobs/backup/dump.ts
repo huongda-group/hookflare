@@ -12,17 +12,17 @@ export type PartMeta = {
 	blob_bytes: Record<string, number>;
 };
 
+/** R2 key of one gzip NDJSON part. */
+export function partKey(prefix: string, table: string, partNo: number): string {
+	return `${prefix}${table}/part-${String(partNo).padStart(4, "0")}.ndjson.gz`;
+}
+
 /**
  * One backup part: `pageSize` rows after `cursor`, gzipped NDJSON in R2.
  * BLOB cells become `{"$b64":"…"}`, so the file is plain JSON text and the
  * bytes survive a gunzip-plus-base64 round trip. A full page returns its
  * last key as the next cursor; anything shorter ends the table.
  */
-/** R2 key of one gzip NDJSON part. */
-export function partKey(prefix: string, table: string, partNo: number): string {
-	return `${prefix}${table}/part-${String(partNo).padStart(4, "0")}.ndjson.gz`;
-}
-
 export async function dumpPage(
 	deps: Pick<Deps, "db" | "backups">,
 	table: TableInfo,

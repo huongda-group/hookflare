@@ -345,6 +345,28 @@ describe("backup cron", () => {
 		expect(rows).toEqual([]);
 	});
 
+	it("cron settings read failure: a D1 error is logged as backup.start_failed, not thrown", async () => {
+		const backup = recordingBackup();
+		const base = testDeps({ backup });
+		const db = new Proxy(base.db, {
+			get(target, prop, receiver) {
+				if (prop === "select") {
+					return () => {
+						throw new Error("D1 unavailable");
+					};
+				}
+				return Reflect.get(target, prop, receiver);
+			},
+		});
+		const deps = { ...base, db };
+		const err = vi.spyOn(console, "error").mockImplementation(() => {});
+		await expect(runScheduled(BACKUP_CRON, deps)).resolves.toBeUndefined();
+		const msgs = err.mock.calls.map((c) => JSON.parse(c[0] as string).msg);
+		err.mockRestore();
+		expect(msgs).toContain("backup.start_failed");
+		expect(backup.created).toEqual([]);
+	});
+
 	it("cron duplicate: a second start returns duplicate and inserts no row (Review Focus 5)", async () => {
 		const deps = testDeps({ backup: fakeBackup() });
 		await cleanBackups(deps);

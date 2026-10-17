@@ -38,7 +38,7 @@ function literal(name: string): string {
 
 /**
  * Every user table in this D1, sorted by name: internal `sqlite_*` tables,
- * Cloudflare `cf_*` bookkeeping, and the migration journal are skipped.
+ * Cloudflare `_cf_*` bookkeeping, and the migration journal are skipped.
  * A table pages by its single-column primary key, or by rowid when it has
  * none (or a composite one, whose leading column alone is not unique).
  */

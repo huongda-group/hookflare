@@ -61,8 +61,8 @@ async function moveInstance(
 }
 
 /**
- * Creates the backup Workflow instance, then records the `backups` row
- * (`running`, prefix `d1/YYYY/MM/DD/<id>/`). A continuation passes its
+ * Records the `backups` row (`running`, prefix `d1/YYYY/MM/DD/<id>/`), then
+ * creates the backup Workflow instance. A continuation passes its
  * existing `backupId` plus `resume`: only the instance ID on the row moves.
  * A duplicate instance ID means this backup already started.
  */

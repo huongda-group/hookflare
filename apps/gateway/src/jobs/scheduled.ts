@@ -71,13 +71,13 @@ export async function runScheduled(cron: string, deps: Deps): Promise<void> {
 		return;
 	}
 	if (cron === BACKUP_CRON) {
-		const { value: storage } = await readSetting(deps.db, STORAGE_SETTING);
-		if (!storage.backup_enabled) {
-			logger.info("backup.disabled", {});
-			await beatSafe(deps, logger, "backup");
-			return;
-		}
 		try {
+			const { value: storage } = await readSetting(deps.db, STORAGE_SETTING);
+			if (!storage.backup_enabled) {
+				logger.info("backup.disabled", {});
+				await beatSafe(deps, logger, "backup");
+				return;
+			}
 			// A previous (or manual) backup may still be going: a second
 			// one would double the D1 read load for no gain.
 			if (await isBackupRunning(deps)) {
