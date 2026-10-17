@@ -187,6 +187,50 @@ describe("expireBackups", () => {
 		expect(await listKeys(deps.backups, keepPrefix)).toHaveLength(1);
 	});
 
+	it("a partial R2 delete leaves the row expiring, never verified; the next run finishes it", async () => {
+		const now = Date.now();
+		const oldPrefix = "test/backup/steps/partial/";
+		await seedBackup("bk_partial", oldPrefix, now - 50 * DAY_MS);
+		await seedBackup("bk_newest", "test/backup/steps/newest/", now);
+		await deps.db
+			.update(backups)
+			.set({ status: "verified" })
+			.where(sql`id IN ('bk_partial', 'bk_newest')`);
+		await deps.backups.put(`${oldPrefix}a.ndjson.gz`, new Uint8Array([1]));
+		await deps.backups.put(`${oldPrefix}b.ndjson.gz`, new Uint8Array([2]));
+		// Deletes the first key, then fails: half the backup is gone.
+		const flaky = {
+			...deps,
+			backups: new Proxy(deps.backups, {
+				get(target, prop) {
+					if (prop === "delete")
+						return async (keys: string[]) => {
+							await target.delete(keys.slice(0, 1));
+							throw new Error("r2 delete failed");
+						};
+					const v = Reflect.get(target, prop);
+					return typeof v === "function" ? v.bind(target) : v;
+				},
+			}),
+		};
+		const settings = { ...DEFAULT_STORAGE_SETTINGS, backup_retention_days: 35 };
+
+		expect((await expireBackups(flaky, settings, now)).deleted).toEqual([]);
+		const [row] = await deps.db
+			.select()
+			.from(backups)
+			.where(sql`id = 'bk_partial'`);
+		expect(row?.status).toBe("expiring");
+		expect(await listKeys(deps.backups, oldPrefix)).toHaveLength(1);
+
+		expect((await expireBackups(deps, settings, now)).deleted).toEqual([
+			"bk_partial",
+		]);
+		expect(await listKeys(deps.backups, oldPrefix)).toEqual([]);
+		const remaining = await deps.db.select({ id: backups.id }).from(backups);
+		expect(remaining.map((r) => r.id)).toEqual(["bk_newest"]);
+	});
+
 	it("retention off: with backup_enabled false, nothing is deleted", async () => {
 		const now = Date.now();
 		const prefix = "test/backup/steps/off/";

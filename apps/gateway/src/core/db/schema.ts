@@ -57,7 +57,13 @@ export const ARCHIVE_STATUSES = [
 	"failed",
 	"expired",
 ] as const;
-export const BACKUP_STATUSES = ["running", "verified", "failed"] as const;
+/** `expiring`: retention started deleting its objects; never restorable again. */
+export const BACKUP_STATUSES = [
+	"running",
+	"verified",
+	"failed",
+	"expiring",
+] as const;
 export const BACKUP_TRIGGERS = ["cron", "manual"] as const;
 
 export type AuthType = (typeof AUTH_TYPES)[number];

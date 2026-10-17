@@ -766,7 +766,13 @@ export type ArchiveLastRun = {
 	started_at: number;
 };
 
-export const BACKUP_STATUSES = ["running", "verified", "failed"] as const;
+/** `expiring`: retention started deleting its objects; never restorable again. */
+export const BACKUP_STATUSES = [
+	"running",
+	"verified",
+	"failed",
+	"expiring",
+] as const;
 export type BackupSummary = {
 	enabled: boolean;
 	last_verified: {
