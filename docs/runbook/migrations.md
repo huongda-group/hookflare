@@ -13,10 +13,10 @@ the CI check described below.
    remove it. The removal migration must be listed in `contract.json`
    (see below), or CI fails.
 
-A migration like `0003_collapse_duplicate_event_ids.sql` is the model for a
-data migration: a plain `UPDATE` that reshapes rows in place (it nulls out
-duplicate provider event IDs, keeping the earliest per group) so a later
-`UNIQUE` index can be built. No rows are deleted.
+A data migration is a plain `UPDATE` that reshapes rows in place so a later
+constraint can be built — for example, nulling duplicate provider event IDs
+(keeping the earliest per group) before adding a `UNIQUE` index. No rows are
+deleted.
 
 ## Worked example: renaming a column across three releases
 
@@ -84,6 +84,19 @@ node scripts/check-migrations.mjs --base origin/main
 
 Generated migrations cannot be hand-edited, so the exception list lives
 beside them in `contract.json`.
+
+## Squashed migrations (`squashed.json`)
+
+At 1.0.0 the ten pre-release migrations (`0001_settings` … `0010_backups`)
+were squashed into one generated baseline, `0000_init.sql`.
+`apps/gateway/migrations/squashed.json` lists the removed files so the CI
+check accepts their removal; editing a listed file that still exists is
+still an error. A squash is only safe for a database that has **not**
+applied the old files: D1 records migrations by name, so an existing
+database would try to run `0000_init` on top of its tables and fail. A
+database created before the squash must be recreated (or, if it holds no
+data, emptied — drop every table including `d1_migrations`) before the
+next deploy. Do not squash again after a release has real data.
 
 ## Checking pending migrations (verify on staging in drill)
 

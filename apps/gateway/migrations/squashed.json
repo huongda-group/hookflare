@@ -1,0 +1,12 @@
+[
+	"0001_settings.sql",
+	"0002_core_pipeline.sql",
+	"0003_collapse_duplicate_event_ids.sql",
+	"0004_reliability.sql",
+	"0005_admin_security.sql",
+	"0006_dashboard.sql",
+	"0007_limiter.sql",
+	"0008_alerts.sql",
+	"0009_archive.sql",
+	"0010_backups.sql"
+]

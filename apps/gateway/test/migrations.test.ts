@@ -1,77 +1,44 @@
 import { env } from "cloudflare:workers";
-import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
-import { deliveries, webhookEvents } from "../src/core/db/schema";
 import { testDeps } from "./helpers/deps";
 import { seedDelivery, seedPipeline } from "./helpers/seed";
 
-function migration(prefix: string) {
-	const m = env.TEST_MIGRATIONS.find((x) => x.name.startsWith(prefix));
-	if (!m) throw new Error(`migration ${prefix} not found`);
-	return m;
+async function columns(table: string) {
+	return (
+		await env.DB.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>()
+	).results.map((c) => c.name);
 }
 
-const UNIQUE_INDEX = "webhook_events_source_provider_uq";
+async function indexNames(table: string) {
+	return (
+		await env.DB.prepare(
+			"SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ? ORDER BY name",
+		)
+			.bind(table)
+			.all<{ name: string }>()
+	).results.map((r) => r.name);
+}
 
-describe("0003 + 0004", () => {
-	it("collapses M1 duplicates so the unique index can be built", async () => {
+describe("0000_init", () => {
+	it("is the only migration (squashed at 1.0.0)", () => {
+		expect(env.TEST_MIGRATIONS.map((m) => m.name)).toEqual([
+			expect.stringMatching(/^0000_init/),
+		]);
+	});
+
+	it("rejects a second event with the same provider event id", async () => {
 		const deps = testDeps();
 		const p = await seedPipeline(deps);
-		const createIndex = migration("0004").queries.find((q) =>
-			q.includes(UNIQUE_INDEX),
+		await seedDelivery(deps, p, { event: { providerEventId: "dup" } });
+		// Drizzle wraps the D1 error: UNIQUE is in cause.message.
+		const dupErr = await seedDelivery(deps, p, {
+			event: { providerEventId: "dup" },
+		}).then(
+			() => null,
+			(e) => e as Error,
 		);
-		if (!createIndex) throw new Error("0004 has no unique index");
-		// Recreate the M1 state: no unique index, duplicates present.
-		await env.DB.prepare(`DROP INDEX ${UNIQUE_INDEX}`).run();
-		try {
-			const first = await seedDelivery(deps, p, {
-				event: { providerEventId: "dup" },
-			});
-			const second = await seedDelivery(deps, p, {
-				event: { providerEventId: "dup" },
-			});
-			const other = await seedDelivery(deps, p, {
-				event: { providerEventId: "unique" },
-			});
-
-			await env.DB.batch(
-				migration("0003").queries.map((q) => env.DB.prepare(q)),
-			);
-			await env.DB.prepare(createIndex).run();
-
-			const ids = async (eventId: string) =>
-				(
-					await deps.db
-						.select({ pid: webhookEvents.providerEventId })
-						.from(webhookEvents)
-						.where(eq(webhookEvents.id, eventId))
-				)[0].pid;
-			expect(await ids(first.eventId)).toBe("dup");
-			expect(await ids(second.eventId)).toBeNull();
-			expect(await ids(other.eventId)).toBe("unique");
-			expect(
-				await deps.db.$count(
-					deliveries,
-					eq(deliveries.projectId, p.project.id),
-				),
-			).toBe(3);
-			// Drizzle wraps the D1 error: UNIQUE is in cause.message.
-			const dupErr = await seedDelivery(deps, p, {
-				event: { providerEventId: "dup" },
-			}).then(
-				() => null,
-				(e) => e as Error,
-			);
-			expect(dupErr).not.toBeNull();
-			expect(String(dupErr?.cause ?? dupErr)).toMatch(/UNIQUE/);
-		} finally {
-			await env.DB.prepare(
-				createIndex.replace(
-					"CREATE UNIQUE INDEX",
-					"CREATE UNIQUE INDEX IF NOT EXISTS",
-				),
-			).run();
-		}
+		expect(dupErr).not.toBeNull();
+		expect(String(dupErr?.cause ?? dupErr)).toMatch(/UNIQUE/);
 	});
 
 	it("allows many events without a provider event id", async () => {
@@ -80,13 +47,8 @@ describe("0003 + 0004", () => {
 		await seedDelivery(deps, p);
 		await expect(seedDelivery(deps, p)).resolves.toBeDefined();
 	});
-});
 
-describe("0005_admin_security", () => {
-	it("creates the M3 tables and columns without rebuilding a table", async () => {
-		const m = migration("0005");
-		const sqlText = m.queries.join("\n");
-		expect(sqlText).not.toMatch(/__new_|DROP TABLE|INSERT INTO/);
+	it("creates the admin tables and rotation columns", async () => {
 		const tables = await env.DB.prepare(
 			"SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('users','audit_logs','test_deliveries') ORDER BY name",
 		).all<{ name: string }>();
@@ -95,25 +57,21 @@ describe("0005_admin_security", () => {
 			"test_deliveries",
 			"users",
 		]);
-		const cols = async (table: string) =>
-			(
-				await env.DB.prepare(`PRAGMA table_info(${table})`).all<{
-					name: string;
-				}>()
-			).results.map((c) => c.name);
-		expect(await cols("sources")).toEqual(
+		expect(await columns("sources")).toEqual(
 			expect.arrayContaining(["secret_prev_enc", "secret_prev_expires_at"]),
 		);
-		expect(await cols("destinations")).toEqual(
+		expect(await columns("destinations")).toEqual(
 			expect.arrayContaining([
 				"signing_secret_prev_enc",
 				"signing_secret_prev_expires_at",
+				"max_in_flight",
+				"rate_limit_per_s",
+				"consecutive_failures",
 			]),
 		);
-		const idx = await env.DB.prepare(
-			"SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'deliveries_status_completed_idx'",
-		).first();
-		expect(idx).not.toBeNull();
+		expect(await indexNames("deliveries")).toContain(
+			"deliveries_status_completed_idx",
+		);
 	});
 
 	it("rejects an unknown role", async () => {
@@ -123,23 +81,8 @@ describe("0005_admin_security", () => {
 			).run(),
 		).rejects.toThrow(/CHECK/);
 	});
-});
 
-describe("0006", () => {
-	it("only creates stats_hourly and indexes (no table rebuild)", () => {
-		const m = migration("0006");
-		for (const q of m.queries) {
-			expect(q.replace(/^--> statement-breakpoint\s*/, "").trim()).toMatch(
-				/^CREATE (TABLE|INDEX)/,
-			);
-		}
-		const all = m.queries.join("\n");
-		expect(all).toContain("`stats_hourly`");
-		expect(all).toContain("webhook_events_received_idx");
-		expect(all).toContain("delivery_attempts_started_idx");
-	});
-
-	it("upserts on the composite primary key", async () => {
+	it("upserts stats_hourly on the composite primary key", async () => {
 		const stmt = `INSERT INTO stats_hourly (hour, project_id, source_id, destination_id, received)
 			VALUES (0, 'prj_m', 'src_m', 'dst_m', 1)
 			ON CONFLICT (hour, project_id, source_id, destination_id) DO UPDATE SET received = received + excluded.received`;
@@ -149,38 +92,19 @@ describe("0006", () => {
 			"SELECT received, delivered FROM stats_hourly WHERE project_id = 'prj_m'",
 		).first();
 		expect(row).toEqual({ received: 2, delivered: 0 });
-	});
-});
-
-describe("0007", () => {
-	it("0007 only adds the two limit columns (no table rebuild)", () => {
-		const sql = migration("0007_limiter").queries.join("\n");
-		expect(sql).not.toMatch(/__new_/);
-		expect(sql).toMatch(/ADD `max_in_flight` integer/);
-		expect(sql).toMatch(/ADD `rate_limit_per_s` integer/);
-	});
-});
-
-describe("0008_alerts", () => {
-	it("0008 creates the alert tables without rebuilding destinations", () => {
-		const sql = migration("0008_alerts").queries.join("\n");
-		expect(sql).not.toMatch(/__new_/);
-		expect(sql).toMatch(/CREATE TABLE `alert_channels`/);
-		expect(sql).toMatch(
-			/CREATE UNIQUE INDEX `alerts_open_key_uq`.*WHERE status = 'open'/s,
+		expect(await indexNames("webhook_events")).toContain(
+			"webhook_events_received_idx",
 		);
-		expect(sql).toMatch(
-			/ADD `consecutive_failures` integer DEFAULT 0 NOT NULL/,
+		expect(await indexNames("delivery_attempts")).toContain(
+			"delivery_attempts_started_idx",
 		);
 	});
 
-	it("allows one open incident per key but many resolved ones", async () => {
-		const db = env.DB;
+	it("allows one open alert per key but many resolved ones", async () => {
 		const ins = (id: string, status: string) =>
-			db
-				.prepare(
-					"INSERT INTO alerts (id, rule, resource_type, resource_id, status, opened_at) VALUES (?, 'new_dead', 'destination', 'dst_mig', ?, 1)",
-				)
+			env.DB.prepare(
+				"INSERT INTO alerts (id, rule, resource_type, resource_id, status, opened_at) VALUES (?, 'new_dead', 'destination', 'dst_mig', ?, 1)",
+			)
 				.bind(id, status)
 				.run();
 		await ins("alr_mig1", "resolved");
@@ -188,34 +112,17 @@ describe("0008_alerts", () => {
 		await ins("alr_mig3", "open");
 		await expect(ins("alr_mig4", "open")).rejects.toThrow(/UNIQUE/);
 	});
-});
 
-describe("0009_archive", () => {
-	it("0009 adds archive tables and marks without rebuilding webhook_events", () => {
-		const sql = migration("0009_archive").queries.join("\n");
-		expect(sql).not.toMatch(/__new_/);
-		expect(sql).toMatch(/CREATE TABLE `archive_batches`/);
-		expect(sql).toMatch(/ADD `archive_batch_id` text/);
-		expect(sql).toMatch(/CREATE INDEX `webhook_events_archive_mark_idx`/);
-	});
-});
-
-describe("0010_backups", () => {
-	it("0010 creates the backups table without rebuilding an existing table", () => {
-		const sql = migration("0010").queries.join("\n");
-		expect(sql).not.toMatch(/__new_|DROP TABLE|INSERT INTO/);
-		expect(sql).toMatch(/CREATE TABLE `backups`/);
+	it("creates the archive tables and the archive mark", async () => {
+		expect(await columns("archive_batches")).not.toEqual([]);
+		expect(await columns("webhook_events")).toContain("archive_batch_id");
+		expect(await indexNames("webhook_events")).toContain(
+			"webhook_events_archive_mark_idx",
+		);
 	});
 
-	it("backups exists with status and started_at indexes", async () => {
-		const tables = await env.DB.prepare(
-			"SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'backups'",
-		).first<{ name: string }>();
-		expect(tables?.name).toBe("backups");
-		const indexes = await env.DB.prepare(
-			"SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'backups' ORDER BY name",
-		).all<{ name: string }>();
-		expect(indexes.results.map((r) => r.name)).toEqual(
+	it("creates backups with status and started_at indexes", async () => {
+		expect(await indexNames("backups")).toEqual(
 			expect.arrayContaining(["backups_status_idx", "backups_started_at_idx"]),
 		);
 	});
