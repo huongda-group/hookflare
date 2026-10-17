@@ -1,6 +1,6 @@
 import type { Destination, Source } from "@hookflare/shared";
 import { eq } from "drizzle-orm";
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
 	decryptSecret,
 	encryptSecret,

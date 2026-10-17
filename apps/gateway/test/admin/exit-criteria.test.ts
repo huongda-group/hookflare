@@ -1,5 +1,5 @@
 import { asc, eq, inArray } from "drizzle-orm";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createApp } from "../../src/app";
 import {
 	auditLogs,
@@ -87,8 +87,6 @@ describe("M3 exit criteria", () => {
 			),
 		);
 		expect(audited.sort()).toEqual(replays.map((r) => r.id).sort());
-		expect(audits.every((a) => a.actor === op.username && a.reason)).toBe(
-			true,
-		);
+		expect(audits.every((a) => a.actor === op.username && a.reason)).toBe(true);
 	});
 });

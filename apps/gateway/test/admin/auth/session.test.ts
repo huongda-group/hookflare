@@ -1,33 +1,32 @@
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
+import { randomToken, sha256Hex } from "../../../src/admin/auth/secrets";
 import {
 	clearSessionCookie,
 	isSameOrigin,
 	SESSION_COOKIE,
 	setSessionCookie,
 } from "../../../src/admin/auth/session";
-import { randomToken, sha256Hex } from "../../../src/admin/auth/secrets";
 import type { AppBindings } from "../../../src/app";
 import { createApp } from "../../../src/app";
-import {
-	SESSION_ABSOLUTE_MS,
-	SESSION_IDLE_MS,
-	SESSION_TOUCH_MS,
-} from "../../../src/core/db/sessions";
 import {
 	apiTokens,
 	type Role,
 	sessions,
 	users,
 } from "../../../src/core/db/schema";
+import {
+	SESSION_ABSOLUTE_MS,
+	SESSION_IDLE_MS,
+	SESSION_TOUCH_MS,
+} from "../../../src/core/db/sessions";
 import { newId } from "../../../src/core/ids";
 import type { Deps } from "../../../src/deps";
 import { testDeps } from "../../helpers/deps";
 
 const T0 = 1_800_000_000_000;
 const ORIGIN = "https://hookflare.example.com";
-const ADMIN_API = `${ORIGIN}/api/admin/v1`;
 /** Only "IS NOT NULL" matters; the value is never parsed by the middleware. */
 const PASSWORD_HASH = "pbkdf2-sha256$100000$c2FsdA==$aGFzaA==";
 
@@ -127,7 +126,8 @@ function request(
 	const init: RequestInit = { method, headers: { ...headers } };
 	if (body !== undefined) {
 		init.body = JSON.stringify(body);
-		(init.headers as Record<string, string>)["content-type"] = "application/json";
+		(init.headers as Record<string, string>)["content-type"] =
+			"application/json";
 	}
 	return createApp({ createDeps: () => deps }).request(
 		`${host}/api/admin/v1${path}`,
@@ -181,8 +181,11 @@ describe("authMiddleware", () => {
 		});
 		set(T0 + SESSION_IDLE_MS - 1);
 		expect(
-			(await request(deps, "GET", "/me", { cookie: `${SESSION_COOKIE}=${token}` }))
-				.status,
+			(
+				await request(deps, "GET", "/me", {
+					cookie: `${SESSION_COOKIE}=${token}`,
+				})
+			).status,
 		).toBe(200);
 		set(T0 + SESSION_IDLE_MS);
 		const res = await request(deps, "GET", "/me", {
@@ -265,22 +268,25 @@ describe("authMiddleware", () => {
 		["no Origin", {}],
 		["Origin: null", { origin: "null" }],
 		["a cross-origin Origin", { origin: "https://evil.example" }],
-	])("returns 403 bad_origin for a cookie POST with %s", async (_label, extra) => {
-		const { deps } = clock();
-		const { token } = await cookieSession(deps);
-		const res = await request(
-			deps,
-			"POST",
-			"/projects",
-			{
-				cookie: `${SESSION_COOKIE}=${token}`,
-				...extra,
-			},
-			{ name: "Nope", slug: slug() },
-		);
-		expect(res.status).toBe(403);
-		expect(await res.json()).toEqual({ error: "bad_origin" });
-	});
+	])(
+		"returns 403 bad_origin for a cookie POST with %s",
+		async (_label, extra) => {
+			const { deps } = clock();
+			const { token } = await cookieSession(deps);
+			const res = await request(
+				deps,
+				"POST",
+				"/projects",
+				{
+					cookie: `${SESSION_COOKIE}=${token}`,
+					...extra,
+				},
+				{ name: "Nope", slug: slug() },
+			);
+			expect(res.status).toBe(403);
+			expect(await res.json()).toEqual({ error: "bad_origin" });
+		},
+	);
 
 	it("allows a cookie GET without an Origin", async () => {
 		const { deps } = clock();
@@ -385,10 +391,7 @@ describe("authMiddleware", () => {
 		const header = { cookie: `${SESSION_COOKIE}=${token}` };
 		const read = async () =>
 			(
-				await deps.db
-					.select()
-					.from(sessions)
-					.where(eq(sessions.idHash, idHash))
+				await deps.db.select().from(sessions).where(eq(sessions.idHash, idHash))
 			)[0];
 		set(T0 + SESSION_TOUCH_MS - 1);
 		expect((await request(deps, "GET", "/me", header)).status).toBe(200);
@@ -449,7 +452,9 @@ describe("setSessionCookie", () => {
 	});
 
 	it("clears the cookie on the same path", async () => {
-		const res = await cookieApp().request("https://hookflare.example.com/clear");
+		const res = await cookieApp().request(
+			"https://hookflare.example.com/clear",
+		);
 		const cookie = res.headers.get("set-cookie") ?? "";
 		expect(cookie).toContain(`${SESSION_COOKIE}=`);
 		expect(cookie).toContain("Path=/api/admin");

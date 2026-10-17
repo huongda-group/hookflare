@@ -269,7 +269,7 @@ describe("main", () => {
 		await expect(main(["s.json", "--yes"], h.deps)).rejects.toThrow("boom");
 		expect(seen.length).toBeGreaterThan(0);
 		for (const headers of seen) {
-			expect(headers["authorization"]).toBe("Bearer hf_test_token");
+			expect(headers.authorization).toBe("Bearer hf_test_token");
 			expect(headers).not.toHaveProperty("CF-Access-Client-Id");
 			expect(headers).not.toHaveProperty("CF-Access-Client-Secret");
 		}

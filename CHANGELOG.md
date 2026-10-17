@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- Cloudflare Access is removed as the auth layer: the Worker no longer
+  reads Access JWTs, and `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`,
+  `ACCESS_DEV_EMAIL`, `BOOTSTRAP_ADMIN_EMAILS`, and the `jose` dependency
+  are gone. Dashboard login is username/password with server-side
+  sessions; automation uses API tokens.
+- Identity is now the username: `users` is keyed by `username` (existing
+  emails stay valid as usernames), and `email` → `username` everywhere,
+  including `actor_email` → `actor` in audit logs and the API.
+- Smoke tests and the bench tool authenticate with `HOOKFLARE_API_TOKEN`
+  (Bearer) instead of `CF_ACCESS_CLIENT_ID`/`CF_ACCESS_CLIENT_SECRET`.
+- A first deploy needs `SETUP_TOKEN` (one-time onboarding that creates
+  the first admin) instead of a Zero Trust application; Turnstile
+  (`TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY`) on the login and
+  onboarding forms is recommended but optional.
+
+### Upgrade notes (2.0.0)
+
+1. Apply the D1 migrations: existing `users` and `audit_logs` rows
+   migrate losslessly (emails become usernames; service identities
+   become disabled rows that can never log in).
+2. Set `SETUP_TOKEN` (`wrangler secret put SETUP_TOKEN`), open the
+   Worker URL, and claim the first admin on the onboarding page — a
+   migrated database has no password hashes yet, so setup is open once.
+   Then set passwords for the other users (Settings › Users) and delete
+   `SETUP_TOKEN`.
+3. Create an API token for automation (Settings › Users) and export it
+   as `HOOKFLARE_API_TOKEN` where the smoke/bench runs.
+4. Optionally create a Turnstile widget for the Worker hostname and set
+   `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` (see
+   `docs/runbook/setup.md`). Without both, the login pages show a
+   "Turnstile is off" notice.
+5. The Zero Trust Access application in front of the Worker is no longer
+   needed — remove it, or keep it as a network gate (Hookflare ignores
+   its JWT).
+
 ### Changed
 
 - The ten pre-release D1 migrations are squashed into one baseline,

@@ -139,7 +139,7 @@ No verified full-DB backup in the last 36 h.
   alerts) have not beaten the heartbeat in 5 minutes — the cron triggers
   are missing or failing. `503 {"reason":"d1_unavailable"}`
   means the D1 probe failed. No response means the Worker is down or the
-  route/Access bypass is broken.
+  route is broken.
 - **Act:** `jobs_stale`: check the cron triggers are deployed
   (`wrangler deployments list --config <config>`) and the Worker logs
   (`wrangler tail`); a deploy that dropped crons needs a redeploy with
@@ -155,8 +155,7 @@ No verified full-DB backup in the last 36 h.
 - **Check:** Worker logs (`wrangler tail`) for `http.unhandled_error`
   with `request_id`; correlate the `request_id` the client got. Check
   `/healthz` and the D1 playbook — most ingress 500s are D1 or queue
-  errors, not routing bugs. Confirm the Access bypass for `/in/*` is
-  intact (a bypass failure looks like non-5xx rejections, not 500s).
+  errors, not routing bugs.
 - **Act:** If a deploy caused it, roll back ([rollback.md](rollback.md)).
   If D1/queue is the cause, follow that playbook. Pause nothing on the
   Hookflare side unless a single abusive source is the load — rate
@@ -217,34 +216,41 @@ No verified full-DB backup in the last 36 h.
 
 ## Dashboard lockout
 
-- **Symptom:** Nobody can log in: Access rejects everyone, or every
-  login lands on a user with no permissions.
-- **Check:** Is it Access (login page errors, wrong team domain) or
-  Hookflare (login works, API returns `403`)? For 403s, check the Users
-  API (`GET /api/admin/v1/users` — needs an operator session, so use a
-  service-token session if one still works) for whether any admin row
-  remains.
-- **Act (Access misconfigured):** Fix the Access application and its
-  policies in the Cloudflare Zero Trust dashboard (application covering
-  `/` and `/api/admin/*`, bypass for `/in/*` and `/healthz`).
-- **Act (no admin left):** Set `BOOTSTRAP_ADMIN_EMAILS` to a controlled
-  address and redeploy — bootstrap emails are granted admin on first
-  login. Then log in, re-create the real admin users on the Users page
-  (or `POST /api/admin/v1/users`), remove the temporary bootstrap
-  address, and redeploy. Service-token identities (`svc:<client id>`)
-  are never created by bootstrap emails, so automation access is
-  unaffected either way.
-- **Close:** Confirm a real admin can log in and act, the temporary
-  bootstrap address is removed, and the redeploy is recorded.
+- **Symptom:** Nobody can log in: every username gets `invalid_credentials`,
+  or every login lands on a user with no permissions.
+- **Check:** Is it the password or the role? If at least one admin session
+  or API token still works, check the Users API
+  (`GET /api/admin/v1/users`) for whether any enabled admin row with a
+  password remains. If nothing works, read the table directly — Cloudflare
+  dashboard, `wrangler d1 execute`, or the Cloudflare MCP D1 query
+  (`POST /accounts/{id}/d1/database/{db}/query`), e.g.
+  `SELECT username, role, disabled_at, password_hash IS NOT NULL AS has_password FROM users`.
+- **Act (an admin session or API token still works):** Reset the password
+  through the dashboard (Settings › Users → Reset password) or
+  `POST /api/admin/v1/users/:username/password`; re-enable or re-promote
+  the user if that is what broke. A password reset revokes that user's
+  sessions, so they log in again.
+- **Act (nothing works — reopen onboarding):** Clear every password hash
+  so setup opens again, then claim the first admin with `SETUP_TOKEN`:
+  `UPDATE users SET password_hash = NULL` via
+  `pnpm exec wrangler d1 execute <db> --remote --command "UPDATE users SET password_hash = NULL"`
+  `--config <config>` (verify on staging in drill), or the same SQL
+  through the Cloudflare MCP D1 query. Then open `/setup`, enter a
+  username, a password, and `SETUP_TOKEN` — existing rows keep their
+  roles, and the claimed account becomes admin. Afterwards re-set
+  passwords for the real users (Settings › Users) and confirm an admin
+  can log in and act.
+- **Close:** Confirm a real admin can log in and act, and that no
+  temporary account or token is left behind.
 
 ## Cloudflare platform incident
 
 - **Symptom:** Multiple unrelated things fail at once (Workers, D1,
-  Queues, Access), with no Hookflare deploy or settings change behind
+  Queues, R2), with no Hookflare deploy or settings change behind
   it.
 - **Check:** [cloudflarestatus.com](https://www.cloudflarestatus.com/)
   and the Cloudflare dashboard account notices. Confirm our config did
-  not change: latest deploy version, Access policies, queue and D1
+  not change: latest deploy version, queue and D1
   bindings untouched in the audit log (`/audit`).
 - **Act:** Do nothing destructive — no rollback, no restore, no secret
   rotation. Providers retry with backoff, so redeliver the backlog by

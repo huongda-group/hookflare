@@ -1,7 +1,7 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { AppBindings } from "../../app";
-import { touchApiTokenStmt, findTokenActor } from "../../core/db/api-tokens";
+import { findTokenActor, touchApiTokenStmt } from "../../core/db/api-tokens";
 import {
 	findSessionActor,
 	SESSION_ABSOLUTE_MS,
@@ -87,7 +87,7 @@ async function authenticateToken(
 	c: Context<AppBindings>,
 	next: () => Promise<void>,
 	token: string,
-): Promise<Response | void> {
+): Promise<Response | undefined> {
 	// Reject an empty or non-`hf_` credential before hashing it.
 	if (!token.startsWith(TOKEN_PREFIX)) {
 		return c.json({ error: "unauthorized" }, 401);
@@ -109,7 +109,7 @@ async function authenticateSession(
 	c: Context<AppBindings>,
 	next: () => Promise<void>,
 	token: string,
-): Promise<Response | void> {
+): Promise<Response | undefined> {
 	const { db, now } = c.var.deps;
 	const at = now();
 	const idHash = await sha256Hex(token);

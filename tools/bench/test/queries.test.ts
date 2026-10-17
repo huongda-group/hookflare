@@ -75,7 +75,7 @@ describe("timeQuery", () => {
 		);
 		expect(seen).toHaveLength(10);
 		expect(seen[0].url).toBe("https://h.example/api/admin/v1/overview");
-		expect(seen[0].headers["authorization"]).toBe("Bearer hf_test_token");
+		expect(seen[0].headers.authorization).toBe("Bearer hf_test_token");
 		expect(r.p50).toBe(50);
 		expect(r.p95).toBe(100);
 		expect(r.max).toBe(100);
@@ -165,7 +165,7 @@ describe("main", () => {
 		await main(["--reps", "1"], h.deps);
 		expect(h.headers.length).toBeGreaterThan(0);
 		for (const seen of h.headers) {
-			expect(seen["authorization"]).toBe("Bearer hf_test_token");
+			expect(seen.authorization).toBe("Bearer hf_test_token");
 			expect(seen).not.toHaveProperty("CF-Access-Client-Id");
 			expect(seen).not.toHaveProperty("CF-Access-Client-Secret");
 		}

@@ -1,5 +1,5 @@
 import type { AuditLog, Page } from "@hookflare/shared";
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { adminApp } from "../helpers/admin";
 import { testDeps } from "../helpers/deps";
 

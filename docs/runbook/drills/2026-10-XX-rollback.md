@@ -9,7 +9,7 @@ smoke test, roll back, smoke again).
 
 - Staging Worker URL: _
 - Sink URL: _
-- Service token client ID (`svc:<client id>` added as operator): _
+- API token (created for an admin user; exported as `HOOKFLARE_API_TOKEN`): _
 - Starting version (`wrangler deployments list --json`): _
 
 ## Steps

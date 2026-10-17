@@ -1,5 +1,5 @@
 import type { DestinationStats } from "@hookflare/shared";
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { destinations, statsHourly } from "../../src/core/db/schema";
 import { floorHour } from "../../src/core/db/stats";
 import { newId } from "../../src/core/ids";

@@ -1,11 +1,10 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { adminApp, auditRows } from "../helpers/admin";
 import { testDeps } from "../helpers/deps";
 import { faultyDeps } from "../helpers/faults";
 import { seedDelivery, seedPipeline } from "../helpers/seed";
 
 describe("GET /events/:id/payload", () => {
-
 	it("returns the raw bytes with safe headers and audits the view", async () => {
 		const deps = testDeps();
 		const p = await seedPipeline(deps);

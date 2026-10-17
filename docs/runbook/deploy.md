@@ -29,9 +29,9 @@ against live staging.
    --json`.
 5. **smoke** — runs the smoke test (see below). If the smoke env vars are
    missing the deploy fails **before any step runs**; pass `--skip-smoke`
-   (e.g. a first-time deployment before the service token exists) to deploy
+   (e.g. a first-time deployment before any account or API token exists) to deploy
    without it, which prints a loud notice and records `"smoke": "skipped"`.
-   A Workers Builds (Git-connected) deploy has no sink or service token, so
+   A Workers Builds (Git-connected) deploy has no sink or API token, so
    its deploy command is `pnpm run deploy -- --skip-smoke`; run
    `pnpm run smoke` from a machine with the smoke env afterwards.
 6. **report** — writes `.deploy/<timestamp>.json` (git-ignored) with the
@@ -54,8 +54,7 @@ pnpm smoke:staging   # node scripts/smoke.mjs --config apps/gateway/wrangler.sta
 pnpm run smoke        # production (verify: same script, production config)
 ```
 
-Export the four env vars first: the gateway origin, `CF_ACCESS_CLIENT_ID` /
-`CF_ACCESS_CLIENT_SECRET` (service token), and `SINK_URL` (sink origin).
+Export the three env vars first: the gateway origin, `HOOKFLARE_API_TOKEN` (an admin API token, created in Settings › Users), and `SINK_URL` (sink origin).
 The gateway origin variable is named after the Worker in the config, so a
 URL left in the shell can never smoke-test the wrong environment:
 `HOOKFLARE_URL` for `hookflare` (production) and `HOOKFLARE_STAGING_URL`

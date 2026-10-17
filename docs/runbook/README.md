@@ -7,7 +7,8 @@ operator who has never seen the code.
 Pages:
 
 - [setup.md](setup.md) — create staging (or production) resources, secrets,
-  the Access application, the sink, and the first deploy.
+  the setup token, the Turnstile widget, the sink, the API token, and the
+  first deploy.
 - [deploy.md](deploy.md) — the normal release path (`scripts/deploy.mjs`).
 - [migrations.md](migrations.md) — expand → deploy → contract, with a worked
   rename example.
@@ -46,7 +47,7 @@ Pages:
 |---|---|
 | Gateway Worker | The main Hookflare Worker (`apps/gateway`): ingress, delivery, admin API, dashboard assets. |
 | Sink | A tiny throwaway Worker (`tools/sink`) used as a fake backend for smoke tests and benchmarks. It records what it receives; it never verifies signatures. |
-| Service token | A Cloudflare Access service token used by automation (smoke/bench scripts). Its identity inside Hookflare is `svc:<client id>`. |
+| API token | An `hf_…` Bearer token for automation (smoke/bench scripts), created in Settings › Users for a user whose role covers the calls. Exported as `HOOKFLARE_API_TOKEN`. |
 | Restore point | The D1 Time Travel bookmark plus the Worker version recorded by `scripts/deploy.mjs` before a release changes anything. Stored in `.deploy/<timestamp>.json` (git-ignored). |
 | Expand → deploy → contract | The only safe schema-change sequence: first add the new shape (expand), then deploy code that works with both shapes, then remove the old shape (contract) in a later release. |
 | Rollback | `wrangler rollback <version-id>`: redeploys a previous Worker version. It does **not** undo D1 schema/data, R2 objects, queue messages, DO migrations, or API-changed settings. |
