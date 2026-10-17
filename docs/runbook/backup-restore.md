@@ -78,38 +78,94 @@ time, size, rows) or the `backups` table. Prefixes look like
 pnpm exec wrangler d1 create hookflare-restore-<date> --config apps/gateway/wrangler.staging.jsonc
 ```
 
-Put the new `database_id` in a copy of the config (never edit the
-committed staging config in place for a drill database), then apply the
-repository migrations — only up to the last name in the backup's
-`d1_migrations`, so the schema matches the backed-up rows:
+Copy the config next to the original, e.g.
+`apps/gateway/wrangler.restore.jsonc` (do not commit it; never edit the
+committed configs in place for a restore database), and put the new
+`database_id` in its `DB` entry of `d1_databases`.
+
+The new database must end up with **exactly** the migrations listed in
+the backup's `manifest.json` `d1_migrations` — no more, no fewer — or
+the backed-up rows will not fit the schema. Copy exactly those
+migration files out of the repository:
 
 ```bash
-pnpm exec wrangler d1 migrations apply DB --remote --config <restore-config>
+node scripts/restore-backup.mjs --prefix d1/YYYY/MM/DD/<backup_id>/ --prepare-migrations
+```
+
+This downloads the manifest to `.restore/<backup_id>/manifest.json` and
+copies each listed file from `apps/gateway/migrations/` into
+`.restore/<backup_id>/migrations/`, printing that absolute path. It
+refuses, copying nothing, if a listed migration is missing from the
+checkout (the backup was taken by a newer release): check out the
+release that took the backup (its deploy record, or the latest commit
+whose `apps/gateway/migrations/` contains every listed name) and run it
+again. Then set `"migrations_dir": "<printed path>"` in the
+restore config's `DB` entry and apply:
+
+```bash
+pnpm exec wrangler d1 migrations apply DB --remote --config apps/gateway/wrangler.restore.jsonc
 ```
 
 ### Step 2 — restore the rows (verify on staging in drill)
 
 ```bash
-node scripts/restore-backup.mjs --prefix d1/YYYY/MM/DD/<backup_id>/ --config <restore-config>
+node scripts/restore-backup.mjs --prefix d1/YYYY/MM/DD/<backup_id>/ --config apps/gateway/wrangler.restore.jsonc
 ```
 
-What the script does: downloads `manifest.json` and every part from the
-backups bucket (`--bucket` defaults to `hookflare-backups`; pass
-`--bucket hookflare-backups-staging` on staging), checks every sha256,
-writes rows to numbered SQL files of at most 50 MB under
-`.restore/<backup_id>/` (tables in parent-before-child order; rows with a
-missing parent go to `.restore/<backup_id>/orphans.json` instead), and
-applies each file with `wrangler d1 execute DB --remote --file --config
-<restore-config>`. Pass `--dry-run` to download and generate without
-applying.
+The scripts run the repository's pinned wrangler
+(`node_modules/.bin/wrangler`, after `pnpm install`) and fall back to
+`wrangler` on `PATH` if it is missing.
+
+Before writing anything the script refuses to continue when:
+
+- the target `database_id` is the production database in
+  `apps/gateway/wrangler.jsonc` — always, there is no override;
+- the target is the staging database in
+  `apps/gateway/wrangler.staging.jsonc`, unless `--allow-known-db` is
+  passed (only for a deliberate restore over staging; a drill restores
+  into a new database and never needs it);
+- the target's `d1_migrations` differ from the manifest's (it prints the
+  missing and extra names — redo step 1);
+- any manifest table on the target already has rows (it prints the
+  counts). This check is skipped when resuming.
+
+Then it downloads `manifest.json` and every part from the backups bucket
+(`--bucket` defaults to `hookflare-backups`; pass
+`--bucket hookflare-backups-staging` on staging), checks every sha256
+(parts already on disk with the right sha256 are not downloaded again),
+streams the rows into numbered SQL files of at most 50 MB under
+`.restore/<backup_id>/sql/` (tables in parent-before-child order; every
+statement stays under 90 KB, with large TEXT and BLOB values appended in
+chunks), and applies each file with `wrangler d1 execute DB --remote
+--file`. Rows with a missing parent — including rows below an orphaned
+row in a self-referencing table — are skipped and counted in
+`.restore/<backup_id>/orphans.json`, which holds only each orphan's
+table, key and foreign-key values (never bodies or secrets). Pass
+`--dry-run` to download and generate without querying or applying.
+
+**Resuming.** Each applied file is recorded in
+`.restore/<backup_id>/applied.json` (with the target `database_id` and
+the file's sha256). If a file fails, the script prints
+`restore: stopped at NNNN.sql` and exits 1. Fix the cause and re-run the
+same command: it regenerates the same SQL, skips the recorded files, and
+continues from the failed one. D1 applies a `--file` import as a single
+unit, so a failed file should have left no rows (verify on staging in
+drill); if re-applying it fails with a `UNIQUE constraint` error, the
+file was partly applied — restore into a fresh database instead. `--from NNNN` starts at file
+`NNNN` regardless of `applied.json` (use it only if `applied.json` was
+lost; files before `NNNN` must already be applied). The script refuses to
+resume against a different `database_id` than the one in `applied.json`,
+or if a recorded file was regenerated with different contents.
 
 ### Step 3 — verify (verify on staging in drill)
 
 ```bash
-node scripts/verify-restore.mjs --prefix d1/YYYY/MM/DD/<backup_id>/ --config <restore-config>
+node scripts/verify-restore.mjs --prefix d1/YYYY/MM/DD/<backup_id>/ --config apps/gateway/wrangler.restore.jsonc
 ```
 
-Checks `PRAGMA integrity_check`, an empty `PRAGMA foreign_key_check`,
+Checks that each manifest table's `rows` equals the sum of its parts'
+rows (a mismatch means the manifest itself is inconsistent — use another
+backup), `PRAGMA integrity_check`, an empty `PRAGMA foreign_key_check`,
 row counts equal to the manifest minus `orphans.json`, per-column BLOB
 byte totals equal to the manifest minus orphaned BLOBs, and
 `d1_migrations` equal to the manifest. Exit 1 on any difference —
@@ -121,7 +177,7 @@ Change `database_id` in the config to the restored database, deploy, and
 smoke-test:
 
 ```bash
-pnpm exec wrangler deploy --config <restore-config>
+pnpm exec wrangler deploy --config apps/gateway/wrangler.restore.jsonc
 pnpm smoke:staging
 ```
 
