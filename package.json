@@ -2,7 +2,7 @@
 	"name": "@huongda-group/hookflare",
 	"version": "1.0.0",
 	"private": true,
-	"packageManager": "pnpm@12.13.0",
+	"packageManager": "pnpm@12.14.0",
 	"scripts": {
 		"dev": "node scripts/ensure-dashboard-dist.mjs && wrangler dev --config apps/gateway/wrangler.jsonc",
 		"dev:dashboard": "pnpm --filter dashboard dev",
@@ -24,6 +24,11 @@
 	"devDependencies": {
 		"@biomejs/biome": "2.5.15",
 		"typescript": "7.0.2",
-		"wrangler": "4.151.0"
-	}
+		"wrangler": "4.151.1"
+	},
+	"workspaces": [
+		"apps/*",
+		"packages/*",
+		"tools/*"
+	]
 }
