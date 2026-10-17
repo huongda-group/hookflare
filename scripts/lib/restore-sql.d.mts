@@ -26,10 +26,25 @@ export type Manifest = {
 	tables: ManifestTable[];
 };
 
+export type OrphanEntry = {
+	table: string;
+	key: Record<string, unknown> | null;
+	fk: Record<string, unknown>;
+};
+
 export type OrphanReport = Record<
 	string,
-	{ count: number; sample: unknown[]; blob_bytes?: Record<string, number> }
+	{
+		count: number;
+		sample: OrphanEntry[];
+		blob_bytes?: Record<string, number>;
+	}
 >;
+
+export function orphanEntry(
+	table: ManifestTable,
+	row: Record<string, unknown>,
+): OrphanEntry;
 
 export function valueLiteral(value: unknown): string;
 

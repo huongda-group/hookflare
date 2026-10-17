@@ -364,37 +364,74 @@ export function rowStatements(table, row, maxStmt = 90000) {
 }
 
 /**
- * Orphan report: dropped rows per table with a small sample.
- * @typedef {Record<string, { count: number, sample: unknown[], blob_bytes?: Record<string, number> }>} OrphanReport
+ * One sampled orphan: never the full row (bodies, secrets), only its
+ * table, its key, and its FK column values.
+ * @typedef {{ table: string, key: Record<string, unknown> | null, fk: Record<string, unknown> }} OrphanEntry
  */
 
 /**
- * Admits rows whose non-null FK parents were already admitted, so a
- * missing parent drops its whole subtree (deliveries, then attempts).
- * Tables must be fed in `tableOrder`. Before streaming a table's rows
- * through `admit`, call `preload` with that table's rows: a
- * self-referencing FK is then checked against the pre-collected key set,
- * so forward self-references (child streamed before its parent) admit.
- * Without a prior `preload`, self-references fall back to the keys seen
- * so far in the same table.
+ * Orphan report: dropped rows per table with a small sample.
+ * @typedef {Record<string, { count: number, sample: OrphanEntry[], blob_bytes?: Record<string, number> }>} OrphanReport
+ */
+
+/**
+ * The `orphans.json` sample entry for a dropped row: table, key (null
+ * for rowid tables) and FK column values only.
+ * @param {ManifestTable} table
+ * @param {Record<string, unknown>} row
+ * @returns {OrphanEntry}
+ */
+export function orphanEntry(table, row) {
+	const fk = {};
+	for (const f of table.foreign_keys) {
+		fk[f.column] = row[f.column] ?? null;
+	}
+	return {
+		table: table.name,
+		key:
+			"column" in table.key
+				? { [table.key.column]: row[table.key.column] ?? null }
+				: null,
+		fk,
+	};
+}
+
+/**
+ * Admits rows whose non-null FK parents were already admitted, matching
+ * each FK on its `fk.to` column, so a missing parent drops its whole
+ * subtree (deliveries, then attempts). Tables must be fed in
+ * `tableOrder`. For a self-referencing table, call `preload` with its
+ * rows before streaming them through `admit`: forward self-references
+ * (child streamed before its parent) then admit, and a row whose
+ * self-referenced parent was orphaned is orphaned too. Without a prior
+ * `preload`, self-references only match rows admitted so far.
  * @param {Manifest} manifest
  * @returns {{ admit: (table: string | ManifestTable, row: Record<string, unknown>) => boolean, preload: (table: string | ManifestTable, rows: Iterable<Record<string, unknown>>) => void, report: () => OrphanReport }}
  */
 export function createOrphanFilter(manifest) {
 	const byName = new Map(manifest.tables.map((t) => [t.name, t]));
-	/** Table -> admitted parent key values. */
+	/**
+	 * Table -> column -> values of admitted rows, for every column some FK
+	 * points at (`fk.to`).
+	 * @type {Map<string, Map<string, Set<unknown>>>}
+	 */
 	const admitted = new Map();
-	/** Table -> key values seen so far (for self-referencing FKs). */
-	const seen = new Map();
-	/** Table -> pre-collected own key values (via `preload`). */
+	for (const t of manifest.tables) {
+		admitted.set(t.name, new Map());
+	}
+	for (const t of manifest.tables) {
+		for (const fk of t.foreign_keys) {
+			admitted.get(fk.table)?.set(fk.to, new Set());
+		}
+	}
+	/**
+	 * Table -> key-only records collected by `preload` (own key, FK and
+	 * `fk.to` values), plus the lazily computed set of orphaned own keys.
+	 * @type {Map<string, { records: Map<unknown, Record<string, unknown>>, orphaned: Set<unknown> | null }>}
+	 */
 	const preloaded = new Map();
 	/** Table -> { count, sample }. */
 	const orphans = new Map();
-	for (const t of manifest.tables) {
-		admitted.set(t.name, new Set());
-		seen.set(t.name, new Set());
-		preloaded.set(t.name, new Set());
-	}
 	/**
 	 * Resolve a table name or table object to its manifest entry.
 	 * @param {string | ManifestTable} table
@@ -421,19 +458,154 @@ export function createOrphanFilter(manifest) {
 			: JSON.stringify(row);
 	}
 	/**
-	 * Pre-collect a table's own keys before streaming its rows through
-	 * `admit`, so forward self-references admit. Additive: safe to call
-	 * once per part batch.
+	 * Only the values the filter needs: the table's key, its FK columns,
+	 * and the columns other rows point at.
+	 * @param {ManifestTable} info
+	 * @param {Record<string, unknown>} row
+	 * @returns {Record<string, unknown>}
+	 */
+	function keyOnly(info, row) {
+		const out = {};
+		if ("column" in info.key) {
+			out[info.key.column] = row[info.key.column] ?? null;
+		}
+		for (const fk of info.foreign_keys) {
+			out[fk.column] = row[fk.column] ?? null;
+		}
+		for (const col of admitted.get(info.name).keys()) {
+			out[col] = row[col] ?? null;
+		}
+		return out;
+	}
+	/**
+	 * True when every non-self FK value is null or an admitted parent value.
+	 * @param {ManifestTable} info
+	 * @param {Record<string, unknown>} row
+	 * @returns {boolean}
+	 */
+	function parentsOk(info, row) {
+		for (const fk of info.foreign_keys) {
+			const value = row[fk.column] ?? null;
+			if (value === null || fk.table === info.name) {
+				continue;
+			}
+			if (!admitted.get(fk.table)?.get(fk.to)?.has(value)) {
+				return false;
+			}
+		}
+		return true;
+	}
+	/**
+	 * Own keys of preloaded rows that must be orphaned: a non-self parent
+	 * is missing, a self-referenced row is missing, or a self-referenced
+	 * row is itself orphaned (propagated down the whole subtree). Rows in
+	 * a self-reference cycle with no missing parent are kept.
+	 * @param {ManifestTable} info
+	 * @returns {Set<unknown>}
+	 */
+	function resolveOrphaned(info) {
+		const pre = preloaded.get(info.name);
+		if (pre.orphaned) {
+			return pre.orphaned;
+		}
+		const selfFks = info.foreign_keys.filter((fk) => fk.table === info.name);
+		/** `fk.to` column -> value -> own key of the row holding it. */
+		const owners = new Map();
+		for (const fk of selfFks) {
+			if (!owners.has(fk.to)) {
+				const byValue = new Map();
+				for (const [key, rec] of pre.records) {
+					const v = rec[fk.to] ?? null;
+					if (v !== null) {
+						byValue.set(v, key);
+					}
+				}
+				owners.set(fk.to, byValue);
+			}
+		}
+		const orphaned = new Set();
+		/** Parent own key -> child own keys. */
+		const children = new Map();
+		const queue = [];
+		for (const [key, rec] of pre.records) {
+			let bad = !parentsOk(info, rec);
+			for (const fk of selfFks) {
+				const v = rec[fk.column] ?? null;
+				if (v === null) {
+					continue;
+				}
+				const owner = owners.get(fk.to).get(v);
+				if (owner === undefined) {
+					bad = true;
+				} else if (owner !== key) {
+					let list = children.get(owner);
+					if (!list) {
+						list = [];
+						children.set(owner, list);
+					}
+					list.push(key);
+				}
+			}
+			if (bad) {
+				orphaned.add(key);
+				queue.push(key);
+			}
+		}
+		while (queue.length > 0) {
+			const key = queue.pop();
+			for (const child of children.get(key) ?? []) {
+				if (!orphaned.has(child)) {
+					orphaned.add(child);
+					queue.push(child);
+				}
+			}
+		}
+		pre.orphaned = orphaned;
+		return orphaned;
+	}
+	/**
+	 * Pre-collect a self-referencing table's key-only records before
+	 * streaming its rows through `admit`, so forward self-references
+	 * admit and an orphaned parent orphans its whole subtree. Call it
+	 * after every parent table has been admitted. Additive: safe to call
+	 * once per part.
 	 * @param {string | ManifestTable} table
 	 * @param {Iterable<Record<string, unknown>>} rows
 	 * @returns {void}
 	 */
 	function preload(table, rows) {
 		const info = resolve(table);
-		const keys = preloaded.get(info.name);
-		for (const row of rows) {
-			keys.add(ownKeyOf(info, row));
+		let pre = preloaded.get(info.name);
+		if (!pre) {
+			pre = { records: new Map(), orphaned: null };
+			preloaded.set(info.name, pre);
 		}
+		pre.orphaned = null;
+		for (const row of rows) {
+			pre.records.set(ownKeyOf(info, row), keyOnly(info, row));
+		}
+	}
+	/**
+	 * Self-reference check for a row `preload` did not see: every self FK
+	 * value is the row itself or an already admitted row.
+	 * @param {ManifestTable} info
+	 * @param {Record<string, unknown>} row
+	 * @returns {boolean}
+	 */
+	function selfOkSoFar(info, row) {
+		for (const fk of info.foreign_keys) {
+			const value = row[fk.column] ?? null;
+			if (value === null || fk.table !== info.name) {
+				continue;
+			}
+			if (
+				value !== (row[fk.to] ?? null) &&
+				!admitted.get(info.name).get(fk.to)?.has(value)
+			) {
+				return false;
+			}
+		}
+		return true;
 	}
 	/**
 	 * @param {string | ManifestTable} table
@@ -443,27 +615,12 @@ export function createOrphanFilter(manifest) {
 	function admit(table, row) {
 		const info = resolve(table);
 		const ownKey = ownKeyOf(info, row);
-		seen.get(info.name).add(ownKey);
-		for (const fk of info.foreign_keys) {
-			const value = row[fk.column] ?? null;
-			if (value === null || value === undefined) {
-				continue;
-			}
-			if (fk.table === info.name) {
-				// Self-reference: admit against the pre-collected key set
-				// (forward references OK), falling back to keys seen so
-				// far when `preload` was not called. The row itself was
-				// just added to `seen` above.
-				if (
-					value === ownKey ||
-					preloaded.get(info.name).has(value) ||
-					seen.get(info.name).has(value)
-				) {
-					continue;
-				}
-			} else if (admitted.get(fk.table)?.has(value)) {
-				continue;
-			}
+		const pre = preloaded.get(info.name);
+		const ok =
+			pre?.records.has(ownKey) === true
+				? !resolveOrphaned(info).has(ownKey)
+				: parentsOk(info, row) && selfOkSoFar(info, row);
+		if (!ok) {
 			let entry = orphans.get(info.name);
 			if (!entry) {
 				entry = { count: 0, sample: [] };
@@ -471,11 +628,16 @@ export function createOrphanFilter(manifest) {
 			}
 			entry.count += 1;
 			if (entry.sample.length < 5) {
-				entry.sample.push(row);
+				entry.sample.push(orphanEntry(info, row));
 			}
 			return false;
 		}
-		admitted.get(info.name).add(ownKey);
+		for (const [col, values] of admitted.get(info.name)) {
+			const v = row[col] ?? null;
+			if (v !== null) {
+				values.add(v);
+			}
+		}
 		return true;
 	}
 	function report() {

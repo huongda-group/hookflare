@@ -189,6 +189,104 @@ describe("createOrphanFilter", () => {
 		assert.equal(report.delivery_attempts.count, 1);
 	});
 
+	it("samples only the table, key and FK values of an orphan", () => {
+		const filter = createOrphanFilter(pipelineManifest());
+		filter.admit("projects", { id: "prj_1" });
+		filter.admit("destinations", { id: "dst_1", project_id: "prj_1" });
+		filter.admit("sources", {
+			id: "src_1",
+			project_id: "prj_1",
+			destination_id: "dst_1",
+		});
+		assert.equal(
+			filter.admit("webhook_events", {
+				id: "evt_1",
+				source_id: "src_gone",
+				body_inline: { $b64: "c2VjcmV0" },
+			}),
+			false,
+		);
+		assert.deepEqual(filter.report().webhook_events, {
+			count: 1,
+			sample: [
+				{
+					table: "webhook_events",
+					key: { id: "evt_1" },
+					fk: { source_id: "src_gone" },
+				},
+			],
+		});
+	});
+
+	it("matches parent keys on the FK's `to` column, not only the PK", () => {
+		const manifest = {
+			version: 1,
+			backup_id: "b1",
+			prefix: "p/",
+			started_at: 1,
+			finished_at: 2,
+			d1_migrations: [],
+			tables: [
+				table("parents", { columns: ["id", "slug"] }),
+				table("children", {
+					columns: ["id", "parent_slug"],
+					fks: [{ column: "parent_slug", table: "parents", to: "slug" }],
+				}),
+			],
+		};
+		const filter = createOrphanFilter(manifest);
+		assert.equal(filter.admit("parents", { id: "p1", slug: "alpha" }), true);
+		assert.equal(
+			filter.admit("children", { id: "c1", parent_slug: "alpha" }),
+			true,
+		);
+		assert.equal(
+			filter.admit("children", { id: "c2", parent_slug: "p1" }),
+			false,
+		);
+	});
+
+	it("orphans a self-referencing subtree whose root was orphaned", () => {
+		const manifest = {
+			version: 1,
+			backup_id: "b1",
+			prefix: "p/",
+			started_at: 1,
+			finished_at: 2,
+			d1_migrations: [],
+			tables: [
+				table("projects"),
+				table("nodes", {
+					columns: ["id", "code", "project_id", "parent_code"],
+					fks: [
+						{ column: "project_id", table: "projects", to: "id" },
+						{ column: "parent_code", table: "nodes", to: "code" },
+					],
+				}),
+			],
+		};
+		const filter = createOrphanFilter(manifest);
+		filter.admit("projects", { id: "prj_1" });
+		// Children stream before their parents (forward references).
+		const rows = [
+			{ id: "n3", code: "c3", project_id: "prj_1", parent_code: "c2" },
+			{ id: "n2", code: "c2", project_id: "prj_1", parent_code: "c1" },
+			{ id: "n1", code: "c1", project_id: "prj_gone", parent_code: null },
+			{ id: "k2", code: "k2", project_id: "prj_1", parent_code: "k1" },
+			{ id: "k1", code: "k1", project_id: "prj_1", parent_code: null },
+			{ id: "y1", code: "y1", project_id: "prj_1", parent_code: "y2" },
+			{ id: "y2", code: "y2", project_id: "prj_1", parent_code: "y1" },
+			{ id: "m1", code: "m1", project_id: "prj_1", parent_code: "n1" },
+		];
+		filter.preload("nodes", rows);
+		const admitted = rows.filter((r) => filter.admit("nodes", r));
+		assert.deepEqual(
+			admitted.map((r) => r.id),
+			["k2", "k1", "y1", "y2"],
+		);
+		assert.equal(filter.report().nodes.count, 4);
+	});
+
 	it("admits a forward self-reference after preloading keys", () => {
 		const manifest = {
 			version: 1,
