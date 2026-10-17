@@ -9,8 +9,14 @@ import { readSetting, STORAGE_SETTING } from "./settings";
 export type BackupParams = {
 	backupId: string;
 	trigger: "cron" | "manual";
+	/**
+	 * Table names the first instance listed. A continuation backs up exactly
+	 * these, so a migration between instances cannot shift the resume point.
+	 */
+	tables?: string[];
+	/** Where a continuation picks up: the table by name, not by index. */
 	resume?: {
-		tableIndex: number;
+		tableName: string;
 		cursor: string | number | null;
 		partNo: number;
 	};
@@ -20,6 +26,7 @@ export type StartBackupOpts = {
 	instanceId: string;
 	trigger: BackupParams["trigger"];
 	backupId?: string;
+	tables?: BackupParams["tables"];
 	resume?: BackupParams["resume"];
 };
 
@@ -41,6 +48,7 @@ export async function startBackupRun(
 			params: {
 				backupId,
 				trigger: opts.trigger,
+				...(opts.tables ? { tables: opts.tables } : {}),
 				...(opts.resume ? { resume: opts.resume } : {}),
 			},
 		});

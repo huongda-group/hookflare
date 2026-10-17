@@ -73,6 +73,30 @@ async function readPartSidecars(
 }
 
 /**
+ * Restricts the live table list to the names the first instance pinned, in
+ * that order. A pinned table that no longer exists fails the run; tables
+ * created since are left out (and reported as `added`) so every instance of
+ * one backup covers the same list.
+ */
+function pinTables(
+	live: TableInfo[],
+	pinned: string[] | undefined,
+): { list: TableInfo[]; added: string[] } {
+	if (!pinned) return { list: live, added: [] };
+	const byName = new Map(live.map((t) => [t.name, t]));
+	const list = pinned.map((name) => {
+		const t = byName.get(name);
+		if (!t)
+			throw new Error(
+				`table ${name} no longer exists: it was dropped while the backup was running`,
+			);
+		return t;
+	});
+	const keep = new Set(pinned);
+	return { list, added: live.filter((t) => !keep.has(t.name)).map((t) => t.name) };
+}
+
+/**
  * Spec M6. Orchestration only: every step is a plain function over Deps.
  * Code outside a step is deterministic (Workflows replays it), so the
  * table list, cursor, and part numbers come from persisted step results.
@@ -98,18 +122,33 @@ export async function runBackup(
 				.from(backups)
 				.where(eq(backups.id, params.backupId));
 			if (!row) throw new Error(`backup ${params.backupId} not found`);
+			const pinned = pinTables(await listTables(d.db), params.tables);
+			if (pinned.added.length > 0)
+				logger.warn("backup.tables_added", {
+					backup_id: params.backupId,
+					tables: pinned.added,
+				});
 			return {
-				tables: await listTables(d.db),
+				tables: pinned.list,
 				prefix: row.prefix,
 				startedAt: row.startedAt,
 			};
 		});
+		const tables = start.tables;
+		const names = tables.map((t) => t.name);
 
 		let parts = 0;
-		let tableIndex = params.resume?.tableIndex ?? 0;
-		for (; tableIndex < start.tables.length; tableIndex++) {
-			const table = start.tables[tableIndex];
-			const resumed = tableIndex === params.resume?.tableIndex;
+		let tableIndex = 0;
+		if (params.resume) {
+			tableIndex = names.indexOf(params.resume.tableName);
+			if (tableIndex < 0)
+				throw new Error(
+					`resume table ${params.resume.tableName} is not in the backup's table list`,
+				);
+		}
+		for (; tableIndex < tables.length; tableIndex++) {
+			const table = tables[tableIndex];
+			const resumed = table.name === params.resume?.tableName;
 			let cursor: string | number | null =
 				resumed && params.resume ? params.resume.cursor : null;
 			let partNo = resumed && params.resume ? params.resume.partNo : 1;
@@ -118,11 +157,16 @@ export async function runBackup(
 					dumpPart(deps(), table, start.prefix, partNo, cursor),
 				);
 				if (part) parts += 1;
+				const following = tables[tableIndex + 1];
 				const resume: BackupParams["resume"] =
-					next === null
-						? { tableIndex: tableIndex + 1, cursor: null, partNo: 1 }
-						: { tableIndex, cursor: next, partNo: partNo + 1 };
-				if (used >= limits.stepBudget - FINAL_STEPS) {
+					next !== null
+						? { tableName: table.name, cursor: next, partNo: partNo + 1 }
+						: following
+							? { tableName: following.name, cursor: null, partNo: 1 }
+							: undefined;
+				// After the last table only the final steps remain, and the
+				// budget always leaves room for them: no continuation needed.
+				if (resume && used >= limits.stepBudget - FINAL_STEPS) {
 					const { base, n } = continuationOf(instanceId);
 					await at("continue", () =>
 						startBackupRun(
@@ -131,6 +175,7 @@ export async function runBackup(
 								instanceId: `${base}-cont-${n}`,
 								trigger: params.trigger,
 								backupId: params.backupId,
+								tables: names,
 								resume,
 							},
 							logger,
@@ -149,7 +194,7 @@ export async function runBackup(
 			await writeManifest(
 				d,
 				params.backupId,
-				start.tables,
+				tables,
 				await readPartSidecars(d, start.prefix),
 				start.startedAt,
 			);

@@ -7,6 +7,7 @@ import {
 import { eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	type BackupParams,
 	isBackupRunning,
 	readBackupSummary,
 	startBackupRun,
@@ -169,7 +170,9 @@ describe("runBackup", () => {
 		const cont = backup.created.find((c) => c.id === `${base}-cont-1`);
 		expect(cont).toBeDefined();
 		const resume = (cont?.params as { resume?: unknown })?.resume;
-		expect(resume).toMatchObject({ tableIndex: expect.any(Number) });
+		expect(resume).toMatchObject({ tableName: expect.any(String) });
+		const tables = (cont?.params as { tables?: unknown })?.tables;
+		expect(tables).toEqual((await listTables(deps.db)).map((t) => t.name));
 
 		const [running] = await deps.db
 			.select()
@@ -183,11 +186,7 @@ describe("runBackup", () => {
 			{
 				backupId: base,
 				trigger: "manual",
-				resume: resume as {
-					tableIndex: number;
-					cursor: string | number | null;
-					partNo: number;
-				},
+				...(cont?.params as Pick<BackupParams, "resume" | "tables">),
 			},
 			`${base}-cont-1`,
 			logger,
@@ -210,6 +209,91 @@ describe("runBackup", () => {
 			counts(await readManifest(deps, solo)),
 		);
 		expect(soloRows.tables.length).toBeGreaterThan(0);
+	});
+
+	/** Runs the first instance with a tiny budget; returns the continuation params. */
+	async function splitFirst(prefix: string) {
+		const backup = recordingBackup();
+		const splitDeps = testDeps({ backup });
+		const base = `${prefix}-${Date.now()}`;
+		await startBackupRun(
+			splitDeps,
+			{ instanceId: base, trigger: "manual" },
+			logger,
+		);
+		const first = await runBackup(
+			plain,
+			() => splitDeps,
+			{ backupId: base, trigger: "manual" },
+			base,
+			logger,
+			{ stepBudget: 6 },
+		);
+		expect(first.continued).toBe(true);
+		const cont = backup.created.find((c) => c.id === `${base}-cont-1`);
+		return { base, splitDeps, params: cont?.params as BackupParams };
+	}
+
+	it("continuation keeps the original table list when a table is added between instances", async () => {
+		const p = await seedPipeline(deps);
+		await seedDelivery(deps, p, { status: "delivered" });
+		const { base, splitDeps, params } = await splitFirst("bk-added");
+		// "aaa_…" sorts first: an index-based resume would shift by one.
+		await deps.db.run(sql`CREATE TABLE aaa_added_mid_run (id TEXT PRIMARY KEY)`);
+		await deps.db.run(sql`INSERT INTO aaa_added_mid_run VALUES ('x')`);
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const second = await runBackup(
+				plain,
+				() => splitDeps,
+				params,
+				`${base}-cont-1`,
+				createLogger({ LOG_LEVEL: "warn" }),
+			);
+			expect(second.continued).toBe(false);
+			const msgs = warn.mock.calls.map((c) => JSON.parse(String(c[0])));
+			expect(msgs).toContainEqual(
+				expect.objectContaining({
+					msg: "backup.tables_added",
+					tables: ["aaa_added_mid_run"],
+				}),
+			);
+		} finally {
+			warn.mockRestore();
+			await deps.db.run(sql`DROP TABLE aaa_added_mid_run`);
+		}
+		const [done] = await deps.db
+			.select()
+			.from(backups)
+			.where(eq(backups.id, base));
+		expect(done.status).toBe("verified");
+		const manifest = await readManifest(deps, base);
+		expect(manifest.tables.map((t) => t.name)).toEqual(params.tables);
+		const counts = await rowCounts(deps);
+		for (const t of manifest.tables) {
+			if (t.name === "backups") continue;
+			expect([t.name, t.rows]).toEqual([t.name, counts[t.name]]);
+		}
+	});
+
+	it("continuation fails clearly when a table of the original list vanished", async () => {
+		await deps.db.run(sql`CREATE TABLE zzz_vanishing (id TEXT PRIMARY KEY)`);
+		let dropped = false;
+		try {
+			const { base, splitDeps, params } = await splitFirst("bk-vanish");
+			await deps.db.run(sql`DROP TABLE zzz_vanishing`);
+			dropped = true;
+			await expect(
+				runBackup(plain, () => splitDeps, params, `${base}-cont-1`, logger),
+			).rejects.toThrow(/zzz_vanishing.*no longer exists/);
+			const [row] = await deps.db
+				.select()
+				.from(backups)
+				.where(eq(backups.id, base));
+			expect(row.status).toBe("failed");
+		} finally {
+			if (!dropped) await deps.db.run(sql`DROP TABLE zzz_vanishing`);
+		}
 	});
 
 	it("failure marks failed: an R2 put that throws leaves the error text", async () => {
