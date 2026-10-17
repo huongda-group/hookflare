@@ -1,5 +1,5 @@
 import type { BackupSummary } from "@hookflare/shared";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { Deps } from "../deps";
 import { ARCHIVE_RUNNING } from "./archive-run";
 import { backups } from "./db/schema";
@@ -99,8 +99,9 @@ export async function startBackupRun(
 /**
  * True while any `running` row's instance is still live (`ARCHIVE_RUNNING`
  * or `unknown`: adopting a live instance's backup would run it twice). A
- * row whose instance is gone from Workflows retention failed: it is marked
- * `failed` with `instance lost` so the next cron starts over.
+ * row whose instance is gone from Workflows retention (`instance lost`) or
+ * ended as errored, terminated, or complete (`instance <status>`) is marked
+ * `failed`, so the next cron starts over.
  */
 export async function isBackupRunning(deps: Deps): Promise<boolean> {
 	const rows = await deps.db
@@ -108,25 +109,45 @@ export async function isBackupRunning(deps: Deps): Promise<boolean> {
 		.from(backups)
 		.where(eq(backups.status, "running"));
 	for (const row of rows) {
+		let status: string;
 		try {
-			const { status } = await (await deps.backup.get(row.instanceId)).status();
-			if (
-				status === "unknown" ||
-				(ARCHIVE_RUNNING as readonly string[]).includes(status)
-			)
-				return true;
+			({ status } = await (await deps.backup.get(row.instanceId)).status());
 		} catch (err) {
-			if (/not.?found/i.test(String(err))) {
-				await deps.db
-					.update(backups)
-					.set({ status: "failed", error: "instance lost" })
-					.where(eq(backups.id, row.id));
-			} else {
-				return true;
-			}
+			if (!/not.?found/i.test(String(err))) return true;
+			await failStale(deps, row, "instance lost");
+			continue;
 		}
+		if (
+			status === "unknown" ||
+			(ARCHIVE_RUNNING as readonly string[]).includes(status)
+		)
+			return true;
+		// errored, terminated, or complete while the row still says running:
+		// the run ended without recording its outcome.
+		await failStale(deps, row, `instance ${status}`);
 	}
 	return false;
+}
+
+/**
+ * Fails a stale `running` row, but only if it still points at the same
+ * instance: a continuation may have moved it since it was read.
+ */
+async function failStale(
+	deps: Deps,
+	row: { id: string; instanceId: string },
+	error: string,
+): Promise<void> {
+	await deps.db
+		.update(backups)
+		.set({ status: "failed", error })
+		.where(
+			and(
+				eq(backups.id, row.id),
+				eq(backups.status, "running"),
+				eq(backups.instanceId, row.instanceId),
+			),
+		);
 }
 
 /** The admin Overview's backup card: newest verified, failed, and running rows. */
