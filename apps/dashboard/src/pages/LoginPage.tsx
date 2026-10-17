@@ -45,6 +45,8 @@ export function LoginPage({ next }: { next?: string }) {
 	});
 	const submit = form.handleSubmit(async (values) => {
 		setError(null);
+		// Drop any root error from a previous attempt so only the latest shows.
+		form.clearErrors("root");
 		try {
 			await login({ ...values, turnstile_token: token ?? undefined });
 			await navigate({ href: safeNext(next) });
@@ -100,6 +102,7 @@ export function LoginPage({ next }: { next?: string }) {
 								<AlertDescription>{error}</AlertDescription>
 							</Alert>
 						)}
+						<FieldError message={form.formState.errors.root?.message} />
 						<Button
 							type="submit"
 							className="w-full"

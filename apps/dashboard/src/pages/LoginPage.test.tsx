@@ -14,7 +14,7 @@ function stubTurnstile() {
 		},
 	);
 	const reset = vi.fn();
-	window.turnstile = { render, reset } as never;
+	window.turnstile = { render, reset };
 	return {
 		render,
 		reset,
@@ -84,6 +84,19 @@ describe("LoginPage", () => {
 		expect(
 			await screen.findByText("Too many attempts, try again in a minute"),
 		).toBeInTheDocument();
+	});
+
+	it("shows an inline error for a non-401/429 failure (403)", async () => {
+		server.use(
+			http.post(apiUrl("/auth/login"), () =>
+				HttpResponse.json({ error: "turnstile_failed" }, { status: 403 }),
+			),
+		);
+		const { user } = renderApp("/login");
+		await user.type(await screen.findByLabelText("Username"), "admin");
+		await user.type(screen.getByLabelText("Password"), "correct-horse-battery");
+		await user.click(screen.getByRole("button", { name: "Sign in" }));
+		expect(await screen.findByText("turnstile_failed")).toBeInTheDocument();
 	});
 
 	it("navigates to safeNext(next) on success", async () => {

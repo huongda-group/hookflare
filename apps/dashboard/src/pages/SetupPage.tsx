@@ -3,6 +3,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import { flushSync } from "react-dom";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { FieldError } from "@/components/ProjectFormDialog";
@@ -49,6 +50,8 @@ export function SetupPage() {
 	});
 	const submit = form.handleSubmit(async (values) => {
 		setError(null);
+		// Drop any root error from a previous attempt so only the latest shows.
+		form.clearErrors("root");
 		try {
 			await setup({
 				username: values.username,
@@ -68,6 +71,18 @@ export function SetupPage() {
 				await navigate({ to: "/login" });
 			} else if (err instanceof ApiError && err.status === 429) {
 				setError("Too many attempts, try again in a minute");
+			} else if (
+				err instanceof ApiError &&
+				err.status === 503 &&
+				err.code === "setup_token_missing"
+			) {
+				// Spec §6.3: name the one command that sets the missing secret.
+				flushSync(() => {
+					form.setError("root", {
+						message:
+							"Set the SETUP_TOKEN secret first: wrangler secret put SETUP_TOKEN",
+					});
+				});
 			} else {
 				applyServerIssues(form, err);
 			}
@@ -131,6 +146,7 @@ export function SetupPage() {
 								<AlertDescription>{error}</AlertDescription>
 							</Alert>
 						)}
+						<FieldError message={form.formState.errors.root?.message} />
 						<Button
 							type="submit"
 							className="w-full"

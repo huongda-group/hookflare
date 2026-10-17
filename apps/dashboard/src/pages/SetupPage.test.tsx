@@ -42,6 +42,36 @@ describe("SetupPage", () => {
 		expect(posted).not.toHaveBeenCalled();
 	});
 
+	it("shows the server's inline error for a wrong setup token (401)", async () => {
+		setupOpen();
+		server.use(
+			http.post(apiUrl("/auth/setup"), () =>
+				HttpResponse.json({ error: "invalid_credentials" }, { status: 401 }),
+			),
+		);
+		const { user } = renderApp("/setup");
+		await fill(user);
+		await user.click(screen.getByRole("button", { name: "Create admin" }));
+		expect(await screen.findByText("invalid_credentials")).toBeInTheDocument();
+	});
+
+	it("points at the SETUP_TOKEN command when the token is unset (503)", async () => {
+		setupOpen();
+		server.use(
+			http.post(apiUrl("/auth/setup"), () =>
+				HttpResponse.json({ error: "setup_token_missing" }, { status: 503 }),
+			),
+		);
+		const { user } = renderApp("/setup");
+		await fill(user);
+		await user.click(screen.getByRole("button", { name: "Create admin" }));
+		expect(
+			await screen.findByText(
+				"Set the SETUP_TOKEN secret first: wrangler secret put SETUP_TOKEN",
+			),
+		).toBeInTheDocument();
+	});
+
 	it("sends a closed setup (409) to the login page", async () => {
 		let open = true;
 		server.use(
