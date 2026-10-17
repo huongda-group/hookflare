@@ -27,12 +27,16 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
 		.join("");
 }
 
-/** D1 returns blobs as ArrayBuffer, Uint8Array, or number[] depending on the path. */
+/**
+ * D1 returns blobs as ArrayBuffer, Uint8Array, or number[] depending on the
+ * path. Anything else throws: silently writing empty bytes would lose data
+ * in a backup or archive. Callers handle NULL themselves.
+ */
 export function toBytes(v: unknown): Uint8Array {
 	if (v instanceof Uint8Array) return v;
 	if (v instanceof ArrayBuffer) return new Uint8Array(v);
 	if (Array.isArray(v)) return Uint8Array.from(v as number[]);
-	return new Uint8Array();
+	throw new Error(`unsupported blob value: ${v === null ? "null" : typeof v}`);
 }
 
 export function base64(bytes: Uint8Array): string {
