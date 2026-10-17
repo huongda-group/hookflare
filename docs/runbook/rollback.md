@@ -55,4 +55,5 @@ this when that loss is smaller than the damage being undone.
 - Settings changed through the API.
 
 A release that changes the Durable Object `migrations` block or a Workflow
-class is **roll-forward only**, and its PR must say so.
+class is **roll-forward only**, and its PR must say so (the checkbox in
+`.github/pull_request_template.md`).
