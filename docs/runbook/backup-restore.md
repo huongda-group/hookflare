@@ -23,7 +23,26 @@ gzip NDJSON parts plus a `manifest.json` under
 production), then verifies every part and enforces
 `backup_retention_days` (default 35). "Run backup now" in Settings ›
 Storage (admin only, audited as `backup.run`) starts a manual run. If no
-`verified` backup appears within 36 hours, the `backup_stale` alert fires.
+`verified` backup appears within 36 hours, the `backup_stale` alert fires;
+a deployment that has never backed up gets that 36 hours of grace from
+when the backups migration (`0010_`) was applied.
+
+Only one backup runs at a time. The cron skips its run (logging
+`backup.skipped_running`) while another is in progress, and "Run backup
+now" returns `409 backup_running`. A `running` row whose Workflow
+instance is gone, errored, terminated, or complete is marked `failed`
+(`instance lost` / `instance <status>`) at the next check, so it stops
+blocking. Turning `backup_enabled` off mid-run does not stop the current
+run: it and its continuations finish the dump and verify, and the run can
+still end `verified` (its retention step reads the setting again and
+deletes nothing while it is off). The setting only stops the next cron
+run. To stop a run, terminate its
+instance in the Workflows dashboard.
+
+Retention marks a backup `expiring` before it deletes any object, so a
+delete that fails halfway (for example under the 7-day bucket lock) never
+leaves a `verified` row with missing parts. An `expiring` backup is not
+restorable; the next retention run finishes deleting it.
 
 ## Path A: Time Travel restore (in place)
 
