@@ -164,7 +164,7 @@ export function runId() {
  *   send: () => Promise<string>,
  *   deliveries: (eventId: string) => Promise<SmokeDelivery[]>,
  *   replay: (eventId: string) => Promise<{ delivery_id: string }>,
- *   sinkStats: (run: string) => Promise<{ unique: number, received: number }>
+ *   sinkStats: (run: string) => Promise<{ unique: number, received: number, ids: string[] }>
  * }} SmokeApi
  */
 
@@ -181,7 +181,8 @@ export function runId() {
 /**
  * Run the smoke flow against a SmokeApi: ensure project, destination (at
  * `${sinkUrl}/r/<run>/hook`), and source; send one event; wait for its
- * delivery; replay it; wait for the replay; then verify the sink saw both.
+ * delivery; replay it; wait for the replay; then verify the sink saw both
+ * delivery IDs.
  * @param {SmokeApi} api
  * @param {(line: string) => void} [log]
  * @param {RunOptions} [options]
@@ -233,20 +234,20 @@ export async function runSmoke(api, log = () => {}, { sleep } = {}) {
 		}
 		throw err;
 	}
+	// The gateway's webhook-id is the delivery ID and a replay is a new
+	// delivery of the same event, so the sink must have seen exactly the
+	// initial and the replay delivery IDs, once each.
+	const deliveryIds = [initial[0].id, replay.delivery_id];
+	const expected = [...deliveryIds].sort().join(",");
 	const stats = await api.sinkStats(run);
-	if (stats.received !== 2 || stats.unique !== 1) {
+	const seen = [...stats.ids].sort().join(",");
+	if (stats.received !== 2 || seen !== expected) {
 		throw new Error(
-			`smoke: expected sink unique=1 received=2, got unique=${stats.unique} received=${stats.received}`,
+			`smoke: expected sink received=2 with webhook IDs ${expected}, got received=${stats.received} ids=${seen}`,
 		);
 	}
-	log(
-		`smoke: sink run ${run} unique=${stats.unique} received=${stats.received}`,
-	);
-	return {
-		eventId,
-		deliveryIds: [initial[0].id, replay.delivery_id],
-		sinkRun: run,
-	};
+	log(`smoke: sink run ${run} received=${stats.received} ids=${seen}`);
+	return { eventId, deliveryIds, sinkRun: run };
 }
 
 /**
@@ -264,8 +265,18 @@ async function throwForStatus(res, what) {
 	);
 }
 
+/** Name of the reused smoke destination and source. */
+const SMOKE_NAME = "smoke";
+/** Audit reason on every smoke mutation. */
+const SMOKE_REASON = "post-deploy smoke test";
+/** Admin list page size: the shared `pageLimit` maximum. */
+const PAGE = 100;
+
 /**
- * Build the HTTP SmokeApi for a deployed gateway plus sink Worker.
+ * Build the HTTP SmokeApi for a deployed gateway plus sink Worker. The
+ * project (by slug), destination, and source (by name `smoke`) are reused
+ * across runs: the destination is repointed at the run's sink URL, and the
+ * source gets the run's HMAC secret through rotate-secret.
  * @param {SmokeEnv} env
  * @param {typeof fetch} [fetchFn]
  * @returns {SmokeApi}
@@ -285,6 +296,11 @@ export function httpSmokeApi(env, fetchFn = fetch) {
 	let smokeSecret = null;
 	/** Header carrying the smoke HMAC (matches the source auth_config below). */
 	const smokeHeader = "x-smoke-signature";
+	const smokeAuthConfig = {
+		header: smokeHeader,
+		algorithm: "sha256",
+		encoding: "hex",
+	};
 
 	/**
 	 * Parse a JSON response, throwing on non-2xx.
@@ -297,14 +313,40 @@ export function httpSmokeApi(env, fetchFn = fetch) {
 		return res.json();
 	}
 
+	/**
+	 * First row of an admin list that matches `pick`, following
+	 * `next_cursor` at the API's maximum page size. Null when none match.
+	 * @param {string} kind e.g. `projects`.
+	 * @param {Record<string, string>} filters
+	 * @param {(row: any) => boolean} pick
+	 * @returns {Promise<any | null>}
+	 */
+	async function findListed(kind, filters, pick) {
+		let cursor = null;
+		do {
+			const params = new URLSearchParams({ ...filters, limit: String(PAGE) });
+			if (cursor !== null) {
+				params.set("cursor", cursor);
+			}
+			const page = await readJson(
+				`list ${kind}`,
+				await fetchFn(`${base}/api/admin/v1/${kind}?${params}`, { headers }),
+			);
+			const found = (page.data ?? []).find(pick);
+			if (found) {
+				return found;
+			}
+			cursor = page.next_cursor ?? null;
+		} while (cursor !== null);
+		return null;
+	}
+
 	return {
 		sinkUrl,
 		async ensureProject(name) {
-			const res = await fetchFn(`${base}/api/admin/v1/projects?limit=200`, {
-				headers,
-			});
-			const page = await readJson("list projects", res);
-			const existing = (page.data ?? []).find(
+			const existing = await findListed(
+				"projects",
+				{},
 				(project) => project.slug === name || project.name === name,
 			);
 			if (existing) {
@@ -326,12 +368,36 @@ export function httpSmokeApi(env, fetchFn = fetch) {
 			if (projectId === null) {
 				throw new Error("smoke: ensureProject must run first");
 			}
+			const existing = await findListed(
+				"destinations",
+				{ project_id: projectId },
+				(destination) => destination.name === SMOKE_NAME,
+			);
+			if (existing) {
+				destinationId = existing.id;
+				// Each run has its own sink URL; repoint the reused destination.
+				if (existing.url !== url) {
+					await readJson(
+						"update destination",
+						await fetchFn(`${base}/api/admin/v1/destinations/${existing.id}`, {
+							method: "PATCH",
+							headers,
+							body: JSON.stringify({ url, reason: SMOKE_REASON }),
+						}),
+					);
+				}
+				return { id: existing.id };
+			}
 			const created = await readJson(
 				"create destination",
 				await fetchFn(`${base}/api/admin/v1/destinations`, {
 					method: "POST",
 					headers,
-					body: JSON.stringify({ project_id: projectId, name: "smoke", url }),
+					body: JSON.stringify({
+						project_id: projectId,
+						name: SMOKE_NAME,
+						url,
+					}),
 				}),
 			);
 			destinationId = created.id;
@@ -348,7 +414,64 @@ export function httpSmokeApi(env, fetchFn = fetch) {
 			for (const b of raw) {
 				bin += String.fromCharCode(b);
 			}
-			smokeSecret = btoa(bin);
+			const secret = btoa(bin);
+			const existing = await findListed(
+				"sources",
+				{ project_id: projectId },
+				(source) => source.name === SMOKE_NAME,
+			);
+			if (existing) {
+				if (existing.auth_type !== "hmac") {
+					throw new Error(
+						`smoke: source ${existing.id} named "${SMOKE_NAME}" is ${existing.auth_type}, not hmac; rename or delete it`,
+					);
+				}
+				/** @type {Record<string, unknown>} */
+				const patch = {};
+				if (existing.destination_id !== destinationId) {
+					patch.destination_id = destinationId;
+				}
+				if (existing.status === "disabled") {
+					patch.status = "active";
+				}
+				if (
+					JSON.stringify(existing.auth_config) !==
+					JSON.stringify(smokeAuthConfig)
+				) {
+					patch.auth_config = smokeAuthConfig;
+				}
+				if (Object.keys(patch).length > 0) {
+					await readJson(
+						"update source",
+						await fetchFn(`${base}/api/admin/v1/sources/${existing.id}`, {
+							method: "PATCH",
+							headers,
+							body: JSON.stringify({ ...patch, reason: SMOKE_REASON }),
+						}),
+					);
+				}
+				// The old secret is unknown (never returned); rotate to this run's
+				// secret with no grace window so only the new one verifies.
+				await readJson(
+					"rotate source secret",
+					await fetchFn(
+						`${base}/api/admin/v1/sources/${existing.id}/rotate-secret`,
+						{
+							method: "POST",
+							headers,
+							body: JSON.stringify({
+								secret,
+								grace_hours: 0,
+								reason: SMOKE_REASON,
+							}),
+						},
+					),
+				);
+				smokeSecret = secret;
+				ingressUrl = existing.ingress_url;
+				return { id: existing.id, ingress_url: existing.ingress_url };
+			}
+			smokeSecret = secret;
 			const created = await readJson(
 				"create source",
 				await fetchFn(`${base}/api/admin/v1/sources`, {
@@ -357,13 +480,9 @@ export function httpSmokeApi(env, fetchFn = fetch) {
 					body: JSON.stringify({
 						project_id: projectId,
 						destination_id: destinationId,
-						name: "smoke",
+						name: SMOKE_NAME,
 						auth_type: "hmac",
-						auth_config: {
-							header: smokeHeader,
-							algorithm: "sha256",
-							encoding: "hex",
-						},
+						auth_config: smokeAuthConfig,
 						secret: smokeSecret,
 					}),
 				}),
@@ -418,15 +537,19 @@ export function httpSmokeApi(env, fetchFn = fetch) {
 				await fetchFn(`${base}/api/admin/v1/events/${eventId}/replay`, {
 					method: "POST",
 					headers,
-					body: JSON.stringify({ reason: "post-deploy smoke test" }),
+					body: JSON.stringify({ reason: SMOKE_REASON }),
 				}),
 			);
 			return { delivery_id: parsed.delivery_id };
 		},
 		async sinkStats(run) {
-			const res = await fetchFn(`${sinkUrl}/r/${run}/stats`);
+			const res = await fetchFn(`${sinkUrl}/r/${run}/stats?ids=1`);
 			const parsed = await readJson("sink stats", res);
-			return { unique: parsed.unique, received: parsed.received };
+			return {
+				unique: parsed.unique,
+				received: parsed.received,
+				ids: parsed.ids ?? [],
+			};
 		},
 	};
 }

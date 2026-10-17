@@ -43,10 +43,14 @@ pnpm run smoke        # production (verify: same script, production config)
 Export the four env vars first: `HOOKFLARE_URL` (worker origin),
 `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` (service token),
 `SINK_URL` (sink origin). The script reuses the project with slug `smoke`
-if it exists, creates a source + destination pointed at a fresh sink run,
-sends a signed webhook, and polls (up to 60 s per step) until the delivery
-reaches the sink. Expected: exit 0, printing the event ID and two delivery
-IDs.
+and, inside it, the destination and `hmac` source named `smoke` (creating
+them on the first run): the destination is repointed at a fresh sink run
+and the source secret is rotated to a new per-run secret with no grace
+window. It sends a signed webhook, polls (up to 60 s per step) until it is
+delivered, replays it, and polls until the replay is delivered. The sink
+must then have received exactly two requests whose `webhook-id`s are the
+two delivery IDs (a replay is a new delivery, so a new `webhook-id`, of the
+same event). Expected: exit 0, printing the event ID and both delivery IDs.
 
 ## On failure
 
