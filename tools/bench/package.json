@@ -7,7 +7,8 @@
 		"test": "vitest run",
 		"typecheck": "tsc --noEmit",
 		"run": "node src/run.ts",
-		"seed": "node src/seed.ts"
+		"seed": "node src/seed.ts",
+		"queries": "node src/queries.ts"
 	},
 	"devDependencies": {
 		"typescript": "7.0.2",
