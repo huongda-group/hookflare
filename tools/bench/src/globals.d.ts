@@ -10,6 +10,10 @@ declare const process: {
 	exit(code?: number): never;
 };
 
+declare const Buffer: {
+	byteLength(data: string, encoding?: "utf8"): number;
+};
+
 declare module "node:child_process" {
 	export function execFileSync(
 		file: string,
@@ -28,6 +32,7 @@ declare module "node:crypto" {
 	export function createHmac(algorithm: string, key: string): BenchHash;
 	export interface BenchRandom {
 		toString(encoding: "hex" | "base64"): string;
+		readUInt32BE(offset?: number): number;
 	}
 	export function randomBytes(size: number): BenchRandom;
 }
@@ -42,6 +47,13 @@ declare module "node:fs" {
 		data: string,
 		encoding?: "utf8",
 	): void;
+	export function readFileSync(path: string | URL, encoding: "utf8"): string;
+	export function readdirSync(path: string): string[];
+	export function unlinkSync(path: string): void;
+	export function renameSync(from: string, to: string): void;
+	export function openSync(path: string, flags: "w" | "a"): number;
+	export function writeSync(fd: number, data: string): number;
+	export function closeSync(fd: number): void;
 }
 
 declare module "node:fs/promises" {
@@ -58,6 +70,10 @@ declare module "node:fs/promises" {
 		data: string,
 		encoding?: "utf8",
 	): Promise<void>;
+}
+
+declare module "*/jsonc.mjs" {
+	export function parseJsonc(text: string): unknown;
 }
 
 interface ImportMeta {
