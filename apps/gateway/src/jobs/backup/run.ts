@@ -5,7 +5,7 @@ import type { Logger } from "../../core/log";
 import { readSetting, STORAGE_SETTING } from "../../core/settings";
 import type { StepFn } from "../../core/workflow";
 import type { Deps } from "../../deps";
-import { dumpPage, type PartMeta } from "./dump";
+import { dumpPage, type PartMeta, partKey } from "./dump";
 import { writeManifest } from "./manifest";
 import { expireBackups } from "./retention";
 import { listTables, type TableInfo } from "./tables";
@@ -33,7 +33,7 @@ function continuationOf(instanceId: string): { base: string; n: number } {
  * the manifest step rebuild the parts list from R2, so a continuation's
  * fresh Workflow carries no large state.
  */
-async function dumpPart(
+export async function dumpPart(
 	d: Pick<Deps, "db" | "backups">,
 	table: TableInfo,
 	prefix: string,
@@ -46,6 +46,13 @@ async function dumpPart(
 			sidecarKey(prefix, table.name, partNo),
 			new TextEncoder().encode(JSON.stringify(r.part)),
 		);
+	} else {
+		// A retry that finds the rows gone: drop what an earlier try wrote, or
+		// the manifest (built from sidecars) would list a part the run ended.
+		await d.backups.delete([
+			sidecarKey(prefix, table.name, partNo),
+			partKey(prefix, table.name, partNo),
+		]);
 	}
 	return r;
 }

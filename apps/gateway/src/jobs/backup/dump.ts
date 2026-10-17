@@ -18,6 +18,11 @@ export type PartMeta = {
  * bytes survive a gunzip-plus-base64 round trip. A full page returns its
  * last key as the next cursor; anything shorter ends the table.
  */
+/** R2 key of one gzip NDJSON part. */
+export function partKey(prefix: string, table: string, partNo: number): string {
+	return `${prefix}${table}/part-${String(partNo).padStart(4, "0")}.ndjson.gz`;
+}
+
 export async function dumpPage(
 	deps: Pick<Deps, "db" | "backups">,
 	table: TableInfo,
@@ -62,7 +67,7 @@ export async function dumpPage(
 	}
 	const gz = await gzipLines(lines());
 	const sha256 = await sha256Hex(gz);
-	const key = `${prefix}${table.name}/part-${String(partNo).padStart(4, "0")}.ndjson.gz`;
+	const key = partKey(prefix, table.name, partNo);
 	await deps.backups.put(key, gz, { sha256 });
 
 	const last = rows[rows.length - 1];
