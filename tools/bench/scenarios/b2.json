@@ -1,0 +1,9 @@
+{
+	"name": "b2",
+	"steps": [{ "rate_per_s": 50, "duration_s": 60 }],
+	"sources": 1,
+	"body_bytes": 1024,
+	"sink": {},
+	"drain_timeout_s": 900,
+	"notes": "Per-source limiter probe: one source at 50 req/s. Confirms the 429 share and that 429 requests write nothing. Feeds the recommended INGRESS_LIMITER value."
+}

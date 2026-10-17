@@ -315,6 +315,22 @@ const cursor = z.string().max(512).optional();
 /** Query flags arrive as strings. */
 const queryBool = z.enum(["true", "false"]).transform((v) => v === "true");
 const email = z.string().trim().toLowerCase().pipe(z.email().max(254));
+
+/** Service-token identities (`svc:`) authenticate like users (§6.1). */
+export function isServiceIdentity(id: string): boolean {
+	return id.startsWith("svc:");
+}
+
+/** The only `svc:` identities a users row can be created for. */
+export const SERVICE_IDENTITY_PATTERN = /^svc:[a-z0-9._-]{1,200}$/;
+
+const serviceIdentity = z
+	.string()
+	.trim()
+	.toLowerCase()
+	.regex(SERVICE_IDENTITY_PATTERN);
+/** Either a user email or a service-token identity. */
+export const userId = z.union([email, serviceIdentity]);
 const graceHours = z.number().int().min(0).max(168).default(24);
 
 /** `status` and `destination_id`-style filters may repeat (`?status=a&status=b`). */
@@ -348,7 +364,7 @@ export const failuresQuery = z.object({
 });
 
 export const auditLogQuery = z.object({
-	actor_email: email.optional(),
+	actor_email: userId.optional(),
 	resource_type: z.string().min(1).max(50).optional(),
 	resource_id: z.string().min(1).max(64).optional(),
 	action: z.string().min(1).max(100).optional(),
@@ -390,7 +406,7 @@ export const rotateDestinationSecretRequest = z.strictObject({
 export const operateRequest = z.strictObject({ ...optionalReason });
 
 export const createUserRequest = z.strictObject({
-	email,
+	email: userId,
 	role: z.enum(ROLES),
 	...optionalReason,
 });
@@ -509,6 +525,7 @@ export const ALERT_RULES = [
 	"stuck_pending",
 	"d1_storage",
 	"archive_stuck",
+	"backup_stale",
 ] as const;
 export type AlertRule = (typeof ALERT_RULES)[number];
 
@@ -676,6 +693,8 @@ export const storageSettingsSchema = z
 		failed_retention_days: z.number().int().min(1).max(3_650),
 		archive_retention_days: z.number().int().min(30).max(36_500).nullable(),
 		audit_retention_days: z.number().int().min(30).max(36_500),
+		backup_enabled: z.boolean().default(true),
+		backup_retention_days: z.number().int().min(7).max(365).default(35),
 	})
 	.refine((v) => v.failed_retention_days >= v.hot_retention_days, {
 		path: ["failed_retention_days"],
@@ -688,6 +707,8 @@ export const DEFAULT_STORAGE_SETTINGS: StorageSettings = {
 	failed_retention_days: 90,
 	archive_retention_days: null,
 	audit_retention_days: 365,
+	backup_enabled: true,
+	backup_retention_days: 35,
 };
 
 export const ARCHIVE_KINDS = ["events", "audit"] as const;
@@ -743,6 +764,26 @@ export type ArchiveLastRun = {
 	instance_id: string;
 	status: string;
 	started_at: number;
+};
+
+/** `expiring`: retention started deleting its objects; never restorable again. */
+export const BACKUP_STATUSES = [
+	"running",
+	"verified",
+	"failed",
+	"expiring",
+] as const;
+export type BackupSummary = {
+	enabled: boolean;
+	last_verified: {
+		id: string;
+		started_at: number;
+		finished_at: number;
+		bytes: number;
+		rows: number;
+	} | null;
+	last_failed: { id: string; started_at: number; error: string | null } | null;
+	running: { id: string; instance_id: string; started_at: number } | null;
 };
 
 export const patchSettingsRequest = z

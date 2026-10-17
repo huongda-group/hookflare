@@ -11,9 +11,10 @@ import {
 	webhookEvents,
 } from "../../core/db/schema";
 import { createLogger, type Logger } from "../../core/log";
+import { base64, gzipLines, sha256Hex, toBytes } from "../../core/ndjson";
 import type { Deps } from "../../deps";
 import { batchPrefix, dayStartOf, partKey } from "./keys";
-import { base64, groupBy, gzipLines, sha256Hex, toBytes } from "./ndjson";
+import { groupBy } from "./ndjson";
 
 export const PART_MAX_EVENTS = 5_000;
 export const PART_MAX_RAW_BYTES = 32 * 1024 * 1024;
@@ -216,7 +217,12 @@ async function* eventLines(
 				SELECT a.* FROM delivery_attempts a JOIN deliveries d ON d.id = a.delivery_id
 				JOIN webhook_events e ON e.id = d.event_id WHERE ${scope} ORDER BY a.delivery_id, a.attempt_no`),
 		]);
-		const bodyOf = new Map(bodies.map((b) => [b.id, toBytes(b.body)]));
+		const bodyOf = new Map(
+			bodies.map((b) => [
+				b.id,
+				b.body == null ? new Uint8Array() : toBytes(b.body),
+			]),
+		);
 		const attemptsOf = groupBy(attempts, (a) => a.delivery_id);
 		const deliveriesOf = groupBy(deliveries, (d) => d.event_id);
 		for (const ev of events) {

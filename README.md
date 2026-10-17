@@ -5,7 +5,9 @@
 Hookflare sits between webhook providers (Stripe, GitHub, Shopify, your own services…) and your backends. It verifies each incoming webhook, persists it durably, and acknowledges it, all before your backend is involved. It then delivers the webhook with automatic retries, keeps a full delivery log, and lets you replay anything from a dashboard.
 
 > [!NOTE]
-> **Status: M2 (Reliability) done.** Webhooks are received, verified, stored in D1 (and R2 for large payloads), queued, and delivered with retries, a reconciler, and pause/resume. The admin API and the dashboard arrive in M3–M4.
+> **Status: M5 (Operations) done.** Webhooks are received, verified, stored in D1 (and R2 for large payloads), queued, and delivered with retries, a reconciler, pause/resume, RBAC admin API, dashboard, alerts, archival, and per-destination limits. M6 (Production readiness) is in progress.
+
+Operations runbook: [`docs/runbook/`](docs/runbook/).
 
 ---
 
@@ -174,7 +176,7 @@ Pausing a destination (`POST /api/admin/v1/destinations/:id/pause`) holds its de
 | **M3: Admin API & security** | Access + RBAC, audit log, replay, test delivery, secret rotation | Planned |
 | **M4: Dashboard** | All dashboard pages, stats rollups | Planned |
 | **M5: Operations** | Alerting, R2 archival, per-destination concurrency and rate limits | Planned |
-| **M6: Production readiness** | Benchmarks, backup/restore, runbook, uptime monitoring | Planned |
+| **M6: Production readiness** | Benchmarks, backup/restore, runbook, uptime monitoring | In progress (M6a) |
 
 Full details: [`docs/superpowers/specs/2026-10-14-hookflare-roadmap.md`](docs/superpowers/specs/2026-10-14-hookflare-roadmap.md). The original system spec is in [`DESIGN.md`](DESIGN.md).
 
@@ -184,7 +186,7 @@ Hookflare is deliberately **not** an integration platform. The following are out
 
 ## Contributing
 
-The project is in early development (M2 done, M3 next), and feedback on the [roadmap](docs/superpowers/specs/2026-10-14-hookflare-roadmap.md) is very welcome. Please open an issue to discuss a change before you send a pull request.
+The project is in development (M5 done, M6 in progress), and feedback on the [roadmap](docs/superpowers/specs/2026-10-14-hookflare-roadmap.md) is very welcome. Please open an issue to discuss a change before you send a pull request.
 
 ## License
 

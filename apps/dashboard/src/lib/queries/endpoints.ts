@@ -1,4 +1,5 @@
 import type {
+	BackupSummary,
 	Destination,
 	DestinationStats,
 	Page,
@@ -60,6 +61,13 @@ export function useSettings() {
 	return useQuery({
 		queryKey: qk.settings,
 		queryFn: () => api.get<Settings>("/settings"),
+	});
+}
+
+export function useBackupSummary() {
+	return useQuery({
+		queryKey: qk.backups.summary,
+		queryFn: () => api.get<BackupSummary>("/backups/summary"),
 	});
 }
 

@@ -1,0 +1,17 @@
+{
+	"name": "bench",
+	"private": true,
+	"version": "0.0.0",
+	"type": "module",
+	"scripts": {
+		"test": "vitest run",
+		"typecheck": "tsc --noEmit",
+		"run": "node src/run.ts",
+		"seed": "node src/seed.ts",
+		"queries": "node src/queries.ts"
+	},
+	"devDependencies": {
+		"typescript": "7.0.2",
+		"vitest": "^5.0.4"
+	}
+}

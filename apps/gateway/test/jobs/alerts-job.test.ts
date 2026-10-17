@@ -1,4 +1,7 @@
-import { DEFAULT_ALERT_RULES } from "@hookflare/shared";
+import {
+	DEFAULT_ALERT_RULES,
+	DEFAULT_STORAGE_SETTINGS,
+} from "@hookflare/shared";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { sealChannelConfig } from "../../src/core/alert-channels";
@@ -11,11 +14,12 @@ import {
 	alertChannels,
 	alertNotifications,
 	alerts,
+	backups,
 	destinations,
 	settings,
 } from "../../src/core/db/schema";
 import { createLogger } from "../../src/core/log";
-import { clearSettingsCache } from "../../src/core/settings";
+import { clearSettingsCache, STORAGE_SETTING } from "../../src/core/settings";
 import type { Deps } from "../../src/deps";
 import {
 	MAX_CHANGES_PER_RUN,
@@ -97,6 +101,21 @@ describe("runAlerts", () => {
 		const deps = testDeps();
 		await resetAlerts(deps);
 		await deps.db.delete(settings).where(eq(settings.key, "alert_rules"));
+		// Keep backup_stale quiet unless a test says otherwise: the file's
+		// fake clock (T) is years past the test D1's migration timestamps, so
+		// the fresh-deploy grace never holds here without a recent backup.
+		await deps.db.delete(backups);
+		await deps.db.delete(settings).where(eq(settings.key, STORAGE_SETTING.key));
+		await deps.db.insert(backups).values({
+			id: "bak_fresh",
+			day: "2030-03-16",
+			status: "verified",
+			prefix: "test/backup/fresh/",
+			instanceId: "test-instance",
+			trigger: "manual",
+			startedAt: T - 2 * 3_600_000,
+			finishedAt: T - 3_600_000,
+		});
 	});
 
 	it("opens once, notifies every matching channel, and resolves (spec §6.3)", async () => {
@@ -406,6 +425,53 @@ describe("runAlerts", () => {
 		// Other active rules in the shared database may take some of the first run's slots.
 		expect(second.opened).toBeGreaterThanOrEqual(3);
 		for (const id of ids) expect(await incidents(deps, id)).toHaveLength(1);
+	});
+
+	it("resolves backup_stale when backups are switched off, queueing a resolved notification (M6-16)", async () => {
+		const { deps, advance } = clockDeps(T);
+		await addChannel(deps, "ach_a");
+		await deps.db.delete(backups);
+		await deps.db.delete(settings).where(eq(settings.key, STORAGE_SETTING.key));
+		await deps.db.insert(backups).values({
+			id: "bak_job_stale",
+			day: "2026-10-15",
+			status: "verified",
+			prefix: "test/backup/job/",
+			instanceId: "test-instance",
+			trigger: "manual",
+			startedAt: T - 38 * 3_600_000,
+			finishedAt: T - 37 * 3_600_000,
+		});
+
+		await runAlerts(deps, logger);
+		const [open] = await deps.db
+			.select()
+			.from(alerts)
+			.where(eq(alerts.resourceId, "backup"));
+		expect(open).toMatchObject({ rule: "backup_stale", status: "open" });
+
+		await deps.db.insert(settings).values({
+			key: STORAGE_SETTING.key,
+			valueJson: JSON.stringify({
+				...DEFAULT_STORAGE_SETTINGS,
+				backup_enabled: false,
+			}),
+			updatedAt: T,
+		});
+		advance(60_000);
+		await runAlerts(deps, logger);
+		const [resolved] = await deps.db
+			.select()
+			.from(alerts)
+			.where(eq(alerts.resourceId, "backup"));
+		expect(resolved.status).toBe("resolved");
+		expect((await notes(deps, open.id)).map((n) => n.kind)).toEqual([
+			"opened",
+			"resolved",
+		]);
+
+		await deps.db.delete(backups);
+		await deps.db.delete(settings).where(eq(settings.key, STORAGE_SETTING.key));
 	});
 });
 

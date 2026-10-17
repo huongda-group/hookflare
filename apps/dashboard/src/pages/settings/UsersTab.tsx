@@ -1,9 +1,16 @@
-import { type Page, ROLES, type Role, type User } from "@hookflare/shared";
+import {
+	isServiceIdentity,
+	type Page,
+	ROLES,
+	type Role,
+	type User,
+} from "@hookflare/shared";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CursorTable } from "@/components/CursorTable";
 import { TimeText } from "@/components/TimeText";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -86,7 +93,17 @@ export function UsersTab() {
 				rowKey={(u) => u.email}
 				empty="No users."
 				columns={[
-					{ header: "Email", cell: (u) => u.email },
+					{
+						header: "Email",
+						cell: (u) => (
+							<span className="flex items-center gap-2">
+								{u.email}
+								{isServiceIdentity(u.email) && (
+									<Badge variant="secondary">Service token</Badge>
+								)}
+							</span>
+						),
+					},
 					{
 						header: "Role",
 						cell: (u) => (

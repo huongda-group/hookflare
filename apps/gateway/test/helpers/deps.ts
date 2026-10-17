@@ -58,6 +58,11 @@ export function fakeArchive(status = "complete") {
 	return archive as unknown as Workflow & { created: string[] };
 }
 
+/** Same shape as fakeArchive, for the M6 backup Workflow binding. */
+export function fakeBackup(status = "complete") {
+	return fakeArchive(status) as unknown as Workflow & { created: string[] };
+}
+
 export function testDeps(overrides: Partial<Deps> = {}): Deps {
 	const env = overrides.env ?? testEnv();
 	return {
@@ -74,6 +79,8 @@ export function testDeps(overrides: Partial<Deps> = {}): Deps {
 			throw new Error("limiter not stubbed: use fakeLimiter()");
 		},
 		archive: fakeArchive(),
+		backups: env.BACKUPS,
+		backup: fakeBackup(),
 		env,
 		...overrides,
 	};

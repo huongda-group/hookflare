@@ -1,7 +1,11 @@
+import { DEFAULT_STORAGE_SETTINGS } from "@hookflare/shared";
+import { eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { matchChannels } from "../../src/core/db/alerts";
-import { settings } from "../../src/core/db/schema";
+import { backups, settings } from "../../src/core/db/schema";
+import { STORAGE_SETTING } from "../../src/core/settings";
 import {
+	backupStale,
 	consecutiveFailures,
 	DEAD_CURSOR_KEY,
 	d1Storage,
@@ -176,6 +180,119 @@ describe("d1_storage hysteresis", () => {
 		expect(await at(7.9 * GB, false)).toHaveLength(0);
 		expect(await at(7.6 * GB, true)).toHaveLength(1);
 		expect(await at(7.4 * GB, true)).toHaveLength(0);
+	});
+});
+
+describe("backup_stale", () => {
+	const ENABLED = { ...DEFAULT_STORAGE_SETTINGS, backup_enabled: true };
+	const stub = { db: deps.db, now: () => NOW };
+	let n = 0;
+
+	const fmt = (ms: number) =>
+		new Date(ms).toISOString().slice(0, 19).replace("T", " ");
+
+	beforeEach(async () => {
+		await deps.db.delete(backups);
+		await deps.db.delete(settings).where(eq(settings.key, STORAGE_SETTING.key));
+	});
+
+	async function seedBackup(o: {
+		status: "running" | "verified" | "failed";
+		finishedAt?: number | null;
+		startedAt?: number;
+	}) {
+		const row = {
+			id: `bak_stale_${n++}`,
+			day: "2026-10-16",
+			status: o.status,
+			prefix: "test/backup/stale/",
+			instanceId: "test-instance",
+			trigger: "manual" as const,
+			startedAt: o.startedAt ?? NOW - 40 * 3_600_000,
+			finishedAt: o.finishedAt ?? null,
+		};
+		await deps.db.insert(backups).values(row);
+		return row;
+	}
+
+	it("opens one alert when no backup was verified for 37 h", async () => {
+		await seedBackup({
+			status: "verified",
+			startedAt: NOW - 38 * 3_600_000,
+			finishedAt: NOW - 37 * 3_600_000,
+		});
+		const [a] = await backupStale(stub, ENABLED);
+		expect(a).toMatchObject({
+			rule: "backup_stale",
+			resourceType: "system",
+			resourceId: "backup",
+			projectId: null,
+			details: { last_verified_at: NOW - 37 * 3_600_000 },
+		});
+	});
+
+	it("stays quiet when a backup was verified 1 h ago", async () => {
+		await seedBackup({
+			status: "verified",
+			startedAt: NOW - 2 * 3_600_000,
+			finishedAt: NOW - 3_600_000,
+		});
+		expect(await backupStale(stub, ENABLED)).toEqual([]);
+	});
+
+	it("stays quiet when backups are disabled", async () => {
+		await seedBackup({
+			status: "verified",
+			startedAt: NOW - 38 * 3_600_000,
+			finishedAt: NOW - 37 * 3_600_000,
+		});
+		expect(
+			await backupStale(stub, { ...ENABLED, backup_enabled: false }),
+		).toEqual([]);
+	});
+
+	it("gives a fresh deployment a grace period when no backup row exists", async () => {
+		// The test D1 applied its migrations minutes ago, so against the wall
+		// clock (not the file's 2030 NOW) the grace holds.
+		const wallClock = { db: deps.db, now: () => Date.now() };
+		expect(await backupStale(wallClock, ENABLED)).toEqual([]);
+	});
+
+	it("gives an upgraded deployment a grace period from when the backups migration landed", async () => {
+		const at = Date.now();
+		const wallClock = { db: deps.db, now: () => at };
+		// Months-old install; the backups migration was applied an hour ago.
+		await deps.db.run(
+			sql`UPDATE d1_migrations SET applied_at = ${fmt(at - 90 * 24 * 3_600_000)}`,
+		);
+		await deps.db.run(
+			sql`UPDATE d1_migrations SET applied_at = ${fmt(at - 3_600_000)} WHERE name LIKE '0010\\_%' ESCAPE '\\'`,
+		);
+		try {
+			expect(await backupStale(wallClock, ENABLED)).toEqual([]);
+		} finally {
+			await deps.db.run(sql`UPDATE d1_migrations SET applied_at = ${fmt(at)}`);
+		}
+	});
+
+	it("opens with a null timestamp for an old deployment with no backup row", async () => {
+		const at = Date.now();
+		const wallClock = { db: deps.db, now: () => at };
+		await deps.db.run(
+			sql`UPDATE d1_migrations SET applied_at = ${fmt(at - 40 * 3_600_000)}`,
+		);
+		try {
+			const [a] = await backupStale(wallClock, ENABLED);
+			expect(a).toMatchObject({
+				rule: "backup_stale",
+				resourceType: "system",
+				resourceId: "backup",
+				projectId: null,
+				details: { last_verified_at: null },
+			});
+		} finally {
+			await deps.db.run(sql`UPDATE d1_migrations SET applied_at = ${fmt(at)}`);
+		}
 	});
 });
 

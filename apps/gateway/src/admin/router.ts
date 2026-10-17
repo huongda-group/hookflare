@@ -5,6 +5,7 @@ import { alertChannelRoutes } from "./routes/alert-channels";
 import { alertRoutes } from "./routes/alerts";
 import { archiveRoutes } from "./routes/archives";
 import { auditLogRoutes } from "./routes/audit-logs";
+import { backupRoutes } from "./routes/backups";
 import { destinationRoutes } from "./routes/destinations";
 import { eventRoutes } from "./routes/events";
 import { failureRoutes } from "./routes/failures";
@@ -31,6 +32,7 @@ export function adminRoutes(options: { accessFetch?: typeof fetch } = {}) {
 	routes.route("/users", userRoutes());
 	routes.route("/audit-logs", auditLogRoutes());
 	routes.route("/archives", archiveRoutes());
+	routes.route("/backups", backupRoutes());
 	routes.route("/settings", settingsRoutes());
 	return routes;
 }

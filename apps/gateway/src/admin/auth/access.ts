@@ -1,5 +1,12 @@
+import { isServiceIdentity, SERVICE_IDENTITY_PATTERN } from "@hookflare/shared";
 import type { MiddlewareHandler } from "hono";
-import { createRemoteJWKSet, customFetch, errors, jwtVerify } from "jose";
+import {
+	createRemoteJWKSet,
+	customFetch,
+	errors,
+	type JWTPayload,
+	jwtVerify,
+} from "jose";
 import type { AppBindings } from "../../app";
 import { bootstrapStatements, getUser } from "../../core/db/users";
 
@@ -90,6 +97,23 @@ async function verifyWithRotation(
 	}
 }
 
+/** Spec §6.1/DEC-5: a token with an email identifies as that email; a
+ * service token (no email) identifies as `svc:<common_name>`. */
+export function identityFromPayload(payload: JWTPayload): string | undefined {
+	const email =
+		typeof payload.email === "string" ? payload.email.trim().toLowerCase() : "";
+	if (email) return email;
+	const commonName =
+		typeof payload.common_name === "string"
+			? payload.common_name.trim().toLowerCase()
+			: "";
+	if (!commonName) return undefined;
+	// A common_name the users API could never store is rejected outright
+	// (403) rather than matched against a hand-written row.
+	const identity = `svc:${commonName}`;
+	return SERVICE_IDENTITY_PATTERN.test(identity) ? identity : undefined;
+}
+
 /** Spec §6.1. Fails closed: missing config is a 500, never an open API. */
 export function accessMiddleware(
 	options: { fetch?: typeof fetch } = {},
@@ -123,7 +147,7 @@ export function accessMiddleware(
 					env.ACCESS_AUD,
 					options.fetch,
 				);
-				email = typeof payload.email === "string" ? payload.email : undefined;
+				email = identityFromPayload(payload);
 			} catch (err) {
 				c.var.logger.info("admin.access_denied", {
 					reason: err instanceof Error ? err.name : "unknown",
@@ -139,7 +163,11 @@ export function accessMiddleware(
 		// Spec §6.1: D1 is the source of truth; the env list only seeds admins.
 		const { db, now } = c.var.deps;
 		let user = await getUser(db, normalized);
-		if (!user && allowedEmails(env.BOOTSTRAP_ADMIN_EMAILS).has(normalized)) {
+		if (
+			!user &&
+			!isServiceIdentity(normalized) &&
+			allowedEmails(env.BOOTSTRAP_ADMIN_EMAILS).has(normalized)
+		) {
 			await db.batch(bootstrapStatements(db, normalized, now()));
 			user = await getUser(db, normalized);
 			c.var.logger.info("admin.user_bootstrapped", { actor_email: normalized });

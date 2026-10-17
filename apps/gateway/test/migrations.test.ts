@@ -199,3 +199,24 @@ describe("0009_archive", () => {
 		expect(sql).toMatch(/CREATE INDEX `webhook_events_archive_mark_idx`/);
 	});
 });
+
+describe("0010_backups", () => {
+	it("0010 creates the backups table without rebuilding an existing table", () => {
+		const sql = migration("0010").queries.join("\n");
+		expect(sql).not.toMatch(/__new_|DROP TABLE|INSERT INTO/);
+		expect(sql).toMatch(/CREATE TABLE `backups`/);
+	});
+
+	it("backups exists with status and started_at indexes", async () => {
+		const tables = await env.DB.prepare(
+			"SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'backups'",
+		).first<{ name: string }>();
+		expect(tables?.name).toBe("backups");
+		const indexes = await env.DB.prepare(
+			"SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'backups' ORDER BY name",
+		).all<{ name: string }>();
+		expect(indexes.results.map((r) => r.name)).toEqual(
+			expect.arrayContaining(["backups_status_idx", "backups_started_at_idx"]),
+		);
+	});
+});

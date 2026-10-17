@@ -1,6 +1,9 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { clearAccessKeyCache } from "../../src/admin/auth/access";
+import {
+	clearAccessKeyCache,
+	identityFromPayload,
+} from "../../src/admin/auth/access";
 import { createApp } from "../../src/app";
 import { auditLogs, users } from "../../src/core/db/schema";
 import type { Deps } from "../../src/deps";
@@ -211,5 +214,135 @@ describe("Access middleware", () => {
 		const res = await api.request("GET", "/me");
 		expect(res.status).toBe(403);
 		expect(await res.json()).toEqual({ error: "forbidden" });
+	});
+
+	describe("service-token identity (svc:)", () => {
+		async function svcApi(deps: Deps, claims: Record<string, unknown>) {
+			const { jwksFetch, sign } = await accessKeys();
+			const app = createApp({
+				createDeps: () => deps,
+				accessFetch: jwksFetch,
+			});
+			const token = await sign(claims);
+			return {
+				request(method: string, path: string, body?: unknown) {
+					const init: RequestInit = {
+						method,
+						headers: { "cf-access-jwt-assertion": token },
+					};
+					if (body !== undefined) {
+						init.body = JSON.stringify(body);
+						(init.headers as Record<string, string>)["content-type"] =
+							"application/json";
+					}
+					return app.request(
+						`https://hookflare.example.com/api/admin/v1${path}`,
+						init,
+						deps.env,
+					);
+				},
+			};
+		}
+
+		async function storeUser(deps: Deps, email: string, role = "operator") {
+			const now = deps.now();
+			await deps.db
+				.insert(users)
+				.values({
+					email,
+					role: role as "operator",
+					createdAt: now,
+					updatedAt: now,
+				})
+				.onConflictDoUpdate({
+					target: users.email,
+					set: { role: role as "operator", disabledAt: null, updatedAt: now },
+				});
+		}
+
+		it("maps a service token to its svc identity", async () => {
+			const deps = testDeps();
+			await storeUser(deps, "svc:ab12.access");
+			const api = await svcApi(deps, {
+				email: undefined,
+				common_name: "Ab12.access",
+			});
+			const res = await api.request("GET", "/me");
+			expect(res.status).toBe(200);
+			expect(await res.json()).toMatchObject({
+				email: "svc:ab12.access",
+				role: "operator",
+			});
+		});
+
+		it.each([
+			["a space", "bad name.access"],
+			["a slash", "a/b"],
+			["a non-ASCII letter", "ñ.access"],
+			["an over-long name", "a".repeat(201)],
+		])("rejects a common_name with %s", async (_label, commonName) => {
+			const identity = `svc:${commonName.toLowerCase()}`;
+			const deps = testDeps();
+			// Even a matching users row (written outside the API) must not admit it.
+			await storeUser(deps, identity);
+			expect(identityFromPayload({ common_name: commonName })).toBeUndefined();
+			const api = await svcApi(deps, {
+				email: undefined,
+				common_name: commonName,
+			});
+			const res = await api.request("GET", "/me");
+			expect(res.status).toBe(403);
+			await deps.db.delete(users).where(eq(users.email, identity));
+		});
+
+		it("falls back to common_name when email is empty", async () => {
+			const deps = testDeps();
+			await storeUser(deps, "svc:x.access");
+			const api = await svcApi(deps, { email: "", common_name: "x.access" });
+			const res = await api.request("GET", "/me");
+			expect(res.status).toBe(200);
+			expect(await res.json()).toMatchObject({ email: "svc:x.access" });
+		});
+
+		it("never bootstraps an svc identity", async () => {
+			const deps = testDeps({
+				env: testEnv({ BOOTSTRAP_ADMIN_EMAILS: "svc:x.access" }),
+			});
+			// The file shares one D1: drop the row an earlier test stored.
+			await deps.db.delete(users).where(eq(users.email, "svc:x.access"));
+			const api = await svcApi(deps, {
+				email: undefined,
+				common_name: "x.access",
+			});
+			const res = await api.request("GET", "/me");
+			expect(res.status).toBe(403);
+			expect(
+				await deps.db
+					.select()
+					.from(users)
+					.where(eq(users.email, "svc:x.access")),
+			).toHaveLength(0);
+		});
+
+		it("writes the svc identity as the audit actor", async () => {
+			const deps = testDeps();
+			// POST /projects needs config.write, so the svc user is an admin;
+			// the load-bearing assertion is the actor_email value.
+			await storeUser(deps, "svc:x.access", "admin");
+			const api = await svcApi(deps, {
+				email: undefined,
+				common_name: "x.access",
+			});
+			const created = await api.request("POST", "/projects", {
+				name: "Shop",
+				slug: `p-${crypto.randomUUID().slice(0, 8)}`,
+			});
+			expect(created.status).toBe(201);
+			const rows = await deps.db
+				.select()
+				.from(auditLogs)
+				.where(eq(auditLogs.actorEmail, "svc:x.access"));
+			expect(rows.length).toBeGreaterThan(0);
+		});
 	});
 });

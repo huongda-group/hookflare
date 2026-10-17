@@ -1,0 +1,16 @@
+{
+	"name": "sink",
+	"private": true,
+	"version": "0.0.0",
+	"type": "module",
+	"scripts": {
+		"test": "vitest run",
+		"typecheck": "tsc --noEmit",
+		"deploy": "wrangler deploy --config wrangler.jsonc"
+	},
+	"devDependencies": {
+		"@cloudflare/vitest-plugin": "^1.4.1",
+		"typescript": "7.0.2",
+		"vitest": "^5.0.4"
+	}
+}

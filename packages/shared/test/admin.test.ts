@@ -279,6 +279,23 @@ describe("M3 schemas", () => {
 				.email,
 		).toBe("ops@example.com");
 	});
+
+	it("accepts service-token identities normalized", () => {
+		expect(
+			createUserRequest.parse({ email: "SVC:Ab.Access", role: "operator" })
+				.email,
+		).toBe("svc:ab.access");
+	});
+
+	it("rejects bare and spaced svc identities", () => {
+		expect(
+			createUserRequest.safeParse({ email: "svc:", role: "operator" }).success,
+		).toBe(false);
+		expect(
+			createUserRequest.safeParse({ email: "svc:a b", role: "operator" })
+				.success,
+		).toBe(false);
+	});
 });
 
 describe("M4 contracts", () => {
@@ -480,6 +497,31 @@ describe("storage settings", () => {
 			storageSettingsSchema.safeParse({
 				...DEFAULT_STORAGE_SETTINGS,
 				archive_retention_days: 29,
+			}).success,
+		).toBe(false);
+	});
+	it("defaults backup fields on a pre-M6 row", () => {
+		expect(
+			storageSettingsSchema.parse({
+				archive_enabled: true,
+				hot_retention_days: 30,
+				failed_retention_days: 90,
+				archive_retention_days: null,
+				audit_retention_days: 365,
+			}),
+		).toMatchObject({ backup_enabled: true, backup_retention_days: 35 });
+	});
+	it("bounds backup_retention_days to 7..365", () => {
+		expect(
+			storageSettingsSchema.safeParse({
+				...DEFAULT_STORAGE_SETTINGS,
+				backup_retention_days: 6,
+			}).success,
+		).toBe(false);
+		expect(
+			storageSettingsSchema.safeParse({
+				...DEFAULT_STORAGE_SETTINGS,
+				backup_retention_days: 366,
 			}).success,
 		).toBe(false);
 	});

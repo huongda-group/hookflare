@@ -1,0 +1,14 @@
+{
+	"name": "b1",
+	"steps": [
+		{ "rate_per_s": 25, "duration_s": 180 },
+		{ "rate_per_s": 50, "duration_s": 180 },
+		{ "rate_per_s": 100, "duration_s": 180 },
+		{ "rate_per_s": 200, "duration_s": 180 },
+		{ "rate_per_s": 400, "duration_s": 180 }
+	],
+	"sources": 40,
+	"body_bytes": 1024,
+	"sink": {},
+	"drain_timeout_s": 1800
+}
