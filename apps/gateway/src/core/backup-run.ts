@@ -30,6 +30,17 @@ export type StartBackupOpts = {
 	resume?: BackupParams["resume"];
 };
 
+async function moveInstance(
+	deps: Deps,
+	backupId: string,
+	instanceId: string,
+): Promise<void> {
+	await deps.db
+		.update(backups)
+		.set({ instanceId })
+		.where(eq(backups.id, backupId));
+}
+
 /**
  * Creates the backup Workflow instance, then records the `backups` row
  * (`running`, prefix `d1/YYYY/MM/DD/<id>/`). A continuation passes its
@@ -54,6 +65,9 @@ export async function startBackupRun(
 		});
 	} catch (err) {
 		if (/already.?exists|duplicate/i.test(String(err))) {
+			// A retried `continue` step: create landed last time but the step
+			// failed before the UPDATE did. Moving the instance ID is idempotent.
+			if (opts.backupId) await moveInstance(deps, opts.backupId, opts.instanceId);
 			logger.info("backup.already_started", { instance_id: opts.instanceId });
 			return "duplicate";
 		}
@@ -61,10 +75,7 @@ export async function startBackupRun(
 	}
 	const now = deps.now();
 	if (opts.backupId) {
-		await deps.db
-			.update(backups)
-			.set({ instanceId: opts.instanceId })
-			.where(eq(backups.id, opts.backupId));
+		await moveInstance(deps, opts.backupId, opts.instanceId);
 	} else {
 		const day = new Date(now).toISOString().slice(0, 10);
 		await deps.db.insert(backups).values({

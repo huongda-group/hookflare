@@ -356,6 +356,27 @@ describe("backup cron", () => {
 		expect(rows.map((r) => r.id)).toEqual([id]);
 	});
 
+	it("a retried continue step still moves the row's instance_id when create says duplicate", async () => {
+		const backup = recordingBackup();
+		const deps = testDeps({ backup });
+		await cleanBackups(deps);
+		await startBackupRun(deps, { instanceId: "bk-c", trigger: "cron" }, logger);
+		const cont = {
+			instanceId: "bk-c-cont-1",
+			trigger: "cron" as const,
+			backupId: "bk-c",
+			resume: { tableName: "backups", cursor: null, partNo: 1 },
+		};
+		// First attempt: create succeeded, then the step failed before the UPDATE landed.
+		await backup.create({ id: cont.instanceId, params: {} });
+		expect(await startBackupRun(deps, cont, logger)).toBe("duplicate");
+		const [row] = await deps.db
+			.select()
+			.from(backups)
+			.where(eq(backups.id, "bk-c"));
+		expect(row.instanceId).toBe("bk-c-cont-1");
+	});
+
 	it("cron enabled starts one backup-<day> instance", async () => {
 		const backup = recordingBackup();
 		const deps = testDeps({ backup, now: () => Date.UTC(2026, 9, 16, 20) });
