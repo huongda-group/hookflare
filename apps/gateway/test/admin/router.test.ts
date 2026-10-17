@@ -6,7 +6,7 @@ describe("admin router", () => {
 	it("declares a permission on every route except /me", () => {
 		const guarded = new Map<string, boolean>();
 		for (const r of adminRoutes().routes) {
-			if (r.method === "ALL") continue; // middleware (Access)
+			if (r.method === "ALL") continue; // middleware (authMiddleware)
 			const key = `${r.method} ${r.path.replace(/\/$/, "")}`;
 			guarded.set(
 				key,

@@ -175,7 +175,6 @@ describe("POST /destinations/:id/test", () => {
 		for (let i = 0; i < 3; i++) {
 			await op.request("POST", `/destinations/${destination.id}/test`);
 		}
-		// keyset so the viewer's tokens verify (op makes no further calls).
 		const viewer = await adminApp(deps, { role: "viewer" });
 		expect(
 			(await viewer.request("POST", `/destinations/${destination.id}/test`))

@@ -11,12 +11,11 @@ async function columns(table: string) {
 }
 
 /**
- * The pre-M7 (0000_init) actor column name. Assembled from parts so the
- * suite-wide "no stale actor email references" sweep does not trip on this
- * file's deliberate legacy-schema upgrade test, which must name the old column
- * to insert into it.
+ * The pre-migration (0000_init) legacy actor column name: `actor_email`. This
+ * test seeds a 1.0.0-era schema and then migrates it, so it must name the old
+ * column to insert rows into it before the rename to `actor`.
  */
-const LEGACY_ACTOR_COLUMN = `actor${"_"}email`;
+const LEGACY_ACTOR_COLUMN = "actor_email";
 
 async function indexNames(table: string) {
 	return (
