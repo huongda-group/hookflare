@@ -100,7 +100,10 @@ function pinTables(
 		return t;
 	});
 	const keep = new Set(pinned);
-	return { list, added: live.filter((t) => !keep.has(t.name)).map((t) => t.name) };
+	return {
+		list,
+		added: live.filter((t) => !keep.has(t.name)).map((t) => t.name),
+	};
 }
 
 /**

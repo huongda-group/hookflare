@@ -53,6 +53,8 @@ describe("0002_core_pipeline migration", () => {
 			expect.stringMatching(/^0008_alerts/),
 			expect.stringMatching(/^0009_archive/),
 			expect.stringMatching(/^0010_backups/),
+			expect.stringMatching(/^0011_backup_expiring/),
+			expect.stringMatching(/^0012_backup_one_running/),
 		]);
 		const sql = migrations[1]?.queries.join("\n") ?? "";
 		expect(sql).not.toMatch(/CREATE TABLE [`"]?settings/i);

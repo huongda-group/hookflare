@@ -85,7 +85,8 @@ export async function startBackupRun(
 		if (/already.?exists|duplicate/i.test(String(err))) {
 			// A retried `continue` step: create landed last time but the step
 			// failed before the UPDATE did. Moving the instance ID is idempotent.
-			if (opts.backupId) await moveInstance(deps, opts.backupId, opts.instanceId);
+			if (opts.backupId)
+				await moveInstance(deps, opts.backupId, opts.instanceId);
 			logger.info("backup.already_started", { instance_id: opts.instanceId });
 			return "duplicate";
 		}

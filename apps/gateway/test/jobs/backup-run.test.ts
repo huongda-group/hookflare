@@ -239,7 +239,9 @@ describe("runBackup", () => {
 		await seedDelivery(deps, p, { status: "delivered" });
 		const { base, splitDeps, params } = await splitFirst("bk-added");
 		// "aaa_…" sorts first: an index-based resume would shift by one.
-		await deps.db.run(sql`CREATE TABLE aaa_added_mid_run (id TEXT PRIMARY KEY)`);
+		await deps.db.run(
+			sql`CREATE TABLE aaa_added_mid_run (id TEXT PRIMARY KEY)`,
+		);
 		await deps.db.run(sql`INSERT INTO aaa_added_mid_run VALUES ('x')`);
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		try {
@@ -440,32 +442,31 @@ describe("backup liveness", () => {
 		expect(row).toMatchObject({ status: "failed", error: "instance lost" });
 	});
 
-	it.each([
-		"errored",
-		"terminated",
-		"complete",
-	])("isBackupRunning fails a running row whose instance is %s", async (status) => {
-		const dead = testDeps({ backup: recordingBackup(status) });
-		await cleanBackups(dead);
-		await dead.db.insert(backups).values({
-			id: `bk-${status}`,
-			day: "2026-10-16",
-			status: "running",
-			prefix: `d1/2026/10/16/bk-${status}/`,
-			instanceId: `bk-${status}`,
-			trigger: "manual",
-			startedAt: Date.now(),
-		});
-		expect(await isBackupRunning(dead)).toBe(false);
-		const [row] = await dead.db
-			.select()
-			.from(backups)
-			.where(eq(backups.id, `bk-${status}`));
-		expect(row).toMatchObject({
-			status: "failed",
-			error: `instance ${status}`,
-		});
-	});
+	it.each(["errored", "terminated", "complete"])(
+		"isBackupRunning fails a running row whose instance is %s",
+		async (status) => {
+			const dead = testDeps({ backup: recordingBackup(status) });
+			await cleanBackups(dead);
+			await dead.db.insert(backups).values({
+				id: `bk-${status}`,
+				day: "2026-10-16",
+				status: "running",
+				prefix: `d1/2026/10/16/bk-${status}/`,
+				instanceId: `bk-${status}`,
+				trigger: "manual",
+				startedAt: Date.now(),
+			});
+			expect(await isBackupRunning(dead)).toBe(false);
+			const [row] = await dead.db
+				.select()
+				.from(backups)
+				.where(eq(backups.id, `bk-${status}`));
+			expect(row).toMatchObject({
+				status: "failed",
+				error: `instance ${status}`,
+			});
+		},
+	);
 
 	it("readBackupSummary reports enabled, last verified, last failed, and running", async () => {
 		await setStorage(deps, { backup_enabled: true });
