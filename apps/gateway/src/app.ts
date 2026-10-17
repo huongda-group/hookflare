@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { turnstileConfig } from "./admin/auth/turnstile";
 import { adminRoutes } from "./admin/router";
 import { heartbeatStale, readHeartbeat } from "./core/heartbeat";
 import { createLogger, type Logger } from "./core/log";
@@ -62,6 +63,8 @@ export function createApp(options: AppOptions = {}) {
 
 	app.get("/healthz", async (c) => {
 		const version = c.env.CF_VERSION_METADATA?.id ?? "unknown";
+		// Reported for visibility only; it never changes the health status.
+		const turnstile = turnstileConfig(c.env).mode;
 		try {
 			const deps = c.var.deps;
 			// The D1 probe and the heartbeat read share one timeout.
@@ -73,19 +76,23 @@ export function createApp(options: AppOptions = {}) {
 				]),
 				healthTimeoutMs,
 			);
-			// Public and unauthenticated: status, reason, and version only.
+			// Public and unauthenticated: status, reason, version, and the
+			// Turnstile mode only.
 			if (!jobs)
-				return c.json({ status: "ok", reason: "jobs_unknown", version }, 200);
+				return c.json(
+					{ status: "ok", reason: "jobs_unknown", version, turnstile },
+					200,
+				);
 			if (heartbeatStale(jobs, deps.now()))
 				return c.json(
-					{ status: "degraded", reason: "jobs_stale", version },
+					{ status: "degraded", reason: "jobs_stale", version, turnstile },
 					503,
 				);
-			return c.json({ status: "ok", version }, 200);
+			return c.json({ status: "ok", version, turnstile }, 200);
 		} catch (err) {
 			c.var.logger.error("health.d1_failed", { error: err });
 			return c.json(
-				{ status: "degraded", reason: "d1_unavailable", version },
+				{ status: "degraded", reason: "d1_unavailable", version, turnstile },
 				503,
 			);
 		}

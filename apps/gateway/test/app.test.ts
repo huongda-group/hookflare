@@ -44,6 +44,7 @@ describe("app", () => {
 			status: "degraded",
 			reason: "d1_unavailable",
 			version: expect.any(String),
+			turnstile: "off",
 		});
 		const line = JSON.parse(errorSpy.mock.calls[0]?.[0] as string);
 		expect(line).toMatchObject({ level: "error", msg: "health.d1_failed" });
@@ -126,7 +127,11 @@ describe("app", () => {
 			const res = await createApp().request("/healthz", {}, env);
 			expect(res.status).toBe(200);
 			const body = (await res.json()) as Record<string, unknown>;
-			expect(body).toEqual({ status: "ok", version: expect.any(String) });
+			expect(body).toEqual({
+				status: "ok",
+				version: expect.any(String),
+				turnstile: "off",
+			});
 		});
 
 		it("returns 503 jobs_stale when reconcile_at is older than 5 minutes", async () => {
@@ -138,6 +143,7 @@ describe("app", () => {
 				status: "degraded",
 				reason: "jobs_stale",
 				version: expect.any(String),
+				turnstile: "off",
 			});
 		});
 
@@ -168,6 +174,7 @@ describe("app", () => {
 				status: "ok",
 				reason: "jobs_unknown",
 				version: expect.any(String),
+				turnstile: "off",
 			});
 		});
 	});

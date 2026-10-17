@@ -22,11 +22,11 @@ export function testEnv(overrides: Partial<AppEnv> = {}): AppEnv {
 	return {
 		...(env as unknown as AppEnv),
 		LOG_LEVEL: "info",
-		ACCESS_TEAM_DOMAIN: ACCESS_TEST.teamDomain,
-		ACCESS_AUD: ACCESS_TEST.aud,
-		BOOTSTRAP_ADMIN_EMAILS: ACCESS_TEST.admin,
 		PUBLIC_BASE_URL: "",
 		INGRESS_LIMITER: allowAllLimiter,
+		LOGIN_LIMITER: allowAllLimiter,
+		SETUP_TOKEN: "test-setup-token",
+		TURNSTILE_SITE_KEY: "",
 		...overrides,
 	};
 }
