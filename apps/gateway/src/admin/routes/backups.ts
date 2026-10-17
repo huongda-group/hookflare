@@ -15,7 +15,7 @@ import { auditStmt } from "../http";
 export function backupRoutes() {
 	const routes = new Hono<AppBindings>();
 
-	routes.get("/summary", requirePermission("settings.manage"), async (c) => {
+	routes.get("/summary", requirePermission("events.read"), async (c) => {
 		return c.json(await readBackupSummary(c.var.deps));
 	});
 

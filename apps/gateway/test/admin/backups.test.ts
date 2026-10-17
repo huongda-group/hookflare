@@ -14,11 +14,14 @@ describe("backups API", () => {
 		await deps.db.delete(backups);
 	}
 
-	it("an operator gets 403 on both routes", async () => {
+	it.each([
+		"viewer",
+		"operator",
+	] as const)("a %s reads the summary but gets 403 on POST /run", async (role) => {
 		const deps = testDeps();
 		await cleanBackups(deps);
-		const app = await adminApp(deps, { role: "operator" });
-		expect((await app.request("GET", "/backups/summary")).status).toBe(403);
+		const app = await adminApp(deps, { role });
+		expect((await app.request("GET", "/backups/summary")).status).toBe(200);
 		expect((await app.request("POST", "/backups/run", {})).status).toBe(403);
 	});
 
