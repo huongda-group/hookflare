@@ -21,9 +21,14 @@ dashboard page; this page covers the external uptime checks (spec §8.2).
 Why these three: Health proves the Worker, D1 (`SELECT 1`), and the job
 heartbeat are all alive — `/healthz` returns `503` with
 `"reason":"jobs_stale"` when `jobs.heartbeat.reconcile_at` is older than
+5 minutes, or is missing while the heartbeat row itself is older than
 5 minutes (`apps/gateway/src/app.ts`, `apps/gateway/src/core/heartbeat.ts`;
-a fresh database with no heartbeat yet reports `"jobs":"unknown"` and
-counts as healthy). Ingress proves webhook intake still verifies
+a fresh database with no heartbeat yet reports `"reason":"jobs_unknown"`
+with `200` and counts as healthy; a failed D1 probe is `503`
+`"reason":"d1_unavailable"`). The public body is only `status`, `reason`,
+and `version` — heartbeat timestamps are read from D1, not `/healthz`.
+A failed heartbeat write is logged as `heartbeat.failed` and never fails
+the job. Ingress proves webhook intake still verifies
 signatures. Dashboard proves the Access application in front of `/` and
 `/api/admin/*` is still attached. **Two consecutive failures page the
 alert channel** (the same Discord/Slack channel as the M5 alerts).

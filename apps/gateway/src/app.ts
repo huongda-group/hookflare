@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { adminRoutes } from "./admin/router";
-import { HEARTBEAT_STALE_MS, readHeartbeat } from "./core/heartbeat";
+import { heartbeatStale, readHeartbeat } from "./core/heartbeat";
 import { createLogger, type Logger } from "./core/log";
 import type { Role } from "./core/rbac";
 import { createDeps, type Deps } from "./deps";
@@ -61,6 +61,7 @@ export function createApp(options: AppOptions = {}) {
 	});
 
 	app.get("/healthz", async (c) => {
+		const version = c.env.CF_VERSION_METADATA?.id ?? "unknown";
 		try {
 			const deps = c.var.deps;
 			// The D1 probe and the heartbeat read share one timeout.
@@ -72,15 +73,21 @@ export function createApp(options: AppOptions = {}) {
 				]),
 				healthTimeoutMs,
 			);
-			const version = c.env.CF_VERSION_METADATA?.id ?? "unknown";
-			if (!jobs) return c.json({ status: "ok", version, jobs: "unknown" }, 200);
-			const at = jobs.reconcile_at;
-			if (typeof at === "number" && deps.now() - at > HEARTBEAT_STALE_MS)
-				return c.json({ status: "degraded", reason: "jobs_stale", jobs }, 503);
-			return c.json({ status: "ok", version, jobs }, 200);
+			// Public and unauthenticated: status, reason, and version only.
+			if (!jobs)
+				return c.json({ status: "ok", reason: "jobs_unknown", version }, 200);
+			if (heartbeatStale(jobs, deps.now()))
+				return c.json(
+					{ status: "degraded", reason: "jobs_stale", version },
+					503,
+				);
+			return c.json({ status: "ok", version }, 200);
 		} catch (err) {
 			c.var.logger.error("health.d1_failed", { error: err });
-			return c.json({ status: "degraded" }, 503);
+			return c.json(
+				{ status: "degraded", reason: "d1_unavailable", version },
+				503,
+			);
 		}
 	});
 

@@ -14,7 +14,7 @@ export const ROLLUP_CRON = "*/5 * * * *";
 export const ARCHIVE_CRON = "0 3 * * *";
 export const BACKUP_CRON = "0 20 * * *";
 
-/** A heartbeat must never fail the job: beat already swallows, this logs. */
+/** A heartbeat must never fail the job: beat throws, this logs. */
 async function beatSafe(
 	deps: Deps,
 	logger: Logger,

@@ -39,7 +39,12 @@ describe("app", () => {
 		});
 		const res = await createApp().request("/healthz", {}, brokenEnv);
 		expect(res.status).toBe(503);
-		await expect(res.json()).resolves.toEqual({ status: "degraded" });
+		const body = (await res.json()) as Record<string, unknown>;
+		expect(body).toEqual({
+			status: "degraded",
+			reason: "d1_unavailable",
+			version: expect.any(String),
+		});
 		const line = JSON.parse(errorSpy.mock.calls[0]?.[0] as string);
 		expect(line).toMatchObject({ level: "error", msg: "health.d1_failed" });
 		expect(typeof line.request_id).toBe("string");
@@ -116,15 +121,12 @@ describe("app", () => {
 				.where(eq(settings.key, HEARTBEAT_KEY));
 		});
 
-		it("returns 200 with jobs when the heartbeat is fresh", async () => {
+		it("returns 200 with only status and version when the heartbeat is fresh", async () => {
 			await beat(testDeps().db, "reconcile", Date.now() - 60_000);
 			const res = await createApp().request("/healthz", {}, env);
 			expect(res.status).toBe(200);
 			const body = (await res.json()) as Record<string, unknown>;
-			expect(body).toMatchObject({ status: "ok" });
-			expect(body.jobs).toMatchObject({
-				reconcile_at: expect.any(Number),
-			});
+			expect(body).toEqual({ status: "ok", version: expect.any(String) });
 		});
 
 		it("returns 503 jobs_stale when reconcile_at is older than 5 minutes", async () => {
@@ -132,10 +134,28 @@ describe("app", () => {
 			const res = await createApp().request("/healthz", {}, env);
 			expect(res.status).toBe(503);
 			const body = (await res.json()) as Record<string, unknown>;
-			expect(body).toMatchObject({ status: "degraded", reason: "jobs_stale" });
-			expect(body.jobs).toMatchObject({
-				reconcile_at: expect.any(Number),
+			expect(body).toEqual({
+				status: "degraded",
+				reason: "jobs_stale",
+				version: expect.any(String),
 			});
+		});
+
+		it("returns 503 jobs_stale when reconcile never beat and the row is older than 5 minutes", async () => {
+			await beat(testDeps().db, "alerts", Date.now() - 6 * 60_000);
+			await beat(testDeps().db, "alerts", Date.now() - 30_000);
+			const res = await createApp().request("/healthz", {}, env);
+			expect(res.status).toBe(503);
+			await expect(res.json()).resolves.toMatchObject({
+				status: "degraded",
+				reason: "jobs_stale",
+			});
+		});
+
+		it("returns 200 when reconcile has not beaten yet but the row is new", async () => {
+			await beat(testDeps().db, "alerts", Date.now() - 30_000);
+			const res = await createApp().request("/healthz", {}, env);
+			expect(res.status).toBe(200);
 		});
 
 		it("returns 200 jobs unknown on a new deployment with no row", async () => {
@@ -144,9 +164,10 @@ describe("app", () => {
 				.where(eq(settings.key, HEARTBEAT_KEY));
 			const res = await createApp().request("/healthz", {}, env);
 			expect(res.status).toBe(200);
-			await expect(res.json()).resolves.toMatchObject({
+			await expect(res.json()).resolves.toEqual({
 				status: "ok",
-				jobs: "unknown",
+				reason: "jobs_unknown",
+				version: expect.any(String),
 			});
 		});
 	});

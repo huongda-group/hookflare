@@ -52,5 +52,5 @@ Pages:
 | Rollback | `wrangler rollback <version-id>`: redeploys a previous Worker version. It does **not** undo D1 schema/data, R2 objects, queue messages, DO migrations, or API-changed settings. |
 | Roll forward | Fix the bug in a new release instead of rolling back. Required when the release contains a contract or DO migration. |
 | Canary source | An `hmac` source whose destination is the sink. Every external ingress probe uses a wrong signature, so it never stores anything — it only exercises signature verification. |
-| Heartbeat | `jobs.heartbeat` in D1, written by `runScheduled` after each job. `/healthz` reports `503 jobs_stale` when `reconcile_at` is older than 5 minutes, `unknown` on a fresh database. |
+| Heartbeat | `jobs.heartbeat` in D1, written by `runScheduled` after each job. `/healthz` reports `503 jobs_stale` when `reconcile_at` is older than 5 minutes (or missing on a row older than 5 minutes), `jobs_unknown` on a fresh database. |
 | Page | An alert that notifies the shared Discord/Slack channel after 2 consecutive failures. |

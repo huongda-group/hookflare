@@ -137,7 +137,7 @@ No verified full-DB backup in the last 36 h.
 - **Check:** `curl https://<host>/healthz`. `503 {"reason":"jobs_stale"}`
   means the Worker and D1 are up but the per-minute jobs (reconciler,
   alerts) have not beaten the heartbeat in 5 minutes — the cron triggers
-  are missing or failing. `503 {"status":"degraded"}` with no reason
+  are missing or failing. `503 {"reason":"d1_unavailable"}`
   means the D1 probe failed. No response means the Worker is down or the
   route/Access bypass is broken.
 - **Act:** `jobs_stale`: check the cron triggers are deployed

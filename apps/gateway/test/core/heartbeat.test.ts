@@ -17,6 +17,7 @@ describe("heartbeat", () => {
 		await beat(db, "reconcile", 1000);
 		await beat(db, "alerts", 2000);
 		expect(await readHeartbeat(db)).toEqual({
+			first_at: 1000,
 			reconcile_at: 1000,
 			alerts_at: 2000,
 		});
@@ -26,7 +27,7 @@ describe("heartbeat", () => {
 		expect(await readHeartbeat(testDeps().db)).toBeNull();
 	});
 
-	it("never throws when D1 is down", async () => {
+	it("throws when D1 is down, so the caller can log heartbeat.failed", async () => {
 		const { db } = testDeps();
 		const broken = new Proxy(db, {
 			get(target, prop, receiver) {
@@ -36,7 +37,24 @@ describe("heartbeat", () => {
 				return Reflect.get(target, prop, receiver);
 			},
 		}) as Db;
-		await expect(beat(broken, "reconcile", 1)).resolves.toBeUndefined();
+		await expect(beat(broken, "reconcile", 1)).rejects.toThrow(/simulated/);
+	});
+
+	it("runScheduled logs heartbeat.failed when the beat fails", async () => {
+		const log = vi.spyOn(console, "log").mockImplementation(() => {});
+		const err = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const base = testDeps();
+			const deps = faultyDeps(base, { d1: [{ match: /json_set/ }] });
+			await runScheduled(RECONCILE_CRON, deps);
+			const lines = err.mock.calls.map((c) => JSON.parse(String(c[0])));
+			expect(lines).toContainEqual(
+				expect.objectContaining({ msg: "heartbeat.failed", job: "reconcile" }),
+			);
+		} finally {
+			log.mockRestore();
+			err.mockRestore();
+		}
 	});
 
 	it("runScheduled beats alerts but not reconcile when reconcile throws", async () => {

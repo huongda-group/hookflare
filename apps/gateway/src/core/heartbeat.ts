@@ -15,22 +15,42 @@ const PATHS: Record<JobName, string> = {
 
 /**
  * Records a successful job run. One statement: the settings row is created
- * from `{}` when missing, otherwise the job's key is merged in. Never
- * throws: a heartbeat must not fail the job, so failures are swallowed for
- * the caller to log.
+ * from `{first_at}` when missing, otherwise the job's key is merged in.
+ * `first_at` dates the row, so `/healthz` can tell a new deployment from a
+ * reconciler that never beat. Throws on failure: the caller logs
+ * `heartbeat.failed` and must not let it fail the job.
  */
 export async function beat(db: Db, job: JobName, at: number): Promise<void> {
-	try {
-		const path = PATHS[job];
-		await db.run(sql`
-			INSERT INTO settings(key, value_json, updated_at)
-			VALUES (${HEARTBEAT_KEY}, json_set('{}', ${path}, ${at}), ${at})
-			ON CONFLICT(key) DO UPDATE SET
-				value_json = json_set(settings.value_json, ${path}, ${at}),
-				updated_at = ${at}`);
-	} catch {
-		// Swallowed by contract.
-	}
+	const path = PATHS[job];
+	await db.run(sql`
+		INSERT INTO settings(key, value_json, updated_at)
+		VALUES (${HEARTBEAT_KEY}, json_set('{}', '$.first_at', ${at}, ${path}, ${at}), ${at})
+		ON CONFLICT(key) DO UPDATE SET
+			value_json = json_set(settings.value_json, ${path}, ${at}),
+			updated_at = ${at}`);
+}
+
+/**
+ * True when the reconciler's heartbeat is older than `HEARTBEAT_STALE_MS`,
+ * or when it never beat although the row (`first_at`, else its oldest key)
+ * is older than that.
+ */
+export function heartbeatStale(
+	jobs: Record<string, number>,
+	now: number,
+): boolean {
+	const at = jobs.reconcile_at;
+	if (typeof at === "number") return now - at > HEARTBEAT_STALE_MS;
+	const values = Object.values(jobs).filter(
+		(v): v is number => typeof v === "number",
+	);
+	const since =
+		typeof jobs.first_at === "number"
+			? jobs.first_at
+			: values.length > 0
+				? Math.min(...values)
+				: null;
+	return since !== null && now - since > HEARTBEAT_STALE_MS;
 }
 
 /** The merged heartbeat map, or null when no job has beaten yet. */
