@@ -15,9 +15,15 @@ describe("admin router", () => {
 		}
 		const unguarded = [...guarded]
 			.filter(([key, ok]) => {
-				// /auth/* is deliberately public (onboarding, login, logout).
+				// /auth/* is deliberately public (onboarding, login, logout);
+				// /me and /me/password are any-authenticated-user (spec §6.6).
 				const path = key.slice(key.indexOf(" ") + 1);
-				return !ok && key !== "GET /me" && !path.startsWith("/auth");
+				return (
+					!ok &&
+					path !== "/me" &&
+					!path.startsWith("/me/") &&
+					!path.startsWith("/auth")
+				);
 			})
 			.map(([key]) => key);
 		expect(unguarded).toEqual([]);

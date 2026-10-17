@@ -1,12 +1,17 @@
 import type { Page, User } from "@hookflare/shared";
 import { and, eq, ne } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
-import { users } from "../../src/core/db/schema";
+import { verifyPassword } from "../../src/admin/auth/password";
+import { createApp } from "../../src/app";
+import { sessions, users } from "../../src/core/db/schema";
+import { getUser } from "../../src/core/db/users";
 import { adminApp, auditRows, uniqueUsername } from "../helpers/admin";
 import { testDeps } from "../helpers/deps";
 
 /** A valid initial password (>= 12 chars); POST /users requires one. */
 const PASSWORD = "correct-horse-battery";
+const NEW_PASSWORD = "rotated-horse-battery";
+const ORIGIN = "https://hookflare.example.com";
 
 /** Every test starts from migrations, so the only admin is whoever we create. */
 async function soleAdmin(deps: ReturnType<typeof testDeps>) {
@@ -34,6 +39,7 @@ describe("/users", () => {
 			username,
 			role: "operator",
 			disabled_at: null,
+			has_password: true,
 		});
 		const [audit] = await auditRows(deps, username);
 		expect(audit).toMatchObject({ action: "user.created", reason: "on-call" });
@@ -76,13 +82,18 @@ describe("/users", () => {
 		await api.request("PATCH", `/users/${target.username}`, {
 			disabled: true,
 		});
-		// Disabling takes effect on the very next request: the user row is read
-		// per request, so the session is rejected (401).
+		// Disabling deletes the user's sessions in the same batch, so the next
+		// request is rejected (401).
 		expect((await target.request("GET", "/me")).status).toBe(401);
 		await api.request("PATCH", `/users/${target.username}`, {
 			disabled: false,
 		});
-		expect((await target.request("GET", "/me")).status).toBe(200);
+		// Re-enabling does not resurrect a deleted session; the row is active.
+		const [row] = await deps.db
+			.select()
+			.from(users)
+			.where(eq(users.username, target.username));
+		expect(row.disabledAt).toBeNull();
 		expect(
 			(await auditRows(deps, target.username)).map((a) => a.action),
 		).toEqual(["user.role_changed", "user.disabled", "user.enabled"]);
@@ -184,5 +195,167 @@ describe("/users", () => {
 		const deps = testDeps();
 		const api = await adminApp(deps, { role: "operator" });
 		expect((await api.request("GET", "/users")).status).toBe(403);
+	});
+
+	it("hashes the password so the new user can log in", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps, { role: "admin" });
+		const username = uniqueUsername("login");
+		const created = await api.request("POST", "/users", {
+			username,
+			role: "operator",
+			password: PASSWORD,
+		});
+		expect(created.status).toBe(201);
+		expect(await created.json<User>()).toMatchObject({
+			username,
+			has_password: true,
+		});
+		const row = await getUser(deps.db, username);
+		expect(await verifyPassword(PASSWORD, row?.passwordHash ?? null)).toBe(
+			true,
+		);
+
+		const login = await createApp({ createDeps: () => deps }).request(
+			`${ORIGIN}/api/admin/v1/auth/login`,
+			{
+				method: "POST",
+				headers: { origin: ORIGIN, "content-type": "application/json" },
+				body: JSON.stringify({ username, password: PASSWORD }),
+			},
+			deps.env,
+		);
+		expect(login.status).toBe(204);
+	});
+
+	it("rejects a password equal to the new username", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps, { role: "admin" });
+		const res = await api.request("POST", "/users", {
+			username: "admintwelve1",
+			role: "viewer",
+			password: "admintwelve1",
+		});
+		expect(res.status).toBe(400);
+		expect(await res.json()).toEqual({ error: "password_equals_username" });
+		expect(await getUser(deps.db, "admintwelve1")).toBeUndefined();
+	});
+
+	it("rejects a username that fails the new rule", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps, { role: "admin" });
+		const res = await api.request("POST", "/users", {
+			username: "ab",
+			role: "viewer",
+			password: PASSWORD,
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("still accepts a legacy svc: key as a path param", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps, { role: "admin" });
+		await deps.db.insert(users).values({
+			username: "svc:bot",
+			role: "viewer",
+			createdAt: 1,
+			updatedAt: 1,
+			disabledAt: deps.now(),
+		});
+		const res = await api.request(
+			"PATCH",
+			`/users/${encodeURIComponent("svc:bot")}`,
+			{ role: "operator" },
+		);
+		expect(res.status).toBe(200);
+		expect((await res.json<User>()).role).toBe("operator");
+	});
+
+	it("resets a password, drops the target's sessions, and audits no secret", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps, { role: "admin" });
+		const target = await adminApp(deps, { role: "viewer" });
+		expect((await target.request("GET", "/me")).status).toBe(200);
+
+		const res = await api.request(
+			"POST",
+			`/users/${target.username}/password`,
+			{
+				password: NEW_PASSWORD,
+				reason: "lost device",
+			},
+		);
+		expect(res.status).toBe(204);
+		// The only reason this 401s is that the session row was deleted.
+		expect((await target.request("GET", "/me")).status).toBe(401);
+
+		const [audit] = (await auditRows(deps, target.username)).filter(
+			(a) => a.action === "user.password_reset",
+		);
+		expect(audit).toMatchObject({
+			action: "user.password_reset",
+			reason: "lost device",
+		});
+		const diff = JSON.stringify(audit.diffJson);
+		expect(diff).not.toContain("password");
+		expect(diff).not.toContain("hash");
+
+		const row = await getUser(deps.db, target.username);
+		expect(row?.passwordChangedAt).not.toBeNull();
+		expect(await verifyPassword(NEW_PASSWORD, row?.passwordHash ?? null)).toBe(
+			true,
+		);
+	});
+
+	it("rejects a reset password equal to the target username", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps, { role: "admin" });
+		const target = await adminApp(deps, {
+			username: "admintwelve1",
+			role: "viewer",
+		});
+		const res = await api.request(
+			"POST",
+			`/users/${target.username}/password`,
+			{
+				password: "admintwelve1",
+			},
+		);
+		expect(res.status).toBe(400);
+		expect(await res.json()).toEqual({ error: "password_equals_username" });
+	});
+
+	it("answers 404 when resetting the password of an unknown user", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps, { role: "admin" });
+		const res = await api.request(
+			"POST",
+			`/users/${uniqueUsername("ghost")}/password`,
+			{ password: NEW_PASSWORD },
+		);
+		expect(res.status).toBe(404);
+	});
+
+	it("deletes the user's session rows in the same batch as a disable", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps, { role: "admin" });
+		const target = await adminApp(deps, { role: "viewer" });
+		expect(
+			await deps.db
+				.select()
+				.from(sessions)
+				.where(eq(sessions.username, target.username)),
+		).toHaveLength(1);
+
+		const res = await api.request("PATCH", `/users/${target.username}`, {
+			disabled: true,
+		});
+		expect(res.status).toBe(200);
+		expect(
+			await deps.db
+				.select()
+				.from(sessions)
+				.where(eq(sessions.username, target.username)),
+		).toEqual([]);
 	});
 });
