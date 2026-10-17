@@ -105,6 +105,64 @@ export function newMigrations(baseFiles, headFiles) {
 }
 
 /**
+ * Migrations on the base ref that the head changed: a modified or removed
+ * migration rewrites history that D1 has already applied (and records by
+ * name only), so it never takes effect remotely. Line endings are
+ * normalized before comparing.
+ * @param {Record<string, string>} base `.sql` name → content at the base ref.
+ * @param {Record<string, string>} head `.sql` name → content in the tree.
+ * @returns {{ file: string, change: "modified" | "removed" }[]}
+ */
+export function changedMigrations(base, head) {
+	/** @param {string} sql */
+	const normalize = (sql) => sql.replace(/\r\n/g, "\n");
+	/** @type {{ file: string, change: "modified" | "removed" }[]} */
+	const changed = [];
+	for (const [file, sql] of Object.entries(base)) {
+		if (!(file in head)) {
+			changed.push({ file, change: "removed" });
+		} else if (normalize(head[file]) !== normalize(sql)) {
+			changed.push({ file, change: "modified" });
+		}
+	}
+	return changed;
+}
+
+/**
+ * Problems in a parsed `contract.json`: it must be an array of
+ * `{ file, release, reason }` objects with non-empty strings.
+ * @param {unknown} contract
+ * @returns {string[]}
+ */
+export function contractProblems(contract) {
+	if (!Array.isArray(contract)) {
+		return ["contract.json must be an array"];
+	}
+	/** @type {string[]} */
+	const problems = [];
+	contract.forEach((entry, index) => {
+		if (typeof entry !== "object" || entry === null) {
+			problems.push(
+				`contract.json[${index}]: must be an object with file, release, and reason`,
+			);
+			return;
+		}
+		const fields = /** @type {Record<string, unknown>} */ (entry);
+		const label =
+			typeof fields.file === "string"
+				? `contract.json[${index}] (${fields.file})`
+				: `contract.json[${index}]`;
+		for (const key of ["file", "release", "reason"]) {
+			const value = fields[key];
+			if (typeof value !== "string" || value.trim().length === 0) {
+				problems.push(`${label}: missing ${key}`);
+			}
+		}
+	});
+	return problems;
+}
+
+/**
  * A contract entry that excuses a destructive migration.
  * @typedef {{ file: string, release: string, reason: string }} ContractEntry
  */

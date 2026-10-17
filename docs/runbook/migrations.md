@@ -59,11 +59,13 @@ an old shape, with the release that stopped using it:
 
 ```json
 [
-  { "file": "0012_drop_url.sql", "release": "v0.9.0" }
+  { "file": "0012_drop_url.sql", "release": "v0.9.0", "reason": "destinations.url replaced by url_v2 in v0.9.0" }
 ]
 ```
 
-(The current file is `[]` — no contract migration has shipped yet.)
+Every entry needs non-empty `file`, `release`, and `reason` strings; the CI
+check fails on a malformed file. (The current file is `[]` — no contract
+migration has shipped yet.)
 
 ## CI check
 
@@ -72,7 +74,9 @@ migration files against `origin/main`. A migration that is new compared
 with `origin/main` fails CI when it contains `DROP TABLE`, `DROP COLUMN`,
 `RENAME`, or adds a `NOT NULL` column without a default — unless the file
 is listed in `contract.json` with the release that stopped using the old
-shape. Invoke it as:
+shape. It also fails when a migration that is already on `origin/main` was
+modified or removed (D1 records applied migrations by name, so an edited
+file never runs remotely; add a new migration instead). Invoke it as:
 
 ```bash
 node scripts/check-migrations.mjs --base origin/main

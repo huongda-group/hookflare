@@ -5,7 +5,9 @@ import { basename, dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+	changedMigrations,
 	checkMigrations,
+	contractProblems,
 	findDestructive,
 	newMigrations,
 } from "../lib/migrations.mjs";
@@ -124,5 +126,71 @@ describe("checkMigrations", () => {
 				`destructive migration ${problem.file} is not on main`,
 			);
 		}
+	});
+});
+
+describe("changedMigrations", () => {
+	it("returns base migrations whose content changed or that were removed", () => {
+		const base = {
+			"0000_init.sql": "CREATE TABLE a (id TEXT);",
+			"0001_b.sql": "CREATE TABLE b (id TEXT);",
+			"0002_c.sql": "CREATE TABLE c (id TEXT);",
+		};
+		const head = {
+			"0000_init.sql": "CREATE TABLE a (id TEXT);",
+			"0001_b.sql": "CREATE TABLE b (id TEXT, x TEXT);",
+			"0003_d.sql": "CREATE TABLE d (id TEXT);",
+		};
+		assert.deepEqual(changedMigrations(base, head), [
+			{ file: "0001_b.sql", change: "modified" },
+			{ file: "0002_c.sql", change: "removed" },
+		]);
+	});
+
+	it("ignores line-ending-only differences", () => {
+		assert.deepEqual(
+			changedMigrations(
+				{ "0000_init.sql": "CREATE TABLE a (id TEXT);\r\n" },
+				{ "0000_init.sql": "CREATE TABLE a (id TEXT);\n" },
+			),
+			[],
+		);
+	});
+});
+
+describe("contractProblems", () => {
+	it("accepts entries with file, release, and reason", () => {
+		assert.deepEqual(
+			contractProblems([
+				{ file: "0003_drop.sql", release: "v1.4.0", reason: "drop old col" },
+			]),
+			[],
+		);
+	});
+
+	it("rejects a non-array contract", () => {
+		assert.deepEqual(contractProblems({}), ["contract.json must be an array"]);
+	});
+
+	it("rejects entries missing release or reason", () => {
+		assert.deepEqual(
+			contractProblems([
+				{ file: "0003_drop.sql", reason: "drop" },
+				{ file: "0004_x.sql", release: "v1.5.0", reason: "  " },
+				"0005_y.sql",
+			]),
+			[
+				"contract.json[0] (0003_drop.sql): missing release",
+				"contract.json[1] (0004_x.sql): missing reason",
+				"contract.json[2]: must be an object with file, release, and reason",
+			],
+		);
+	});
+
+	it("the repository contract is valid", () => {
+		const contract = JSON.parse(
+			readFileSync(join(migrationsDir, "contract.json"), "utf8"),
+		);
+		assert.deepEqual(contractProblems(contract), []);
 	});
 });

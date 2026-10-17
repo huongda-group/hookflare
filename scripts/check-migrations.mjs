@@ -1,14 +1,21 @@
 #!/usr/bin/env node
 /**
  * Block destructive migrations outside the contract list. Compares the
- * migration files in the working tree against the base ref and fails when a
- * new migration is destructive without a contract entry.
+ * migration files in the working tree against the base ref and fails when
+ * `contract.json` is malformed, when a migration already on the base ref was
+ * modified or removed, or when a new migration is destructive without a
+ * contract entry.
  */
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { checkMigrations, newMigrations } from "./lib/migrations.mjs";
+import {
+	changedMigrations,
+	checkMigrations,
+	contractProblems,
+	newMigrations,
+} from "./lib/migrations.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const migrationsDir = join(repoRoot, "apps", "gateway", "migrations");
@@ -57,12 +64,42 @@ const baseFiles = listBaseFiles(base);
 const headFiles = readdirSync(migrationsDir).filter((name) =>
 	name.endsWith(".sql"),
 );
+const contract = JSON.parse(readFileSync(contractPath, "utf8"));
+const invalid = contractProblems(contract);
+if (invalid.length > 0) {
+	for (const problem of invalid) {
+		console.error(problem);
+	}
+	process.exit(1);
+}
+/** @type {Record<string, string>} */
+const baseSql = {};
+for (const path of baseFiles.filter((file) => file.endsWith(".sql"))) {
+	const name = path.slice(path.lastIndexOf("/") + 1);
+	baseSql[name] = execFileSync("git", ["show", `${base}:${path}`], {
+		cwd: repoRoot,
+		encoding: "utf8",
+	});
+}
+/** @type {Record<string, string>} */
+const headSql = {};
+for (const name of headFiles) {
+	headSql[name] = readFileSync(join(migrationsDir, name), "utf8");
+}
+const changed = changedMigrations(baseSql, headSql);
+if (changed.length > 0) {
+	for (const { file, change } of changed) {
+		console.error(
+			`${file}: ${change} after it reached ${base}; add a new migration instead`,
+		);
+	}
+	process.exit(1);
+}
 const fresh = newMigrations(baseFiles, headFiles);
 if (fresh.length === 0) {
 	console.log("0 new migrations");
 	process.exit(0);
 }
-const contract = JSON.parse(readFileSync(contractPath, "utf8"));
 const result = checkMigrations({
 	files: fresh.map((name) => ({
 		name,
