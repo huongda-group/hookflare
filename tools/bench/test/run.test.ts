@@ -163,8 +163,7 @@ describe("main", () => {
 		const deps: RunDeps = {
 			env: {
 				HOOKFLARE_URL: url,
-				CF_ACCESS_CLIENT_ID: "id",
-				CF_ACCESS_CLIENT_SECRET: "secret",
+				HOOKFLARE_API_TOKEN: "hf_test_token",
 				SINK_URL: "https://sink.example",
 			},
 			readFile: async () => scenario,
@@ -209,6 +208,70 @@ describe("main", () => {
 			await expect(main(["s.json", "--yes"], h.deps)).rejects.toThrow("exit 2");
 			expect(h.fetched).toEqual([]);
 			expect(h.lines.join("\n")).toMatch(/production/);
+		}
+	});
+
+	it("needs HOOKFLARE_API_TOKEN with --yes", async () => {
+		const h = harness("https://hookflare-staging.acme.workers.dev");
+		h.deps.env = {
+			HOOKFLARE_URL: "https://hookflare-staging.acme.workers.dev",
+			SINK_URL: "https://sink.example",
+		};
+		await expect(main(["s.json", "--yes"], h.deps)).rejects.toThrow("exit 2");
+		expect(h.fetched).toEqual([]);
+		expect(h.lines.join("\n")).toMatch(/HOOKFLARE_API_TOKEN/);
+	});
+
+	it("provisions with the API token as a Bearer authorization header", async () => {
+		const h = harness("https://hookflare-staging.acme.workers.dev");
+		const tiny = JSON.stringify({
+			name: "t",
+			steps: [{ rate_per_s: 1, duration_s: 1 }],
+			sources: 1,
+			body_bytes: 8,
+			sink: {},
+			drain_timeout_s: 1,
+		});
+		h.deps.readFile = async () => tiny;
+		const seen: Record<string, string>[] = [];
+		h.deps.fetch = (async (
+			input: string | URL | Request,
+			init?: RequestInit,
+		) => {
+			const url = String(input);
+			if (url.includes("/api/admin/v1/")) {
+				seen.push({ ...(init?.headers as Record<string, string>) });
+				if (url.endsWith("/projects")) {
+					return new Response(JSON.stringify({ id: "prj_1" }), {
+						status: 201,
+					});
+				}
+				if (url.endsWith("/destinations")) {
+					return new Response(JSON.stringify({ id: "dst_1" }), {
+						status: 201,
+					});
+				}
+				if (url.endsWith("/sources")) {
+					return new Response(
+						JSON.stringify({
+							id: "src_1",
+							ingress_url: "https://h.example/in/src_1",
+						}),
+						{ status: 201 },
+					);
+				}
+			}
+			throw new Error("boom");
+		}) as typeof fetch;
+		// Provision succeeds, then the first send's fetch throws "boom":
+		// sendOne records it as a network error, the drain polls fail
+		// closed, and the sink stats fetch lets "boom" escape.
+		await expect(main(["s.json", "--yes"], h.deps)).rejects.toThrow("boom");
+		expect(seen.length).toBeGreaterThan(0);
+		for (const headers of seen) {
+			expect(headers["authorization"]).toBe("Bearer hf_test_token");
+			expect(headers).not.toHaveProperty("CF-Access-Client-Id");
+			expect(headers).not.toHaveProperty("CF-Access-Client-Secret");
 		}
 	});
 });

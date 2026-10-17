@@ -2,7 +2,7 @@
  * B5 admin query timer: `node src/queries.ts [--reps 10] [--project <id>]
  * [--source <id>] [--destination <id>]`.
  *
- * Reads HOOKFLARE_URL, CF_ACCESS_CLIENT_ID, and CF_ACCESS_CLIENT_SECRET,
+ * Reads HOOKFLARE_URL and HOOKFLARE_API_TOKEN,
  * refuses a production URL, then issues each read-only admin query of
  * spec §6 B5 `--reps` times in sequence and prints p50/p95/max per query
  * (wall time from request to fully read body, so it includes network RTT;
@@ -225,17 +225,10 @@ export async function main(
 	const { log, exit } = deps;
 	const reps = Number(flag(argv, "reps") ?? "10");
 	const url = deps.env.HOOKFLARE_URL ?? "";
-	const clientId = deps.env.CF_ACCESS_CLIENT_ID ?? "";
-	const clientSecret = deps.env.CF_ACCESS_CLIENT_SECRET ?? "";
-	if (
-		!Number.isInteger(reps) ||
-		reps < 1 ||
-		!url ||
-		!clientId ||
-		!clientSecret
-	) {
+	const token = deps.env.HOOKFLARE_API_TOKEN ?? "";
+	if (!Number.isInteger(reps) || reps < 1 || !url || !token) {
 		log(
-			"usage: HOOKFLARE_URL=… CF_ACCESS_CLIENT_ID=… CF_ACCESS_CLIENT_SECRET=… node src/queries.ts [--reps 10] [--project <id>] [--source <id>] [--destination <id>]",
+			"usage: HOOKFLARE_URL=… HOOKFLARE_API_TOKEN=… node src/queries.ts [--reps 10] [--project <id>] [--source <id>] [--destination <id>]",
 		);
 		return exit(2);
 	}
@@ -247,8 +240,7 @@ export async function main(
 	}
 	const base = url.replace(/\/$/, "");
 	const headers = {
-		"CF-Access-Client-Id": clientId,
-		"CF-Access-Client-Secret": clientSecret,
+		authorization: `Bearer ${token}`,
 	};
 	const queries = b5Queries({
 		projectId: flag(argv, "project"),

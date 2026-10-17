@@ -8,7 +8,7 @@
  *
  * The smoke step needs the gateway URL in the per-Worker variable from
  * `smokeUrlVar` (`HOOKFLARE_URL`, `HOOKFLARE_STAGING_URL`), plus
- * `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET`, and `SINK_URL`. A
+ * `HOOKFLARE_API_TOKEN` and `SINK_URL`. A
  * missing smoke env fails the deploy before anything runs unless
  * `--skip-smoke` is passed.
  */
@@ -81,9 +81,7 @@ try {
 	}
 } catch (err) {
 	console.error(err instanceof Error ? err.message : String(err));
-	console.error(
-		`deploy: smoke needs ${urlVar}, CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET, SINK_URL`,
-	);
+	console.error(`deploy: smoke needs ${urlVar}, HOOKFLARE_API_TOKEN, SINK_URL`);
 	process.exit(1);
 }
 /** @type {import("./lib/deploy.mjs").DeployRecord & { previousVersion: string, newVersion: string, smoke: string }} */

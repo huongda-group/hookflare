@@ -1,9 +1,44 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { seedDeadDelivery } from "./seed";
+
+/**
+ * The Turnstile widget (always-pass test keys) gates submit until it
+ * yields a token. Click its checkbox once when it needs one; with the
+ * test keys a single click passes.
+ */
+async function passTurnstile(page: Page, submit: Locator) {
+	const box = page
+		.frameLocator('iframe[src*="challenges.cloudflare.com"]')
+		.getByRole("checkbox")
+		.first();
+	try {
+		await box.waitFor({ state: "visible", timeout: 15_000 });
+		if (await submit.isDisabled()) {
+			await box.click({ timeout: 15_000 });
+		}
+	} catch {
+		// The widget already passed (or is absent with Turnstile off).
+	}
+	await expect(submit).toBeEnabled({ timeout: 30_000 });
+}
 
 test("exit criteria: configure everything from the UI, then see the DLQ", async ({
 	page,
 }) => {
+	// Fresh D1 per run, so onboarding is open: claim the first admin.
+	await page.goto("/");
+	await expect(page).toHaveURL(/\/setup$/);
+	await page.getByLabel("Username", { exact: true }).fill("e2e-admin");
+	await page.getByLabel("Password", { exact: true }).fill("e2e-password-1234");
+	await page
+		.getByLabel("Confirm password", { exact: true })
+		.fill("e2e-password-1234");
+	await page.getByLabel("Setup token", { exact: true }).fill("e2e-setup-token");
+	const createAdmin = page.getByRole("button", { name: "Create admin" });
+	await passTurnstile(page, createAdmin);
+	await createAdmin.click();
+	await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+
 	const slug = `e2e-${Date.now().toString(36)}`;
 
 	// Exit criterion 2: project → destination → source, UI only.
@@ -86,4 +121,14 @@ test("exit criteria: configure everything from the UI, then see the DLQ", async 
 	// And a client-side route deep link gets the SPA shell.
 	const deep = await page.request.get("/events/evt_missing");
 	expect(deep.headers()["content-type"]).toContain("text/html");
+
+	// Log out and back in as the onboarded admin.
+	await page.getByRole("button", { name: "Log out" }).click();
+	await expect(page).toHaveURL(/\/login/);
+	await page.getByLabel("Username", { exact: true }).fill("e2e-admin");
+	await page.getByLabel("Password", { exact: true }).fill("e2e-password-1234");
+	const signIn = page.getByRole("button", { name: "Sign in" });
+	await passTurnstile(page, signIn);
+	await signIn.click();
+	await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
 });

@@ -8,28 +8,29 @@
 
 /**
  * Credentials and URLs the smoke test needs. Null when the env is
- * incomplete; see `smokeEnv`.
- * @typedef {{ url: string, clientId: string, clientSecret: string, sinkUrl: string }} SmokeEnv
+ * incomplete; see `smokeEnv`. The token is an `hf_`-prefixed API token
+ * for an admin user (the smoke creates projects, destinations, and
+ * sources through `config.manage`-gated routes), sent as
+ * `authorization: Bearer <token>`.
+ * @typedef {{ url: string, token: string, sinkUrl: string }} SmokeEnv
  */
 
 /**
  * Read the smoke env from a `process.env`-shaped object. Returns null when
  * any of the URL variable (`HOOKFLARE_URL` by default; see `smokeUrlVar`),
- * `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET`, or `SINK_URL` is
- * missing.
+ * `HOOKFLARE_API_TOKEN`, or `SINK_URL` is missing.
  * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} [env]
  * @param {{ urlVar?: string }} [options]
  * @returns {SmokeEnv | null}
  */
 export function smokeEnv(env = process.env, { urlVar = "HOOKFLARE_URL" } = {}) {
 	const url = env[urlVar];
-	const clientId = env.CF_ACCESS_CLIENT_ID;
-	const clientSecret = env.CF_ACCESS_CLIENT_SECRET;
+	const token = env.HOOKFLARE_API_TOKEN;
 	const sinkUrl = env.SINK_URL;
-	if (!url || !clientId || !clientSecret || !sinkUrl) {
+	if (!url || !token || !sinkUrl) {
 		return null;
 	}
-	return { url, clientId, clientSecret, sinkUrl };
+	return { url, token, sinkUrl };
 }
 
 /**
@@ -323,8 +324,7 @@ export function httpSmokeApi(env, fetchFn = fetch) {
 	const sinkUrl = env.sinkUrl.replace(/\/$/, "");
 	const headers = {
 		"content-type": "application/json",
-		"CF-Access-Client-Id": env.clientId,
-		"CF-Access-Client-Secret": env.clientSecret,
+		authorization: `Bearer ${env.token}`,
 	};
 	let projectId = null;
 	let destinationId = null;
