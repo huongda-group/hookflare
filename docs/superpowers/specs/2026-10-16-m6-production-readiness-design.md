@@ -69,7 +69,7 @@
 | M0 `pnpm run deploy` = build, migrate, deploy | Now also records restore points and runs the smoke test | M6-8 |
 | Roadmap M6 "scheduled exports" | A table-by-table copy to R2 instead of the D1 export API | M6-12: the export API blocks the database while it runs |
 | M0 compatibility flags (`nodejs_compat` only) | Adds `global_fetch_strictly_public` | M6-22 |
-| Roadmap §5.1 parity test (`apps/gateway/test/config-parity.test.ts`, Vitest) | Lives in `scripts/test/config-parity.test.mjs` (node:test); `preview_database_id` added to the ignored keys | Scripts are plain node, not gateway code; the staging database needs a preview ID the prod config lacks |
+| Roadmap §5.1 parity test (`apps/gateway/test/config-parity.test.ts`, Vitest) | Lives in `scripts/test/config-parity.test.mjs` (node:test); the ignore list is path-based (resource names, IDs, `vars`, `routes`, and rate-limit `namespace_id`) | Scripts are plain node, not gateway code; path-based ignores keep binding names compared |
 | Roadmap §7.1 "5,000 rows per step" for every table | BLOB-bearing tables page at 250 rows per step (`BLOB_PAGE_SIZE` in `jobs/backup/tables.ts`) | A 5,000-row BLOB page would blow the per-step read budget; small BLOB pages keep the nightly read cheap |
 | Roadmap §7.4 hardcoded restore order (projects, destinations, sources, …) | `tableOrder` in `scripts/lib/restore-sql.mjs` sorts tables topologically from the manifest's foreign keys (self-references ignored; forward self-references pre-collected) | Schema changes must not require a restore-script change; the manifest already carries the FK graph |
 | Roadmap §7.4 "turns rows into `INSERT` statements" | Rows whose `INSERT` would exceed 90 k chars become `INSERT` with empty BLOBs plus chunked `UPDATE … SET c = CAST(c \|\| X'…' AS BLOB)` appends (32 KiB of bytes per chunk) | D1 rejects oversized statements; chunked appends keep large payloads restorable |
@@ -111,7 +111,7 @@ docs/
 
 - `wrangler.staging.jsonc` is a copy of `wrangler.jsonc` with its own names and IDs (M6-2). Its `vars` point at a staging Access application.
 - `package.json` adds `deploy:staging`, `db:migrate:remote:staging`, and `smoke:staging`, which pass `--config apps/gateway/wrangler.staging.jsonc`.
-- The parity test lives in `apps/gateway/test/config-parity.test.ts`. It parses both JSONC files and compares them after removing an allowlist of keys (`name`, `database_name`, `database_id`, `queue`, `dead_letter_queue`, `bucket_name`, workflow `name`, `vars`, `routes`).
+- The parity test lives in `scripts/test/config-parity.test.mjs` (see §3). It parses both JSONC files and compares them after removing an allowlist of paths: top-level `name`, `vars`, and `routes`; `d1_databases[].database_name`/`database_id`/`preview_database_id`; the queue names under `queues.producers[]` and `queues.consumers[]` (`queue`, `dead_letter_queue`); `r2_buckets[].bucket_name`; `workflows[].name`; and `ratelimits[].namespace_id`. Binding names (`binding`, a DO binding's or rate limiter's `name`) are still compared. Rate-limit `namespace_id`s are environment-specific, and a separate check requires staging's to differ from production's.
 
 ### 5.2 Sink Worker (`tools/sink`)
 
