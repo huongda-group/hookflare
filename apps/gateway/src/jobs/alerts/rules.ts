@@ -264,8 +264,8 @@ export const BACKUP_STALE_AFTER_MS = 36 * 3_600_000;
 
 /**
  * M6: a verified full-DB backup must land at least every 36 h. Disabled
- * backups never alert, and a fresh deployment (no backup row yet, oldest
- * migration applied recently) gets a grace period instead of an incident.
+ * backups never alert, and a deployment with no backup row yet whose
+ * backups migration landed recently gets a grace period instead of an incident.
  */
 export async function backupStale(
 	deps: Pick<Deps, "db" | "now">,
@@ -285,12 +285,20 @@ export async function backupStale(
 			sql`SELECT 1 AS one FROM backups LIMIT 1`,
 		);
 		if (rows.length === 0) {
-			const [oldest] = await deps.db.all<{ oldest: number | null }>(sql`
-				SELECT MIN(unixepoch(applied_at)) AS oldest FROM d1_migrations`);
+			// The grace runs from when backups became possible: the `0010_`
+			// (backups table) migration, not the install's first migration, so
+			// upgrading an old deployment does not alert at once. Without that
+			// row (a hand-built or restored ledger), the newest migration.
+			const [since] = await deps.db.all<{ since: number | null }>(sql`
+				SELECT COALESCE(
+					(SELECT MIN(unixepoch(applied_at)) FROM d1_migrations
+						WHERE name LIKE '0010\\_%' ESCAPE '\\'),
+					(SELECT MAX(unixepoch(applied_at)) FROM d1_migrations)
+				) AS since`);
 			if (
-				oldest?.oldest !== null &&
-				oldest?.oldest !== undefined &&
-				oldest.oldest * 1000 >= now - BACKUP_STALE_AFTER_MS
+				since?.since !== null &&
+				since?.since !== undefined &&
+				since.since * 1000 >= now - BACKUP_STALE_AFTER_MS
 			)
 				return [];
 		}
