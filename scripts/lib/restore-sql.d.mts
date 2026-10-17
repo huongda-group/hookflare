@@ -33,6 +33,8 @@ export type OrphanReport = Record<
 
 export function valueLiteral(value: unknown): string;
 
+export function utf8Length(s: string): number;
+
 export function tableOrder(manifest: Manifest): string[];
 
 export function rowStatements(

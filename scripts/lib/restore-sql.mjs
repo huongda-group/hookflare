@@ -202,33 +202,75 @@ function findCycle(names, parents) {
 /** Hex chars per BLOB append chunk: 32 KiB of bytes. */
 const CHUNK_HEX = 65536;
 
+/** UTF-8 bytes per TEXT append chunk, after `'` doubling. */
+const CHUNK_TEXT_BYTES = 65536;
+
+const utf8 = new TextEncoder();
+
 /**
- * The `WHERE` locating a restored row: the primary key, or — for rowid
- * tables, whose rowid is not restored — every non-BLOB column. Only
- * `archive_parts` uses this, and it has no BLOBs.
- * @param {ManifestTable} table
- * @param {Record<string, unknown>} row
- * @returns {string}
+ * UTF-8 byte length of a string (what D1 limits), not UTF-16 units.
+ * @param {string} s
+ * @returns {number}
  */
-function rowWhere(table, row) {
-	if ("column" in table.key) {
-		return `${ident(table.key.column)} = ${valueLiteral(row[table.key.column])}`;
-	}
-	return table.columns
-		.filter((c) => !c.blob)
-		.map((c) => {
-			const v = row[c.name] ?? null;
-			return v === null || v === undefined
-				? `${ident(c.name)} IS NULL`
-				: `${ident(c.name)} = ${valueLiteral(v)}`;
-		})
-		.join(" AND ");
+export function utf8Length(s) {
+	return utf8.encode(s).length;
 }
 
 /**
- * INSERT for a row, plus one chunked `UPDATE … SET c = CAST(c || X'…'
- * AS BLOB)` per 32 KiB of BLOB bytes when the INSERT would exceed
- * `maxStmt`. Oversized BLOBs become `X''` in the INSERT.
+ * UTF-8 bytes of one code point (a lone surrogate encodes as U+FFFD).
+ * @param {number} cp
+ * @returns {number}
+ */
+function codePointBytes(cp) {
+	if (cp < 0x80) {
+		return 1;
+	}
+	if (cp < 0x800) {
+		return 2;
+	}
+	if (cp < 0x10000) {
+		return 3;
+	}
+	return 4;
+}
+
+/**
+ * Split TEXT into `'`-doubled chunks on whole code points, each at most
+ * `budget` UTF-8 bytes after doubling.
+ * @param {string} value
+ * @param {number} budget
+ * @returns {string[]}
+ */
+function textChunks(value, budget) {
+	const chunks = [];
+	let chunk = "";
+	let bytes = 0;
+	for (const ch of value) {
+		const quote = ch === "'";
+		const n = quote ? 2 : codePointBytes(ch.codePointAt(0) ?? 0);
+		if (bytes + n > budget && chunk.length > 0) {
+			chunks.push(chunk);
+			chunk = "";
+			bytes = 0;
+		}
+		chunk += quote ? "''" : ch;
+		bytes += n;
+	}
+	if (chunk.length > 0) {
+		chunks.push(chunk);
+	}
+	return chunks;
+}
+
+/**
+ * INSERT for a row. When the INSERT is not under `maxStmt` UTF-8 bytes,
+ * the largest TEXT and BLOB values become `''` / `X''` (largest first,
+ * until the INSERT fits) and are appended back with chunked
+ * `UPDATE … SET c = c || '…'` (TEXT, split on whole code points) or
+ * `UPDATE … SET c = CAST(c || X'…' AS BLOB)` (at most 32 KiB of bytes
+ * per chunk). Every statement is under `maxStmt` UTF-8 bytes; NULL, `''`
+ * and `X''` are never split. Splitting needs a key column, so an
+ * oversized row in a rowid table throws.
  * @param {ManifestTable} table
  * @param {Record<string, unknown>} row
  * @param {number} [maxStmt]
@@ -241,32 +283,84 @@ export function rowStatements(table, row, maxStmt = 90000) {
 	}
 	const insert = () =>
 		`INSERT INTO ${ident(table.name)} (${table.columns.map((c) => ident(c.name)).join(", ")}) VALUES (${table.columns.map((c) => literals.get(c.name)).join(", ")});`;
-	const sql = insert();
-	if (sql.length <= maxStmt) {
+	let sql = insert();
+	if (utf8Length(sql) < maxStmt) {
 		return [sql];
 	}
+	if (!("column" in table.key)) {
+		throw new Error(
+			`restore: a row in ${table.name} is ${utf8Length(sql)} bytes and the table has no key column to split on`,
+		);
+	}
+	const keyColumn = table.key.column;
+	const candidates = table.columns
+		.filter((c) => {
+			const v = row[c.name] ?? null;
+			return (
+				c.name !== keyColumn &&
+				((typeof v === "string" && v.length > 0) ||
+					(isB64(v) && v.$b64.length > 0))
+			);
+		})
+		.map((c) => ({ column: c, size: utf8Length(literals.get(c.name)) }))
+		.sort((a, b) => b.size - a.size);
+	const split = [];
+	for (const { column } of candidates) {
+		if (utf8Length(sql) < maxStmt) {
+			break;
+		}
+		literals.set(column.name, isB64(row[column.name]) ? "X''" : "''");
+		split.push(column);
+		sql = insert();
+	}
+	const where = `${ident(keyColumn)} = ${valueLiteral(row[keyColumn])}`;
+	if (utf8Length(sql) >= maxStmt) {
+		throw new Error(
+			`restore: INSERT for ${table.name} ${where} is ${utf8Length(sql)} bytes even with every TEXT/BLOB value split`,
+		);
+	}
+	const target = ident(table.name);
 	const updates = [];
-	for (const c of table.columns) {
-		if (!c.blob) {
+	for (const c of split) {
+		const value = row[c.name];
+		const col = ident(c.name);
+		if (isB64(value)) {
+			const room =
+				maxStmt -
+				1 -
+				utf8Length(
+					`UPDATE ${target} SET ${col} = CAST(${col} || X'' AS BLOB) WHERE ${where};`,
+				);
+			const step = Math.min(CHUNK_HEX, room - (room % 2));
+			if (step < 2) {
+				throw new Error(`restore: no room to append ${table.name}.${c.name}`);
+			}
+			const hex = bytesToHex(base64ToBytes(value.$b64));
+			for (let i = 0; i < hex.length; i += step) {
+				updates.push(
+					`UPDATE ${target} SET ${col} = CAST(${col} || X'${hex.slice(i, i + step)}' AS BLOB) WHERE ${where};`,
+				);
+			}
 			continue;
 		}
-		const value = row[c.name] ?? null;
-		if (!isB64(value)) {
-			continue;
+		const room = Math.min(
+			CHUNK_TEXT_BYTES,
+			maxStmt -
+				1 -
+				utf8Length(
+					`UPDATE ${target} SET ${col} = ${col} || '' WHERE ${where};`,
+				),
+		);
+		if (room < 4) {
+			throw new Error(`restore: no room to append ${table.name}.${c.name}`);
 		}
-		const hex = bytesToHex(base64ToBytes(value.$b64));
-		if (hex.length === 0) {
-			continue;
-		}
-		literals.set(c.name, `X''`);
-		for (let i = 0; i < hex.length; i += CHUNK_HEX) {
-			const chunk = hex.slice(i, i + CHUNK_HEX);
+		for (const chunk of textChunks(String(value), room)) {
 			updates.push(
-				`UPDATE ${ident(table.name)} SET ${ident(c.name)} = CAST(${ident(c.name)} || X'${chunk}' AS BLOB) WHERE ${rowWhere(table, row)};`,
+				`UPDATE ${target} SET ${col} = ${col} || '${chunk}' WHERE ${where};`,
 			);
 		}
 	}
-	return [insert(), ...updates];
+	return [sql, ...updates];
 }
 
 /**
