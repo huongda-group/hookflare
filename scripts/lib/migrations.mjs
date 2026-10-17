@@ -108,18 +108,23 @@ export function newMigrations(baseFiles, headFiles) {
  * Migrations on the base ref that the head changed: a modified or removed
  * migration rewrites history that D1 has already applied (and records by
  * name only), so it never takes effect remotely. Line endings are
- * normalized before comparing.
+ * normalized before comparing. A removed file listed in `squashed` (folded
+ * into a baseline by a deliberate squash) is not reported.
  * @param {Record<string, string>} base `.sql` name → content at the base ref.
  * @param {Record<string, string>} head `.sql` name → content in the tree.
+ * @param {string[]} [squashed] `.sql` names the squash removed.
  * @returns {{ file: string, change: "modified" | "removed" }[]}
  */
-export function changedMigrations(base, head) {
+export function changedMigrations(base, head, squashed = []) {
 	/** @param {string} sql */
 	const normalize = (sql) => sql.replace(/\r\n/g, "\n");
 	/** @type {{ file: string, change: "modified" | "removed" }[]} */
 	const changed = [];
 	for (const [file, sql] of Object.entries(base)) {
 		if (!(file in head)) {
+			if (squashed.includes(file)) {
+				continue;
+			}
 			changed.push({ file, change: "removed" });
 		} else if (normalize(head[file]) !== normalize(sql)) {
 			changed.push({ file, change: "modified" });

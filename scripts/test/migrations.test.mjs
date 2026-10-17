@@ -147,6 +147,18 @@ describe("changedMigrations", () => {
 		]);
 	});
 
+	it("skips removed files listed as squashed but still reports edits", () => {
+		const base = {
+			"0001_a.sql": "CREATE TABLE a (id TEXT);",
+			"0002_b.sql": "CREATE TABLE b (id TEXT);",
+		};
+		const head = { "0002_b.sql": "CREATE TABLE b (id TEXT, x TEXT);" };
+		assert.deepEqual(
+			changedMigrations(base, head, ["0001_a.sql", "0002_b.sql"]),
+			[{ file: "0002_b.sql", change: "modified" }],
+		);
+	});
+
 	it("ignores line-ending-only differences", () => {
 		assert.deepEqual(
 			changedMigrations(

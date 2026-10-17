@@ -285,14 +285,13 @@ export async function backupStale(
 			sql`SELECT 1 AS one FROM backups LIMIT 1`,
 		);
 		if (rows.length === 0) {
-			// The grace runs from when backups became possible: the `0010_`
-			// (backups table) migration, not the install's first migration, so
-			// upgrading an old deployment does not alert at once. Without that
-			// row (a hand-built or restored ledger), the newest migration.
+			// The grace runs from when backups became possible: the `0000_init`
+			// migration that creates the backups table. Without that row (a
+			// hand-built or restored ledger), the newest migration.
 			const [since] = await deps.db.all<{ since: number | null }>(sql`
 				SELECT COALESCE(
 					(SELECT MIN(unixepoch(applied_at)) FROM d1_migrations
-						WHERE name LIKE '0010\\_%' ESCAPE '\\'),
+						WHERE name LIKE '0000\\_%' ESCAPE '\\'),
 					(SELECT MAX(unixepoch(applied_at)) FROM d1_migrations)
 				) AS since`);
 			if (

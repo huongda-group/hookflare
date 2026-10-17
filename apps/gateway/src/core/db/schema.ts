@@ -95,7 +95,7 @@ const bytes = customType<{
 	},
 });
 
-/** M0 table (0001_settings.sql, STRICT). Declared so drizzle-kit never recreates it. */
+/** Key/value settings (retry defaults, storage, alert rules); one JSON value per key. */
 export const settings = sqliteTable("settings", {
 	key: text("key").primaryKey(),
 	valueJson: text("value_json").notNull(),

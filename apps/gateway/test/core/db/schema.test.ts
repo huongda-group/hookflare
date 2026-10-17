@@ -29,7 +29,7 @@ async function insertProject(id: string, status = "active") {
 	);
 }
 
-describe("0002_core_pipeline migration", () => {
+describe("0000_init migration", () => {
 	it("creates every M1 table", async () => {
 		const { results } = await env.DB.prepare(
 			"SELECT name FROM sqlite_master WHERE type = 'table'",
@@ -40,23 +40,9 @@ describe("0002_core_pipeline migration", () => {
 		}
 	});
 
-	it("continues the NNNN_<topic>.sql sequence and never recreates settings", () => {
-		const migrations = env.TEST_MIGRATIONS;
-		expect(migrations.map((m) => m.name)).toEqual([
-			expect.stringMatching(/^0001_settings/),
-			expect.stringMatching(/^0002_core_pipeline/),
-			expect.stringMatching(/^0003_collapse_duplicate_event_ids/),
-			expect.stringMatching(/^0004_reliability/),
-			expect.stringMatching(/^0005_admin_security/),
-			expect.stringMatching(/^0006_dashboard/),
-			expect.stringMatching(/^0007_limiter/),
-			expect.stringMatching(/^0008_alerts/),
-			expect.stringMatching(/^0009_archive/),
-			expect.stringMatching(/^0010_backups/),
-		]);
-		const sql = migrations[1]?.queries.join("\n") ?? "";
-		expect(sql).not.toMatch(/CREATE TABLE [`"]?settings/i);
-		expect(sql).not.toMatch(/STRICT/);
+	it("creates settings in the single init migration", () => {
+		const sql = env.TEST_MIGRATIONS[0]?.queries.join("\n") ?? "";
+		expect(sql).toMatch(/CREATE TABLE [`"]?settings/i);
 	});
 
 	it("rejects enum values outside the CHECK list", async () => {
