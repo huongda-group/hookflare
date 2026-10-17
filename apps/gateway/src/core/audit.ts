@@ -18,6 +18,7 @@ export type AuditAction =
 	| "delivery.replayed"
 	| "event.payload_viewed"
 	| "user.created"
+	| "user.onboarded"
 	| "user.role_changed"
 	| "user.disabled"
 	| "user.enabled"

@@ -3,7 +3,7 @@ import { PERMISSION_TAG } from "../../src/admin/auth/permission";
 import { adminRoutes } from "../../src/admin/router";
 
 describe("admin router", () => {
-	it("declares a permission on every route except /me", () => {
+	it("declares a permission on every route except /me and the public auth routes", () => {
 		const guarded = new Map<string, boolean>();
 		for (const r of adminRoutes().routes) {
 			if (r.method === "ALL") continue; // middleware (authMiddleware)
@@ -14,7 +14,11 @@ describe("admin router", () => {
 			);
 		}
 		const unguarded = [...guarded]
-			.filter(([key, ok]) => !ok && key !== "GET /me")
+			.filter(([key, ok]) => {
+				// /auth/* is deliberately public (onboarding, login, logout).
+				const path = key.slice(key.indexOf(" ") + 1);
+				return !ok && key !== "GET /me" && !path.startsWith("/auth");
+			})
 			.map(([key]) => key);
 		expect(unguarded).toEqual([]);
 		expect(guarded.size).toBeGreaterThanOrEqual(15);

@@ -5,6 +5,7 @@ import { alertChannelRoutes } from "./routes/alert-channels";
 import { alertRoutes } from "./routes/alerts";
 import { archiveRoutes } from "./routes/archives";
 import { auditLogRoutes } from "./routes/audit-logs";
+import { authRoutes } from "./routes/auth";
 import { backupRoutes } from "./routes/backups";
 import { destinationRoutes } from "./routes/destinations";
 import { eventRoutes } from "./routes/events";
@@ -19,6 +20,9 @@ import { userRoutes } from "./routes/users";
 /** /api/admin/v1 — built-in auth, then a per-route permission. */
 export function adminRoutes() {
 	const routes = new Hono<AppBindings>();
+	// Public auth routes are registered before the middleware, so their
+	// handlers respond first and authMiddleware never runs for /auth/*.
+	routes.route("/auth", authRoutes());
 	routes.use("*", authMiddleware());
 	routes.route("/me", meRoutes());
 	routes.route("/overview", overviewRoutes());
