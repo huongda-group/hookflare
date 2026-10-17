@@ -29,58 +29,13 @@ describe("AppShell", () => {
 		).not.toBeInTheDocument();
 	});
 
-	it("shows No access with the email when /me answers 403", async () => {
-		server.use(
-			http.get(apiUrl("/me"), () =>
-				HttpResponse.json(
-					{ error: "forbidden", email: "x@example.com" },
-					{ status: 403 },
-				),
-			),
-		);
-		renderApp("/");
-		expect(
-			await screen.findByRole("heading", { name: "No access" }),
-		).toBeInTheDocument();
-		expect(screen.getByText(/x@example.com/)).toBeInTheDocument();
-	});
-
-	it("keeps in-progress form input under the session-expired banner", async () => {
-		server.use(
-			http.post(
-				apiUrl("/projects"),
-				() =>
-					new HttpResponse("<html>Sign in</html>", {
-						headers: { "content-type": "text/html" },
-					}),
-			),
-		);
-		const { user } = renderApp("/projects");
-		await user.click(
-			await screen.findByRole("button", { name: "New project" }),
-		);
-		await user.type(screen.getByLabelText("Name"), "Billing");
-		await user.type(screen.getByLabelText("Slug"), "billing");
-		await user.click(screen.getByRole("button", { name: "Create" }));
-		expect(await screen.findByRole("alert")).toHaveTextContent(
-			"Session expired or network unavailable",
-		);
-		expect(screen.getByRole("button", { name: "Reload" })).toBeInTheDocument();
-		expect(
-			screen.getByRole("dialog", { name: "New project" }),
-		).toBeInTheDocument();
-		expect(screen.getByLabelText("Name")).toHaveValue("Billing");
-		expect(screen.getByLabelText("Slug")).toHaveValue("billing");
-		expect(screen.getByText("admin@example.com")).toBeInTheDocument();
-	});
-
 	it("refetches /me after a 403 from any call", async () => {
 		let meCalls = 0;
 		server.use(
 			http.get(apiUrl("/me"), () => {
 				meCalls++;
 				return HttpResponse.json({
-					email: "admin@example.com",
+					username: "admin@example.com",
 					role: "admin",
 					permissions: ["events.read"],
 				});
@@ -112,7 +67,7 @@ describe("AppShell", () => {
 				fail
 					? HttpResponse.json({ error: "internal" }, { status: 500 })
 					: HttpResponse.json({
-							email: "admin@example.com",
+							username: "admin@example.com",
 							role: "admin",
 							permissions: ["events.read"],
 						}),

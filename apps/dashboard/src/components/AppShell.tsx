@@ -1,13 +1,12 @@
 import type { Permission } from "@hookflare/shared";
-import { Link, Outlet } from "@tanstack/react-router";
+import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
+import { useEffect } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ApiError } from "@/lib/api";
+import { subscribeUnauthorized } from "@/lib/api";
 import { useCan } from "@/lib/permissions";
 import { useMeQuery } from "@/lib/queries/me";
 import { LoadError } from "./LoadError";
-import { NoAccess } from "./NoAccess";
-import { SessionExpiredBanner } from "./SessionExpiredBanner";
 
 const NAV: { to: string; label: string; permission?: Permission }[] = [
 	{ to: "/", label: "Overview" },
@@ -38,34 +37,31 @@ function NavItem({ to, label, permission }: (typeof NAV)[number]) {
 
 export function AppShell() {
 	const me = useMeQuery();
-	if (me.error instanceof ApiError && me.error.status === 403) {
-		const email = me.error.body?.email;
-		return <NoAccess email={typeof email === "string" ? email : undefined} />;
-	}
+	const navigate = useNavigate();
+	const location = useLocation();
+	// Spec §6.7: any 401 from the API sends the user to `/login?next=<here>`.
+	useEffect(
+		() =>
+			subscribeUnauthorized(() => {
+				void navigate({ to: "/login", search: { next: location.href } });
+			}),
+		[navigate, location.href],
+	);
 	if (!me.data && me.isError) {
 		return (
-			<>
-				<SessionExpiredBanner />
-				<LoadError
-					what="your account"
-					error={me.error}
-					retrying={me.isFetching}
-					onRetry={() => void me.refetch()}
-				/>
-			</>
+			<LoadError
+				what="your account"
+				error={me.error}
+				retrying={me.isFetching}
+				onRetry={() => void me.refetch()}
+			/>
 		);
 	}
 	if (!me.data) {
-		return (
-			<>
-				<SessionExpiredBanner />
-				<p className="p-6 text-neutral-500">Loading…</p>
-			</>
-		);
+		return <p className="p-6 text-neutral-500">Loading…</p>;
 	}
 	return (
 		<div className="flex min-h-screen min-w-[1024px]">
-			<SessionExpiredBanner />
 			<aside className="w-56 shrink-0 border-r p-4">
 				<div className="mb-6 text-lg font-semibold">Hookflare</div>
 				<nav className="space-y-1">
@@ -74,7 +70,7 @@ export function AppShell() {
 					))}
 				</nav>
 				<div className="mt-8 border-t pt-4 text-xs text-neutral-500">
-					<div>{me.data.email}</div>
+					<div>{me.data.username}</div>
 					<div className="capitalize">{me.data.role}</div>
 				</div>
 			</aside>

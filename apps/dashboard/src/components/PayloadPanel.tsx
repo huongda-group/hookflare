@@ -23,11 +23,7 @@ export function PayloadPanel({
 		staleTime: Number.POSITIVE_INFINITY,
 		gcTime: 0,
 		queryFn: async () => {
-			const res = await apiRaw(
-				`/events/${eventId}/payload`,
-				{},
-				{ allowHtml: true },
-			);
+			const res = await apiRaw(`/events/${eventId}/payload`);
 			// Bytes, not text(): text() replaces invalid UTF-8, which would also
 			// corrupt Download for binary bodies.
 			const bytes = await res.arrayBuffer();

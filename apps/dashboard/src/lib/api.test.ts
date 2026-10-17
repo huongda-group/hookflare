@@ -1,7 +1,7 @@
 import { HttpResponse, http } from "msw";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { apiUrl, server } from "@/test/server";
-import { ApiError, api, isSessionExpired, qs } from "./api";
+import { ApiError, api, qs, subscribeUnauthorized } from "./api";
 
 describe("api", () => {
 	it("returns parsed JSON", async () => {
@@ -34,25 +34,41 @@ describe("api", () => {
 		});
 	});
 
-	it("treats an HTML answer as an expired session", async () => {
+	it("fires the unauthorized listener on a 401 from a non-auth path", async () => {
 		server.use(
-			http.get(
-				apiUrl("/events"),
-				() =>
-					new HttpResponse("<html>login</html>", {
-						headers: { "content-type": "text/html" },
-					}),
+			http.get(apiUrl("/projects"), () =>
+				HttpResponse.json({ error: "unauthorized" }, { status: 401 }),
 			),
 		);
-		const err = await api.get("/events").catch((e) => e);
-		expect(err).toMatchObject({ code: "session_expired" });
-		expect(isSessionExpired()).toBe(true);
+		const fired = vi.fn();
+		const unsubscribe = subscribeUnauthorized(fired);
+		const err = await api.get("/projects").catch((e) => e);
+		expect(err).toMatchObject({ status: 401, code: "unauthorized" });
+		expect(fired).toHaveBeenCalledTimes(1);
+		unsubscribe();
 	});
 
-	it("treats a network failure (CORS on the Access redirect) as an expired session", async () => {
+	it("does not fire the listener on a 401 from /auth/login", async () => {
+		server.use(
+			http.post(apiUrl("/auth/login"), () =>
+				HttpResponse.json({ error: "invalid_credentials" }, { status: 401 }),
+			),
+		);
+		const fired = vi.fn();
+		const unsubscribe = subscribeUnauthorized(fired);
+		const err = await api
+			.postVoid("/auth/login", { username: "a", password: "b" })
+			.catch((e) => e);
+		expect(err).toMatchObject({ status: 401, code: "invalid_credentials" });
+		expect(fired).not.toHaveBeenCalled();
+		unsubscribe();
+	});
+
+	it("maps a network failure to ApiError(0, network_error)", async () => {
 		server.use(http.get(apiUrl("/events"), () => HttpResponse.error()));
 		const err = await api.get("/events").catch((e) => e);
-		expect(err).toMatchObject({ code: "session_expired" });
+		expect(err).toBeInstanceOf(ApiError);
+		expect(err).toMatchObject({ status: 0, code: "network_error" });
 	});
 
 	it("builds query strings with repeated keys and skips empty values", () => {

@@ -1,6 +1,7 @@
 /** One key factory for every resource; mutations invalidate by prefix (spec §9.2). */
 export const qk = {
 	me: ["me"] as const,
+	authState: ["auth-state"] as const,
 	settings: ["settings"] as const,
 	overview: (q: object) => ["overview", q] as const,
 	projects: {

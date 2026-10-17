@@ -1,7 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, configure } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll } from "vitest";
-import { resetSessionExpired } from "@/lib/api";
 import { server } from "./server";
 
 // findBy*/waitFor default to 1 s, which a loaded runner (all workspaces at once) can miss.
@@ -11,7 +10,6 @@ beforeAll(() => server.listen({ onUnhandledFrame: "error" }));
 afterEach(() => {
 	cleanup();
 	server.resetHandlers();
-	resetSessionExpired();
 });
 afterAll(() => server.close());
 
