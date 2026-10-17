@@ -31,6 +31,9 @@ against live staging.
    missing the deploy fails **before any step runs**; pass `--skip-smoke`
    (e.g. a first-time deployment before the service token exists) to deploy
    without it, which prints a loud notice and records `"smoke": "skipped"`.
+   A Workers Builds (Git-connected) deploy has no sink or service token, so
+   its deploy command is `pnpm run deploy -- --skip-smoke`; run
+   `pnpm run smoke` from a machine with the smoke env afterwards.
 6. **report** — writes `.deploy/<timestamp>.json` (git-ignored) with the
    timestamp, config, worker name, D1 name, `previousVersion` (live before
    the deploy; the rollback target), `newVersion`, bookmark, smoke result,

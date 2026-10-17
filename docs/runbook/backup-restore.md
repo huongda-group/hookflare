@@ -25,7 +25,7 @@ production), then verifies every part and enforces
 Storage (admin only, audited as `backup.run`) starts a manual run. If no
 `verified` backup appears within 36 hours, the `backup_stale` alert fires;
 a deployment that has never backed up gets that 36 hours of grace from
-when the backups migration (`0010_`) was applied.
+when the `backups` table was created (the `0000_init` migration).
 
 Only one backup runs at a time. The cron skips its run (logging
 `backup.skipped_running`) while another is in progress, and "Run backup

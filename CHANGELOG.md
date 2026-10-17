@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The ten pre-release D1 migrations are squashed into one baseline,
+  `0000_init.sql`; `migrations/squashed.json` lets the CI migration check
+  accept the removal. A database created before the squash must be
+  recreated (see `docs/runbook/migrations.md`).
+- Workers Builds deploys run `pnpm run deploy -- --skip-smoke`
+  (`docs/runbook/deploy.md`).
+
 ## [1.0.0] - 2026-10-17
 
 First release. Milestones M0–M6 of the

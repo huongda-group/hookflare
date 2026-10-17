@@ -3,8 +3,8 @@
  * Block destructive migrations outside the contract list. Compares the
  * migration files in the working tree against the base ref and fails when
  * `contract.json` is malformed, when a migration already on the base ref was
- * modified or removed, or when a new migration is destructive without a
- * contract entry.
+ * modified or removed (unless `squashed.json` lists it), or when a new
+ * migration is destructive without a contract entry.
  */
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
@@ -20,6 +20,7 @@ import {
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const migrationsDir = join(repoRoot, "apps", "gateway", "migrations");
 const contractPath = join(migrationsDir, "contract.json");
+const squashedPath = join(migrationsDir, "squashed.json");
 
 /**
  * Parse `--base <ref>` from argv.
@@ -86,7 +87,8 @@ const headSql = {};
 for (const name of headFiles) {
 	headSql[name] = readFileSync(join(migrationsDir, name), "utf8");
 }
-const changed = changedMigrations(baseSql, headSql);
+const squashed = JSON.parse(readFileSync(squashedPath, "utf8"));
+const changed = changedMigrations(baseSql, headSql, squashed);
 if (changed.length > 0) {
 	for (const { file, change } of changed) {
 		console.error(

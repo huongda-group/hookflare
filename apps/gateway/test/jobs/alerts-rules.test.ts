@@ -258,23 +258,6 @@ describe("backup_stale", () => {
 		expect(await backupStale(wallClock, ENABLED)).toEqual([]);
 	});
 
-	it("gives an upgraded deployment a grace period from when the backups migration landed", async () => {
-		const at = Date.now();
-		const wallClock = { db: deps.db, now: () => at };
-		// Months-old install; the backups migration was applied an hour ago.
-		await deps.db.run(
-			sql`UPDATE d1_migrations SET applied_at = ${fmt(at - 90 * 24 * 3_600_000)}`,
-		);
-		await deps.db.run(
-			sql`UPDATE d1_migrations SET applied_at = ${fmt(at - 3_600_000)} WHERE name LIKE '0010\\_%' ESCAPE '\\'`,
-		);
-		try {
-			expect(await backupStale(wallClock, ENABLED)).toEqual([]);
-		} finally {
-			await deps.db.run(sql`UPDATE d1_migrations SET applied_at = ${fmt(at)}`);
-		}
-	});
-
 	it("opens with a null timestamp for an old deployment with no backup row", async () => {
 		const at = Date.now();
 		const wallClock = { db: deps.db, now: () => at };
