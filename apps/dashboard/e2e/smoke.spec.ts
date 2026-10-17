@@ -16,8 +16,11 @@ async function passTurnstile(page: Page, submit: Locator) {
 		if (await submit.isDisabled()) {
 			await box.click({ timeout: 15_000 });
 		}
-	} catch {
+	} catch (e) {
 		// The widget already passed (or is absent with Turnstile off).
+		// Log instead of swallowing: a widget that never renders (e.g. a
+		// CSP regression) would otherwise surface only as a 30s timeout below.
+		console.log("turnstile passthrough:", String(e));
 	}
 	await expect(submit).toBeEnabled({ timeout: 30_000 });
 }

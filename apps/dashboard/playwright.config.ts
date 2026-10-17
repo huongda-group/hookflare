@@ -13,7 +13,7 @@ export default defineConfig({
 	webServer: {
 		command: `rm -rf ../../.wrangler/e2e && pnpm --dir ../.. exec wrangler d1 migrations apply DB --local --config apps/gateway/wrangler.jsonc --persist-to .wrangler/e2e && pnpm --dir ../.. exec wrangler dev --config apps/gateway/wrangler.jsonc --port ${PORT} --var SETUP_TOKEN:e2e-setup-token --var TURNSTILE_SITE_KEY:1x00000000000000000000AA --var TURNSTILE_SECRET_KEY:1x0000000000000000000000000000000AA --var SECRETS_KEY:ptOEPIGX3zAeX8aB1D0Fak+xg9RDepObO/sBwFUrRXI= --persist-to .wrangler/e2e`,
 		url: `http://127.0.0.1:${PORT}/healthz`,
-		reuseExistingServer: !process.env.CI,
+		reuseExistingServer: false,
 		timeout: 120_000,
 	},
 });
