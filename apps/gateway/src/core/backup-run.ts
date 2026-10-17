@@ -30,6 +30,24 @@ export type StartBackupOpts = {
 	resume?: BackupParams["resume"];
 };
 
+/** A fresh `running` row whose first instance ID is the backup ID. */
+export function newBackupRow(
+	now: number,
+	backupId: string,
+	trigger: BackupParams["trigger"],
+): typeof backups.$inferInsert {
+	const day = new Date(now).toISOString().slice(0, 10);
+	return {
+		id: backupId,
+		day,
+		status: "running",
+		prefix: `d1/${day.replaceAll("-", "/")}/${backupId}/`,
+		instanceId: backupId,
+		trigger,
+		startedAt: now,
+	};
+}
+
 async function moveInstance(
 	deps: Deps,
 	backupId: string,
@@ -73,20 +91,12 @@ export async function startBackupRun(
 		}
 		throw err;
 	}
-	const now = deps.now();
 	if (opts.backupId) {
 		await moveInstance(deps, opts.backupId, opts.instanceId);
 	} else {
-		const day = new Date(now).toISOString().slice(0, 10);
-		await deps.db.insert(backups).values({
-			id: backupId,
-			day,
-			status: "running",
-			prefix: `d1/${day.replaceAll("-", "/")}/${backupId}/`,
-			instanceId: opts.instanceId,
-			trigger: opts.trigger,
-			startedAt: now,
-		});
+		await deps.db
+			.insert(backups)
+			.values(newBackupRow(deps.now(), backupId, opts.trigger));
 	}
 	logger.info("backup.started", {
 		instance_id: opts.instanceId,

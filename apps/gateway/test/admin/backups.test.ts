@@ -3,6 +3,7 @@ import { clearAccessKeyCache } from "../../src/admin/auth/access";
 import { backups } from "../../src/core/db/schema";
 import { adminApp, auditRows } from "../helpers/admin";
 import { fakeBackup, testDeps } from "../helpers/deps";
+import { faultyDeps } from "../helpers/faults";
 
 describe("backups API", () => {
 	beforeEach(async () => {
@@ -60,6 +61,37 @@ describe("backups API", () => {
 		expect(await second.json()).toEqual({ error: "backup_running" });
 		const rows = await deps.db.select().from(backups);
 		expect(rows).toHaveLength(1);
+	});
+
+	it("two concurrent POSTs start exactly one backup", async () => {
+		const backup = fakeBackup("running");
+		const deps = testDeps({ backup });
+		await cleanBackups(deps);
+		const app = await adminApp(deps);
+		const results = await Promise.all([
+			app.request("POST", "/backups/run", {}),
+			app.request("POST", "/backups/run", {}),
+		]);
+		expect(results.map((r) => r.status).sort()).toEqual([202, 409]);
+		expect(await deps.db.select().from(backups)).toHaveLength(1);
+		expect(backup.created).toHaveLength(1);
+	});
+
+	it("a failed audit write leaves no backups row and starts no workflow", async () => {
+		const backup = fakeBackup("running");
+		const base = testDeps({ backup });
+		await cleanBackups(base);
+		const deps = faultyDeps(base, {
+			d1: [{ match: /insert into "audit_logs"/i }],
+		});
+		const res = await (await adminApp(deps)).request(
+			"POST",
+			"/backups/run",
+			{},
+		);
+		expect(res.status).toBe(500);
+		expect(await base.db.select().from(backups)).toHaveLength(0);
+		expect(backup.created).toHaveLength(0);
 	});
 
 	it("summary returns last_verified from the newest verified row", async () => {

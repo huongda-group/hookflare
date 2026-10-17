@@ -422,6 +422,7 @@ describe("backup liveness", () => {
 		expect(await isBackupRunning(live)).toBe(true);
 
 		const lost = testDeps({ backup: recordingBackup("missing") });
+		await cleanBackups(lost);
 		await lost.db.insert(backups).values({
 			id: "bk-lost",
 			day: "2026-10-16",

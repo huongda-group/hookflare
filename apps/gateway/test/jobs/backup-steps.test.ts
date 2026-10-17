@@ -30,11 +30,16 @@ async function migrationNames(): Promise<string[]> {
 	return rows.map((r) => r.name);
 }
 
-async function seedBackup(id: string, prefix: string, startedAt: number) {
+async function seedBackup(
+	id: string,
+	prefix: string,
+	startedAt: number,
+	status: "running" | "verified" = "running",
+) {
 	await deps.db.insert(backups).values({
 		id,
 		day: DAY,
-		status: "running",
+		status,
 		prefix,
 		instanceId: "test-instance",
 		trigger: "manual",
@@ -165,12 +170,8 @@ describe("expireBackups", () => {
 		const now = Date.now();
 		const oldPrefix = "test/backup/steps/old50/";
 		const keepPrefix = "test/backup/steps/keep40/";
-		await seedBackup("bk_old50", oldPrefix, now - 50 * DAY_MS);
-		await seedBackup("bk_keep40", keepPrefix, now - 40 * DAY_MS);
-		await deps.db
-			.update(backups)
-			.set({ status: "verified" })
-			.where(sql`id IN ('bk_old50', 'bk_keep40')`);
+		await seedBackup("bk_old50", oldPrefix, now - 50 * DAY_MS, "verified");
+		await seedBackup("bk_keep40", keepPrefix, now - 40 * DAY_MS, "verified");
 		await deps.backups.put(`${oldPrefix}part.ndjson.gz`, new Uint8Array([1]));
 		await deps.backups.put(`${keepPrefix}part.ndjson.gz`, new Uint8Array([2]));
 
@@ -190,12 +191,8 @@ describe("expireBackups", () => {
 	it("a partial R2 delete leaves the row expiring, never verified; the next run finishes it", async () => {
 		const now = Date.now();
 		const oldPrefix = "test/backup/steps/partial/";
-		await seedBackup("bk_partial", oldPrefix, now - 50 * DAY_MS);
-		await seedBackup("bk_newest", "test/backup/steps/newest/", now);
-		await deps.db
-			.update(backups)
-			.set({ status: "verified" })
-			.where(sql`id IN ('bk_partial', 'bk_newest')`);
+		await seedBackup("bk_partial", oldPrefix, now - 50 * DAY_MS, "verified");
+		await seedBackup("bk_newest", "test/backup/steps/newest/", now, "verified");
 		await deps.backups.put(`${oldPrefix}a.ndjson.gz`, new Uint8Array([1]));
 		await deps.backups.put(`${oldPrefix}b.ndjson.gz`, new Uint8Array([2]));
 		// Deletes the first key, then fails: half the backup is gone.

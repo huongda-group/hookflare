@@ -572,6 +572,10 @@ export const backups = sqliteTable(
 		check("backups_status_check", inList("status", BACKUP_STATUSES)),
 		index("backups_status_idx").on(t.status),
 		index("backups_started_at_idx").on(t.startedAt),
+		/** At most one backup runs at a time: a racing second start fails its insert. */
+		uniqueIndex("backups_one_running_idx")
+			.on(t.status)
+			.where(sql`status = 'running'`),
 	],
 );
 
