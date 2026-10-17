@@ -1,3 +1,4 @@
+import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { testDeps } from "./helpers/deps";
@@ -19,10 +20,45 @@ async function indexNames(table: string) {
 	).results.map((r) => r.name);
 }
 
+/**
+ * Drop every table in dependency order (D1 refuses `PRAGMA foreign_keys`), then
+ * re-apply only `0000_init`, so the upgrade is exercised from the pre-M7 shape.
+ * A failed `DROP TABLE` means a referencing table still exists; retry it next
+ * pass, once its children are gone.
+ */
+async function resetToInit() {
+	const { results } = await env.DB.prepare(
+		"SELECT name FROM sqlite_master WHERE type = 'table'",
+	).all<{ name: string }>();
+	// `_cf_METADATA` is miniflare's own table and cannot be dropped.
+	let remaining = results
+		.map((r) => r.name)
+		.filter((name) => !name.startsWith("sqlite_") && !name.startsWith("_cf_"));
+	while (remaining.length > 0) {
+		const next: string[] = [];
+		for (const name of remaining) {
+			try {
+				await env.DB.prepare(`DROP TABLE IF EXISTS "${name}"`).run();
+			} catch {
+				next.push(name);
+			}
+		}
+		if (next.length === remaining.length) {
+			throw new Error(`could not drop tables: ${next.join(", ")}`);
+		}
+		remaining = next;
+	}
+	const init = env.TEST_MIGRATIONS[0];
+	if (!init) throw new Error("0000_init migration missing");
+	await applyD1Migrations(env.DB, [init]);
+}
+
 describe("0000_init", () => {
-	it("is the only migration (squashed at 1.0.0)", () => {
+	it("applies 0000_init, then the built-in-auth migrations", () => {
 		expect(env.TEST_MIGRATIONS.map((m) => m.name)).toEqual([
 			expect.stringMatching(/^0000_init/),
+			expect.stringMatching(/^0001_/),
+			expect.stringMatching(/^0002_/),
 		]);
 	});
 
@@ -77,7 +113,7 @@ describe("0000_init", () => {
 	it("rejects an unknown role", async () => {
 		await expect(
 			env.DB.prepare(
-				"INSERT INTO users (email, role, created_at, updated_at) VALUES ('x@example.com', 'root', 1, 1)",
+				"INSERT INTO users (username, role, created_at, updated_at) VALUES ('x@example.com', 'root', 1, 1)",
 			).run(),
 		).rejects.toThrow(/CHECK/);
 	});
@@ -125,5 +161,122 @@ describe("0000_init", () => {
 		expect(await indexNames("backups")).toEqual(
 			expect.arrayContaining(["backups_status_idx", "backups_started_at_idx"]),
 		);
+	});
+});
+
+describe("built-in auth migrations", () => {
+	it("renames the identity and actor columns and adds user credentials", async () => {
+		const userCols = await columns("users");
+		expect(userCols).toEqual(
+			expect.arrayContaining([
+				"username",
+				"password_hash",
+				"password_changed_at",
+			]),
+		);
+		expect(userCols).not.toContain("email");
+		expect(await columns("audit_logs")).toContain("actor");
+		expect(await columns("audit_logs")).not.toContain("actor_email");
+		expect(await columns("test_deliveries")).toContain("actor");
+		expect(await columns("test_deliveries")).not.toContain("actor_email");
+	});
+
+	it("creates sessions with its indexes", async () => {
+		expect(await columns("sessions")).toEqual([
+			"id_hash",
+			"username",
+			"created_at",
+			"last_seen_at",
+			"expires_at",
+		]);
+		expect(await indexNames("sessions")).toEqual(
+			expect.arrayContaining(["sessions_username_idx", "sessions_expires_idx"]),
+		);
+	});
+
+	it("creates api_tokens with the username index", async () => {
+		expect(await columns("api_tokens")).toEqual([
+			"id",
+			"token_hash",
+			"username",
+			"name",
+			"created_at",
+			"expires_at",
+			"last_used_at",
+			"revoked_at",
+		]);
+		expect(await indexNames("api_tokens")).toContain("api_tokens_username_idx");
+	});
+
+	it("cascades sessions when the user is deleted", async () => {
+		await env.DB.prepare(
+			"INSERT INTO users (username, role, created_at, updated_at, password_hash) VALUES ('casc@x.io', 'admin', 1, 1, 'hash')",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO sessions (id_hash, username, created_at, last_seen_at, expires_at) VALUES ('sess_casc', 'casc@x.io', 1, 1, 9999999999999)",
+		).run();
+		await env.DB.prepare(
+			"DELETE FROM users WHERE username = 'casc@x.io'",
+		).run();
+		const row = await env.DB.prepare(
+			"SELECT count(*) AS n FROM sessions WHERE username = 'casc@x.io'",
+		).first<{ n: number }>();
+		expect(row?.n).toBe(0);
+	});
+
+	it("rejects two api tokens with the same hash", async () => {
+		await env.DB.prepare(
+			"INSERT INTO users (username, role, created_at, updated_at, password_hash) VALUES ('tok@x.io', 'admin', 1, 1, 'hash')",
+		).run();
+		const ins = (id: string) =>
+			env.DB.prepare(
+				"INSERT INTO api_tokens (id, token_hash, username, name, created_at) VALUES (?, 'same-hash', 'tok@x.io', 'k', 1)",
+			)
+				.bind(id)
+				.run();
+		await ins("tok_1");
+		await expect(ins("tok_2")).rejects.toThrow(/UNIQUE/);
+	});
+
+	it("upgrades a 0000_init database without losing identity or actor rows", async () => {
+		await resetToInit();
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO users (email, role, created_at, updated_at, disabled_at) VALUES ('a@x.io', 'admin', 1, 1, NULL)",
+			),
+			env.DB.prepare(
+				"INSERT INTO users (email, role, created_at, updated_at, disabled_at) VALUES ('svc:bot', 'operator', 1, 1, NULL)",
+			),
+			env.DB.prepare(
+				"INSERT INTO audit_logs (id, actor_email, action, resource_type, resource_id, at) VALUES ('aud_ll', 'a@x.io', 'user.created', 'user', 'a@x.io', 1)",
+			),
+			env.DB.prepare(
+				"INSERT INTO projects (id, name, slug, status, created_at, updated_at) VALUES ('prj_ll', 'P', 'prj-ll', 'active', 1, 1)",
+			),
+			env.DB.prepare(
+				"INSERT INTO destinations (id, project_id, name, url, status, signing_secret_enc, created_at, updated_at) VALUES ('dst_ll', 'prj_ll', 'D', 'https://example.com', 'active', 'x', 1, 1)",
+			),
+			env.DB.prepare(
+				"INSERT INTO test_deliveries (id, destination_id, project_id, actor_email, started_at, duration_ms) VALUES ('tst_ll', 'dst_ll', 'prj_ll', 'a@x.io', 1, 5)",
+			),
+		]);
+
+		await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
+
+		const users = await env.DB.prepare(
+			"SELECT username, disabled_at FROM users ORDER BY username",
+		).all<{ username: string; disabled_at: number | null }>();
+		expect(users.results).toEqual([
+			{ username: "a@x.io", disabled_at: null },
+			{ username: "svc:bot", disabled_at: expect.any(Number) },
+		]);
+		const audit = await env.DB.prepare(
+			"SELECT actor FROM audit_logs WHERE id = 'aud_ll'",
+		).first<{ actor: string }>();
+		expect(audit?.actor).toBe("a@x.io");
+		const testDelivery = await env.DB.prepare(
+			"SELECT actor FROM test_deliveries WHERE id = 'tst_ll'",
+		).first<{ actor: string }>();
+		expect(testDelivery?.actor).toBe("a@x.io");
 	});
 });

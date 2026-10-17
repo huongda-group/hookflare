@@ -1,4 +1,3 @@
-import { isServiceIdentity, SERVICE_IDENTITY_PATTERN } from "@hookflare/shared";
 import type { MiddlewareHandler } from "hono";
 import {
 	createRemoteJWKSet,
@@ -8,10 +7,13 @@ import {
 	jwtVerify,
 } from "jose";
 import type { AppBindings } from "../../app";
-import { bootstrapStatements, getUser } from "../../core/db/users";
+import { getUser } from "../../core/db/users";
 
 /** Unknown-kid refetches are bounded to one per team domain per cooldown. */
 const COOLDOWN_MS = 60_000;
+
+/** The only `svc:` identities Access could map to (kept until Access is removed in M7). */
+const SERVICE_IDENTITY_PATTERN = /^svc:[a-z0-9._-]{1,200}$/;
 
 type KeySet = ReturnType<typeof createRemoteJWKSet>;
 type Entry = { set: KeySet; rotationRefetchAt: number };
@@ -41,15 +43,6 @@ function keySetFor(
 		keySets.set(teamDomain, entry);
 	}
 	return entry.set;
-}
-
-function allowedEmails(value: string | undefined): Set<string> {
-	return new Set(
-		(value ?? "")
-			.split(",")
-			.map((e) => e.trim().toLowerCase())
-			.filter(Boolean),
-	);
 }
 
 function verifyOptions(
@@ -160,18 +153,10 @@ export function accessMiddleware(
 		if (!normalized) {
 			return c.json({ error: "forbidden" }, 403);
 		}
-		// Spec §6.1: D1 is the source of truth; the env list only seeds admins.
-		const { db, now } = c.var.deps;
-		let user = await getUser(db, normalized);
-		if (
-			!user &&
-			!isServiceIdentity(normalized) &&
-			allowedEmails(env.BOOTSTRAP_ADMIN_EMAILS).has(normalized)
-		) {
-			await db.batch(bootstrapStatements(db, normalized, now()));
-			user = await getUser(db, normalized);
-			c.var.logger.info("admin.user_bootstrapped", { actor_email: normalized });
-		}
+		// Spec §6.1: D1 is the source of truth. Bootstrap-via-env is gone with
+		// built-in auth (M7), so an unknown identity is simply forbidden.
+		const { db } = c.var.deps;
+		const user = await getUser(db, normalized);
 		if (!user || user.disabledAt !== null) {
 			return c.json({ error: "forbidden" }, 403);
 		}

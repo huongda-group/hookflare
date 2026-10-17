@@ -17,11 +17,12 @@ import { auditStmt, readJson, readQuery } from "../http";
 
 function toUser(r: UserRow): User {
 	return {
-		email: r.email,
+		username: r.username,
 		role: r.role,
 		created_at: r.createdAt,
 		updated_at: r.updatedAt,
 		disabled_at: r.disabledAt,
+		has_password: r.passwordHash !== null,
 	};
 }
 
@@ -40,7 +41,7 @@ export function userRoutes() {
 		return c.json({
 			data: page.map(toUser),
 			next_cursor:
-				rows.length > q.value.limit ? (page.at(-1)?.email ?? null) : null,
+				rows.length > q.value.limit ? (page.at(-1)?.username ?? null) : null,
 		} satisfies Page<User>);
 	});
 
@@ -51,8 +52,11 @@ export function userRoutes() {
 		const ts = now();
 		const { reason, ...v } = body.value;
 		const row: UserRow = {
-			email: v.email,
+			username: v.username,
 			role: v.role,
+			// The password is set by the onboarding/reset flows (M7).
+			passwordHash: null,
+			passwordChangedAt: null,
 			createdAt: ts,
 			updatedAt: ts,
 			disabledAt: null,
@@ -63,7 +67,7 @@ export function userRoutes() {
 				auditStmt(c, {
 					action: "user.created",
 					resourceType: "user",
-					resourceId: v.email,
+					resourceId: v.username,
 					reason,
 					diff: { role: v.role },
 				}),

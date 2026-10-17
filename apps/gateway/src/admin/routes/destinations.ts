@@ -604,7 +604,7 @@ export function destinationRoutes() {
 				id: testId,
 				destinationId: id,
 				projectId: destination.projectId,
-				actorEmail: c.var.actor?.email ?? "",
+				actor: c.var.actor?.email ?? "",
 				startedAt,
 				durationMs: outcome.durationMs,
 				httpStatus: outcome.httpStatus,
