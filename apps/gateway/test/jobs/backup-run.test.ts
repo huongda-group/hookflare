@@ -377,6 +377,23 @@ describe("backup cron", () => {
 		expect(row.instanceId).toBe("bk-c-cont-1");
 	});
 
+	it("cron skips (and logs) while a backup is still running", async () => {
+		const backup = recordingBackup("running");
+		const deps = testDeps({ backup, now: () => Date.UTC(2026, 9, 17, 20) });
+		await cleanBackups(deps);
+		await startBackupRun(
+			deps,
+			{ instanceId: "backup-2026-10-16", trigger: "cron" },
+			logger,
+		);
+		const log = vi.spyOn(console, "log").mockImplementation(() => {});
+		await runScheduled(BACKUP_CRON, deps);
+		const msgs = log.mock.calls.map((c) => JSON.parse(c[0] as string).msg);
+		log.mockRestore();
+		expect(msgs).toContain("backup.skipped_running");
+		expect(backup.created.map((c) => c.id)).toEqual(["backup-2026-10-16"]);
+	});
+
 	it("cron enabled starts one backup-<day> instance", async () => {
 		const backup = recordingBackup();
 		const deps = testDeps({ backup, now: () => Date.UTC(2026, 9, 16, 20) });

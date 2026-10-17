@@ -1,5 +1,5 @@
 import { startArchiveRun } from "../core/archive-run";
-import { startBackupRun } from "../core/backup-run";
+import { isBackupRunning, startBackupRun } from "../core/backup-run";
 import { beat, type JobName } from "../core/heartbeat";
 import { createLogger, type Logger } from "../core/log";
 import { readSetting, STORAGE_SETTING } from "../core/settings";
@@ -78,6 +78,13 @@ export async function runScheduled(cron: string, deps: Deps): Promise<void> {
 			return;
 		}
 		try {
+			// A previous (or manual) backup may still be going: a second
+			// one would double the D1 read load for no gain.
+			if (await isBackupRunning(deps)) {
+				logger.info("backup.skipped_running", {});
+				await beatSafe(deps, logger, "backup");
+				return;
+			}
 			await startBackupRun(
 				deps,
 				{ instanceId: `backup-${dayOf(deps.now())}`, trigger: "cron" },
