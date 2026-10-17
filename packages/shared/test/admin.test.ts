@@ -3,6 +3,7 @@ import {
 	alertChannelConfigSchema,
 	alertRulesSchema,
 	bulkReplayRequest,
+	createApiTokenRequest,
 	createDestinationRequest,
 	createProjectRequest,
 	createSourceRequest,
@@ -13,6 +14,8 @@ import {
 	eventSearchQuery,
 	isAllowedAlertUrl,
 	listQuery,
+	loginRequest,
+	password,
 	PERMISSIONS,
 	patchDestinationRequest,
 	patchSettingsRequest,
@@ -22,8 +25,10 @@ import {
 	retryDefaultsSchema,
 	rotateDestinationSecretRequest,
 	rotateSourceSecretRequest,
+	setupRequest,
 	statsQuery,
 	storageSettingsSchema,
+	username,
 } from "../src/admin";
 
 const base = { project_id: "prj_1", destination_id: "dst_1", name: "Stripe" };
@@ -273,26 +278,70 @@ describe("M3 schemas", () => {
 		).toBe(false);
 	});
 
-	it("lowercases user emails", () => {
+	it("normalizes the username of a new user", () => {
 		expect(
-			createUserRequest.parse({ email: "Ops@Example.COM", role: "operator" })
-				.email,
-		).toBe("ops@example.com");
+			createUserRequest.parse({
+				username: " Ops.Bot ",
+				role: "operator",
+				password: "pässwörd 12345",
+			}),
+		).toMatchObject({ username: "ops.bot", role: "operator" });
 	});
 
-	it("accepts service-token identities normalized", () => {
+	it("rejects an email where a username is required", () => {
 		expect(
-			createUserRequest.parse({ email: "SVC:Ab.Access", role: "operator" })
-				.email,
-		).toBe("svc:ab.access");
+			createUserRequest.safeParse({ username: "svc:legacy", role: "operator" })
+				.success,
+		).toBe(false);
+	});
+});
+
+describe("built-in auth contracts", () => {
+	it("normalizes a username to lowercase and trims it", () => {
+		expect(username.parse(" Ops.Bot ")).toBe("ops.bot");
 	});
 
-	it("rejects bare and spaced svc identities", () => {
+	it("rejects too-short, badly-started, and too-long usernames", () => {
+		for (const bad of ["ab", "-x1", "a".repeat(65)]) {
+			expect(username.safeParse(bad).success).toBe(false);
+		}
+	});
+
+	it("leaves a password untouched, including its whitespace", () => {
+		const raw = "  pässwörd 12345 ";
+		expect(password.parse(raw)).toBe(raw);
+	});
+
+	it("rejects a password shorter than 12 characters", () => {
+		expect(password.safeParse("x".repeat(11)).success).toBe(false);
+	});
+
+	it("loginRequest accepts a legacy service-token identity", () => {
 		expect(
-			createUserRequest.safeParse({ email: "svc:", role: "operator" }).success,
+			loginRequest.safeParse({ username: "svc:legacy", password: "pw" })
+				.success,
+		).toBe(true);
+	});
+
+	it("setupRequest requires a setup_token", () => {
+		expect(
+			setupRequest.safeParse({
+				username: "ops.bot",
+				password: "pässwörd 12345",
+			}).success,
 		).toBe(false);
 		expect(
-			createUserRequest.safeParse({ email: "svc:a b", role: "operator" })
+			setupRequest.parse({
+				username: " Ops.Bot ",
+				password: "pässwörd 12345",
+				setup_token: "t".repeat(24),
+			}),
+		).toMatchObject({ username: "ops.bot", setup_token: "t".repeat(24) });
+	});
+
+	it("createApiTokenRequest rejects expires_in_days below 1", () => {
+		expect(
+			createApiTokenRequest.safeParse({ name: "ci", expires_in_days: 0 })
 				.success,
 		).toBe(false);
 	});
