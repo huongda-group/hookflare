@@ -196,10 +196,36 @@ gateway for Cloudflare Workers, and verify it runs locally.
    or deploy unless I explicitly ask. If I do, follow README "Option B" and
    `docs/runbook/setup.md` step by step, show me each command that changes my
    Cloudflare account before running it, and use `pnpm run deploy`
-   (never `pnpm deploy`).
+   (never `pnpm deploy`). If the Cloudflare API MCP server is connected, use it
+   for account operations (README "Cloudflare operations with the Cloudflare
+   MCP server") and wrangler only for local dev and `pnpm run deploy`.
 
 Finish with a short summary: what was installed, the local URLs, and what is
 left for a Cloudflare deployment.
+```
+
+### Cloudflare operations with the Cloudflare MCP server
+
+For a deployed instance, give the agent the [Cloudflare API MCP server](https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare/) (`https://mcp.cloudflare.com/mcp`) alongside wrangler. It exposes the whole Cloudflare API through three tools: `search` (find an endpoint in the OpenAPI spec), `execute` (run JavaScript that calls the API with your OAuth grant), and `docs` (search the Cloudflare docs). Connect it in Claude Code with:
+
+```bash
+claude mcp add --transport http cloudflare https://mcp.cloudflare.com/mcp
+```
+
+The first call opens an OAuth page where you choose the account and permissions. Other MCP clients use `{"mcpServers": {"cloudflare": {"url": "https://mcp.cloudflare.com/mcp"}}}`.
+
+| Task | Use |
+|---|---|
+| Create D1 databases, queues, and R2 buckets; list Workers, deployments, and versions | MCP `execute` |
+| Inspect a live D1 database (`POST /accounts/{id}/d1/database/{db}/query`) | MCP `execute` |
+| Workers Builds triggers: build/deploy command, branch, path filters (`/accounts/{id}/builds/triggers`) | MCP `execute` |
+| Cloudflare product questions (Access, Queues limits, Workflows) | MCP `docs` |
+| Local dev, local D1 migrations, `wrangler types` | `pnpm` scripts (wrangler) |
+| Deploys, remote migrations, rollback | `pnpm run deploy` and [`docs/runbook/`](docs/runbook/), never hand-made API calls, so the restore point and smoke result are recorded |
+
+Pass the account ID explicitly when the OAuth grant covers several accounts. A write through `execute` changes the live account immediately: review every call that creates, updates, or deletes something (above all SQL against a production D1) before approving it.
+
+The Git-connected Workers Builds trigger runs `pnpm install --frozen-lockfile` as the build command and `pnpm run deploy -- --skip-smoke` as the deploy command, because Workers Builds has no sink or Access service token. Run `pnpm run smoke` afterwards from a machine that has the smoke env.
 
 ## Dashboard
 
