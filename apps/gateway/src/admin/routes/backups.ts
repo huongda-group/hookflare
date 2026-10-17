@@ -7,6 +7,7 @@ import {
 	readBackupSummary,
 	startBackupRun,
 } from "../../core/backup-run";
+import { isUniqueViolation } from "../../core/db/errors";
 import { backups } from "../../core/db/schema";
 import { newId } from "../../core/ids";
 import { requirePermission } from "../auth/permission";
@@ -40,7 +41,7 @@ export function backupRoutes() {
 				}),
 			]);
 		} catch (err) {
-			if (/unique/i.test(String(err)))
+			if (isUniqueViolation(err))
 				return c.json({ error: "backup_running" }, 409);
 			throw err;
 		}

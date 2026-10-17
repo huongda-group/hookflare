@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	type BackupParams,
 	isBackupRunning,
+	newBackupRow,
 	readBackupSummary,
 	startBackupRun,
 } from "../../src/core/backup-run";
@@ -356,6 +357,42 @@ describe("backup cron", () => {
 		).toBe("duplicate");
 		const rows = await deps.db.select({ id: backups.id }).from(backups);
 		expect(rows.map((r) => r.id)).toEqual([id]);
+	});
+
+	it("a cron start racing a running manual backup creates no workflow instance", async () => {
+		const backup = recordingBackup("running");
+		const deps = testDeps({ backup });
+		await cleanBackups(deps);
+		await deps.db
+			.insert(backups)
+			.values(newBackupRow(deps.now(), "manual-1", "manual"));
+		expect(
+			await startBackupRun(
+				deps,
+				{ instanceId: "backup-2026-10-17", trigger: "cron" },
+				logger,
+			),
+		).toBe("duplicate");
+		expect(backup.created).toEqual([]);
+	});
+
+	it("a failed workflow create marks the new row failed", async () => {
+		const deps = testDeps({
+			backup: {
+				async create() {
+					throw new Error("workflows unavailable");
+				},
+			} as unknown as Workflow,
+		});
+		await cleanBackups(deps);
+		await expect(
+			startBackupRun(deps, { instanceId: "bk-f", trigger: "cron" }, logger),
+		).rejects.toThrow("workflows unavailable");
+		const [row] = await deps.db
+			.select()
+			.from(backups)
+			.where(eq(backups.id, "bk-f"));
+		expect(row.status).toBe("failed");
 	});
 
 	it("a retried continue step still moves the row's instance_id when create says duplicate", async () => {

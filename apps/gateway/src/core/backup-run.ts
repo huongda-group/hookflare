@@ -2,6 +2,7 @@ import type { BackupSummary } from "@hookflare/shared";
 import { and, desc, eq } from "drizzle-orm";
 import type { Deps } from "../deps";
 import { ARCHIVE_RUNNING } from "./archive-run";
+import { isUniqueViolation } from "./db/errors";
 import { backups } from "./db/schema";
 import type { Logger } from "./log";
 import { readSetting, STORAGE_SETTING } from "./settings";
@@ -71,6 +72,19 @@ export async function startBackupRun(
 	logger: Logger,
 ): Promise<"started" | "duplicate"> {
 	const backupId = opts.backupId ?? opts.instanceId;
+	if (!opts.backupId) {
+		// Row first: its primary key and the one-running index decide whether
+		// this run may start before any Workflow instance exists.
+		try {
+			await deps.db
+				.insert(backups)
+				.values(newBackupRow(deps.now(), backupId, opts.trigger));
+		} catch (err) {
+			if (!isUniqueViolation(err)) throw err;
+			logger.info("backup.already_started", { instance_id: opts.instanceId });
+			return "duplicate";
+		}
+	}
 	try {
 		await deps.backup.create({
 			id: opts.instanceId,
@@ -90,15 +104,18 @@ export async function startBackupRun(
 			logger.info("backup.already_started", { instance_id: opts.instanceId });
 			return "duplicate";
 		}
+		if (!opts.backupId)
+			await deps.db
+				.update(backups)
+				.set({
+					status: "failed",
+					error: `start failed: ${String(err)}`,
+					finishedAt: deps.now(),
+				})
+				.where(eq(backups.id, backupId));
 		throw err;
 	}
-	if (opts.backupId) {
-		await moveInstance(deps, opts.backupId, opts.instanceId);
-	} else {
-		await deps.db
-			.insert(backups)
-			.values(newBackupRow(deps.now(), backupId, opts.trigger));
-	}
+	if (opts.backupId) await moveInstance(deps, opts.backupId, opts.instanceId);
 	logger.info("backup.started", {
 		instance_id: opts.instanceId,
 		backup_id: backupId,
