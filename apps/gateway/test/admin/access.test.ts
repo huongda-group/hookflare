@@ -1,6 +1,9 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { clearAccessKeyCache } from "../../src/admin/auth/access";
+import {
+	clearAccessKeyCache,
+	identityFromPayload,
+} from "../../src/admin/auth/access";
 import { createApp } from "../../src/app";
 import { auditLogs, users } from "../../src/core/db/schema";
 import type { Deps } from "../../src/deps";
@@ -270,6 +273,26 @@ describe("Access middleware", () => {
 				email: "svc:ab12.access",
 				role: "operator",
 			});
+		});
+
+		it.each([
+			["a space", "bad name.access"],
+			["a slash", "a/b"],
+			["a non-ASCII letter", "ñ.access"],
+			["an over-long name", "a".repeat(201)],
+		])("rejects a common_name with %s", async (_label, commonName) => {
+			const identity = `svc:${commonName.toLowerCase()}`;
+			const deps = testDeps();
+			// Even a matching users row (written outside the API) must not admit it.
+			await storeUser(deps, identity);
+			expect(identityFromPayload({ common_name: commonName })).toBeUndefined();
+			const api = await svcApi(deps, {
+				email: undefined,
+				common_name: commonName,
+			});
+			const res = await api.request("GET", "/me");
+			expect(res.status).toBe(403);
+			await deps.db.delete(users).where(eq(users.email, identity));
 		});
 
 		it("falls back to common_name when email is empty", async () => {

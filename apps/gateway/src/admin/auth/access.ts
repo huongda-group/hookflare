@@ -1,4 +1,4 @@
-import { isServiceIdentity } from "@hookflare/shared";
+import { isServiceIdentity, SERVICE_IDENTITY_PATTERN } from "@hookflare/shared";
 import type { MiddlewareHandler } from "hono";
 import {
 	createRemoteJWKSet,
@@ -107,7 +107,11 @@ export function identityFromPayload(payload: JWTPayload): string | undefined {
 		typeof payload.common_name === "string"
 			? payload.common_name.trim().toLowerCase()
 			: "";
-	return commonName ? `svc:${commonName}` : undefined;
+	if (!commonName) return undefined;
+	// A common_name the users API could never store is rejected outright
+	// (403) rather than matched against a hand-written row.
+	const identity = `svc:${commonName}`;
+	return SERVICE_IDENTITY_PATTERN.test(identity) ? identity : undefined;
 }
 
 /** Spec §6.1. Fails closed: missing config is a 500, never an open API. */

@@ -321,11 +321,14 @@ export function isServiceIdentity(id: string): boolean {
 	return id.startsWith("svc:");
 }
 
+/** The only `svc:` identities a users row can be created for. */
+export const SERVICE_IDENTITY_PATTERN = /^svc:[a-z0-9._-]{1,200}$/;
+
 const serviceIdentity = z
 	.string()
 	.trim()
 	.toLowerCase()
-	.regex(/^svc:[a-z0-9._-]{1,200}$/);
+	.regex(SERVICE_IDENTITY_PATTERN);
 /** Either a user email or a service-token identity. */
 export const userId = z.union([email, serviceIdentity]);
 const graceHours = z.number().int().min(0).max(168).default(24);
