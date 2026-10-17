@@ -1,7 +1,6 @@
 import type { Destination, Source } from "@hookflare/shared";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
-import { clearAccessKeyCache } from "../../src/admin/auth/access";
 import {
 	decryptSecret,
 	encryptSecret,
@@ -18,10 +17,6 @@ import {
 } from "../helpers/seed";
 
 const HOUR = 3_600_000;
-
-beforeEach(() => {
-	clearAccessKeyCache();
-});
 
 describe("POST /destinations/:id/rotate-secret", () => {
 	it("returns a new secret once and keeps the old one as prev for the grace window", async () => {

@@ -37,7 +37,7 @@ const batchRow = async (id: string) =>
 async function insertAudit(id: string, at: number) {
 	await deps.db.insert(auditLogs).values({
 		id,
-		actorEmail: "plan@test",
+		actor: "plan@test",
 		action: "settings.updated",
 		resourceType: "settings",
 		resourceId: "x",

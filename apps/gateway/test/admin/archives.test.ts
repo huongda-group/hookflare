@@ -1,6 +1,5 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { clearAccessKeyCache } from "../../src/admin/auth/access";
 import { archiveParts, auditLogs } from "../../src/core/db/schema";
 import { ARCHIVE_LAST_RUN_KEY, upsertSetting } from "../../src/core/settings";
 import { adminApp, auditRows } from "../helpers/admin";
@@ -11,7 +10,6 @@ describe("archives API (spec §7.6)", () => {
 	const archive = fakeArchive();
 	const deps = testDeps({ archive });
 	beforeEach(async () => {
-		clearAccessKeyCache();
 		await isolateArchive(deps);
 	});
 
@@ -72,7 +70,6 @@ describe("archives API (spec §7.6)", () => {
 		expect((await auditRows(deps, b.id)).map((a) => a.action)).toEqual([
 			"archive.downloaded",
 		]);
-		clearAccessKeyCache(); // second app minted fresh keys under the same kid
 		expect(
 			(
 				await (
@@ -190,7 +187,6 @@ describe("archives API (spec §7.6)", () => {
 			eligible: expect.any(Number),
 			currently_eligible: expect.any(Number),
 		});
-		clearAccessKeyCache(); // second app minted fresh keys under the same kid
 		expect(
 			(
 				await (

@@ -16,8 +16,8 @@ export type AppBindings = {
 		requestId: string;
 		logger: Logger;
 		deps: Deps;
-		/** Set by the Access middleware on /api/admin/v1. */
-		actor?: { email: string; role: Role };
+		/** Set by the built-in auth middleware for /api/admin/v1. */
+		actor?: { username: string; role: Role; sessionIdHash?: string };
 	};
 };
 
@@ -26,8 +26,6 @@ export type AppOptions = {
 	healthTimeoutMs?: number;
 	/** Builds the per-request Deps. Injectable for tests. */
 	createDeps?: (env: AppEnv) => Deps;
-	/** fetch for the Access JWKS. Injectable for tests. */
-	accessFetch?: typeof fetch;
 };
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -99,7 +97,7 @@ export function createApp(options: AppOptions = {}) {
 	});
 
 	app.route("/in", ingressRoutes());
-	app.route("/api/admin/v1", adminRoutes({ accessFetch: options.accessFetch }));
+	app.route("/api/admin/v1", adminRoutes());
 
 	app.notFound((c) => c.json({ error: "not_found" }, 404));
 

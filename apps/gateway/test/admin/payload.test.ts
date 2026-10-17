@@ -1,15 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { clearAccessKeyCache } from "../../src/admin/auth/access";
 import { adminApp, auditRows } from "../helpers/admin";
 import { testDeps } from "../helpers/deps";
 import { faultyDeps } from "../helpers/faults";
 import { seedDelivery, seedPipeline } from "../helpers/seed";
 
 describe("GET /events/:id/payload", () => {
-	beforeEach(() => {
-		// Each adminApp mints fresh keys under the same kid.
-		clearAccessKeyCache();
-	});
 
 	it("returns the raw bytes with safe headers and audits the view", async () => {
 		const deps = testDeps();
@@ -28,8 +23,8 @@ describe("GET /events/:id/payload", () => {
 		expect(res.headers.get("x-content-type-options")).toBe("nosniff");
 		expect(res.headers.get("cache-control")).toBe("no-store");
 		const rows = await auditRows(deps, eventId);
-		expect(rows.map((r) => [r.action, r.actorEmail])).toEqual([
-			["event.payload_viewed", api.email],
+		expect(rows.map((r) => [r.action, r.actor])).toEqual([
+			["event.payload_viewed", api.username],
 		]);
 		expect(JSON.stringify(rows)).not.toContain("4242");
 	});
@@ -67,9 +62,8 @@ describe("GET /events/:id/payload", () => {
 
 		const broken = await adminApp(
 			faultyDeps(base, { r2: [{ match: /^get / }] }),
-			{ email: api.email },
+			{ username: api.username },
 		);
-		clearAccessKeyCache(); // second app minted fresh keys under the same kid
 		expect(
 			(await broken.request("GET", `/events/${eventId}/payload`)).status,
 		).toBe(503);
@@ -83,9 +77,8 @@ describe("GET /events/:id/payload", () => {
 		const op = await adminApp(base, { role: "operator" });
 		const api = await adminApp(
 			faultyDeps(base, { d1: [{ match: /insert into "audit_logs"/i }] }),
-			{ email: op.email },
+			{ username: op.username },
 		);
-		clearAccessKeyCache(); // second app minted fresh keys under the same kid
 		const res = await api.request("GET", `/events/${eventId}/payload`);
 		expect(res.status).toBe(503);
 		expect(await res.text()).not.toContain("hello");

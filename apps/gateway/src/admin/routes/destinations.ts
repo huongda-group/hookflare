@@ -399,7 +399,7 @@ export function destinationRoutes() {
 					)
 					.returning(),
 				auditInsertIfChanged(db, {
-					actor: c.var.actor?.email ?? "",
+					actor: c.var.actor?.username ?? "",
 					at: ts,
 					action: "destination.secret_rotated",
 					resourceType: "destination",
@@ -436,7 +436,7 @@ export function destinationRoutes() {
 				const [[row]] = await db.batch([
 					transitionDestinationStmt(db, id, "active", "paused", ts),
 					auditInsertIfChanged(db, {
-						actor: c.var.actor?.email ?? "",
+						actor: c.var.actor?.username ?? "",
 						at: ts,
 						action: "destination.paused",
 						resourceType: "destination",
@@ -477,7 +477,7 @@ export function destinationRoutes() {
 						)
 						.returning(),
 					auditInsertIfChanged(deps.db, {
-						actor: c.var.actor?.email ?? "",
+						actor: c.var.actor?.username ?? "",
 						at: ts,
 						action: "destination.resumed",
 						resourceType: "destination",
@@ -604,7 +604,7 @@ export function destinationRoutes() {
 				id: testId,
 				destinationId: id,
 				projectId: destination.projectId,
-				actor: c.var.actor?.email ?? "",
+				actor: c.var.actor?.username ?? "",
 				startedAt,
 				durationMs: outcome.durationMs,
 				httpStatus: outcome.httpStatus,

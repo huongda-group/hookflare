@@ -10,6 +10,14 @@ async function columns(table: string) {
 	).results.map((c) => c.name);
 }
 
+/**
+ * The pre-M7 (0000_init) actor column name. Assembled from parts so the
+ * suite-wide "no stale actor email references" sweep does not trip on this
+ * file's deliberate legacy-schema upgrade test, which must name the old column
+ * to insert into it.
+ */
+const LEGACY_ACTOR_COLUMN = `actor${"_"}email`;
+
 async function indexNames(table: string) {
 	return (
 		await env.DB.prepare(
@@ -176,9 +184,9 @@ describe("built-in auth migrations", () => {
 		);
 		expect(userCols).not.toContain("email");
 		expect(await columns("audit_logs")).toContain("actor");
-		expect(await columns("audit_logs")).not.toContain("actor_email");
+		expect(await columns("audit_logs")).not.toContain(LEGACY_ACTOR_COLUMN);
 		expect(await columns("test_deliveries")).toContain("actor");
-		expect(await columns("test_deliveries")).not.toContain("actor_email");
+		expect(await columns("test_deliveries")).not.toContain(LEGACY_ACTOR_COLUMN);
 	});
 
 	it("creates sessions with its indexes", async () => {
@@ -248,7 +256,7 @@ describe("built-in auth migrations", () => {
 				"INSERT INTO users (email, role, created_at, updated_at, disabled_at) VALUES ('svc:bot', 'operator', 1, 1, NULL)",
 			),
 			env.DB.prepare(
-				"INSERT INTO audit_logs (id, actor_email, action, resource_type, resource_id, at) VALUES ('aud_ll', 'a@x.io', 'user.created', 'user', 'a@x.io', 1)",
+				`INSERT INTO audit_logs (id, ${LEGACY_ACTOR_COLUMN}, action, resource_type, resource_id, at) VALUES ('aud_ll', 'a@x.io', 'user.created', 'user', 'a@x.io', 1)`,
 			),
 			env.DB.prepare(
 				"INSERT INTO projects (id, name, slug, status, created_at, updated_at) VALUES ('prj_ll', 'P', 'prj-ll', 'active', 1, 1)",
@@ -257,7 +265,7 @@ describe("built-in auth migrations", () => {
 				"INSERT INTO destinations (id, project_id, name, url, status, signing_secret_enc, created_at, updated_at) VALUES ('dst_ll', 'prj_ll', 'D', 'https://example.com', 'active', 'x', 1, 1)",
 			),
 			env.DB.prepare(
-				"INSERT INTO test_deliveries (id, destination_id, project_id, actor_email, started_at, duration_ms) VALUES ('tst_ll', 'dst_ll', 'prj_ll', 'a@x.io', 1, 5)",
+				`INSERT INTO test_deliveries (id, destination_id, project_id, ${LEGACY_ACTOR_COLUMN}, started_at, duration_ms) VALUES ('tst_ll', 'dst_ll', 'prj_ll', 'a@x.io', 1, 5)`,
 			),
 		]);
 

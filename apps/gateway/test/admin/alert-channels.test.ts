@@ -1,7 +1,6 @@
 import type { AlertChannel } from "@hookflare/shared";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { clearAccessKeyCache } from "../../src/admin/auth/access";
 import { alertChannels } from "../../src/core/db/schema";
 import { adminApp, auditRows } from "../helpers/admin";
 import { resetAlerts } from "../helpers/alerts";
@@ -17,7 +16,6 @@ describe("alert channels API (spec §6.5)", () => {
 		) as unknown as typeof fetch,
 	});
 	beforeEach(async () => {
-		clearAccessKeyCache();
 		await resetAlerts(deps);
 	});
 

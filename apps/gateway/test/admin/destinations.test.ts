@@ -1,6 +1,5 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { clearAccessKeyCache } from "../../src/admin/auth/access";
 import { deliveries, destinations, settings } from "../../src/core/db/schema";
 import { DnsError } from "../../src/core/dns";
 import {
@@ -28,7 +27,6 @@ type Dest = {
 
 describe("admin destinations", () => {
 	beforeEach(() => {
-		clearAccessKeyCache();
 		clearSsrfCache();
 		for (const m of ["log", "warn", "error"] as const)
 			vi.spyOn(console, m).mockImplementation(() => {});
@@ -232,7 +230,6 @@ describe("admin destinations", () => {
 			},
 		});
 		const { project: p2 } = await seedPipeline(failing);
-		clearAccessKeyCache();
 		const api2 = await adminApp(failing);
 		const res = await api2.request("POST", "/destinations", {
 			project_id: p2.id,

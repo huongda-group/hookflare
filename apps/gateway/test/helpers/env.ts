@@ -1,12 +1,6 @@
 import { env } from "cloudflare:workers";
 import type { AppEnv } from "../../src/env";
 
-export const ACCESS_TEST = {
-	teamDomain: "https://test.cloudflareaccess.com",
-	aud: "test-aud",
-	admin: "admin@example.com",
-} as const;
-
 export const allowAllLimiter = {
 	limit: async () => ({ success: true }),
 } as unknown as RateLimit;

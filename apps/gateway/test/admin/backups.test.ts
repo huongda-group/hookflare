@@ -1,14 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { clearAccessKeyCache } from "../../src/admin/auth/access";
 import { backups } from "../../src/core/db/schema";
 import { adminApp, auditRows } from "../helpers/admin";
 import { fakeBackup, testDeps } from "../helpers/deps";
 import { faultyDeps } from "../helpers/faults";
 
 describe("backups API", () => {
-	beforeEach(async () => {
-		clearAccessKeyCache();
-	});
 
 	async function cleanBackups(deps: ReturnType<typeof testDeps>) {
 		await deps.db.delete(backups);

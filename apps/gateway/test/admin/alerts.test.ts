@@ -1,6 +1,5 @@
 import type { Alert, AlertDetail, Page } from "@hookflare/shared";
 import { beforeEach, describe, expect, it } from "vitest";
-import { clearAccessKeyCache } from "../../src/admin/auth/access";
 import { alerts } from "../../src/core/db/schema";
 import { adminApp } from "../helpers/admin";
 import { resetAlerts } from "../helpers/alerts";
@@ -10,7 +9,6 @@ import { seedPipeline } from "../helpers/seed";
 describe("alerts API", () => {
 	const deps = testDeps();
 	beforeEach(async () => {
-		clearAccessKeyCache();
 		await resetAlerts(deps);
 	});
 

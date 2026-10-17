@@ -298,7 +298,7 @@ export function sourceRoutes() {
 					)
 					.returning(),
 				auditInsertIfChanged(db, {
-					actor: c.var.actor?.email ?? "",
+					actor: c.var.actor?.username ?? "",
 					at: ts,
 					action: "source.secret_rotated",
 					resourceType: "source",

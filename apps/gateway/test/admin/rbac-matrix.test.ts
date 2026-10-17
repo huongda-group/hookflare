@@ -1,7 +1,6 @@
 import type { Permission, Role } from "@hookflare/shared";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
-import { clearAccessKeyCache } from "../../src/admin/auth/access";
 import {
 	alertChannels,
 	alerts,
@@ -19,9 +18,7 @@ import { seedBatch } from "../helpers/archive";
 import { testDeps } from "../helpers/deps";
 import { seedDelivery, seedPipeline } from "../helpers/seed";
 
-// Each adminApp mints fresh keys under the same kid.
 beforeEach(async () => {
-	clearAccessKeyCache();
 	clearSettingsCache();
 	const deps = testDeps();
 	await deps.db.delete(settings).where(eq(settings.key, RETRY_DEFAULTS_KEY));

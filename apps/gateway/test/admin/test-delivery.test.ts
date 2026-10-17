@@ -1,7 +1,6 @@
 import type { Page, TestDelivery } from "@hookflare/shared";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { clearAccessKeyCache } from "../../src/admin/auth/access";
 import { deliveries, destinations } from "../../src/core/db/schema";
 import { DnsError } from "../../src/core/dns";
 import { clearRetryDefaultsCache } from "../../src/core/settings";
@@ -14,7 +13,6 @@ import { seedPipeline, TEST_SIGNING_SECRET } from "../helpers/seed";
 
 describe("POST /destinations/:id/test", () => {
 	beforeEach(() => {
-		clearAccessKeyCache();
 		clearSsrfCache();
 	});
 
@@ -138,9 +136,8 @@ describe("POST /destinations/:id/test", () => {
 		const op = await adminApp(base, { role: "operator" });
 		const api = await adminApp(
 			faultyDeps(base, { d1: [{ match: /from "settings"/i }] }),
-			{ email: op.email },
+			{ username: op.username },
 		);
-		clearAccessKeyCache(); // second app minted fresh keys under the same kid
 		clearRetryDefaultsCache();
 		expect(
 			(await api.request("POST", `/destinations/${destination.id}/test`))
@@ -178,9 +175,7 @@ describe("POST /destinations/:id/test", () => {
 		for (let i = 0; i < 3; i++) {
 			await op.request("POST", `/destinations/${destination.id}/test`);
 		}
-		// Each adminApp mints fresh keys under the same kid; drop the cached
 		// keyset so the viewer's tokens verify (op makes no further calls).
-		clearAccessKeyCache();
 		const viewer = await adminApp(deps, { role: "viewer" });
 		expect(
 			(await viewer.request("POST", `/destinations/${destination.id}/test`))

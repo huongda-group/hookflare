@@ -271,7 +271,7 @@ describe("purge re-checks the batch inside the delete transaction (re-review)", 
 	it("deletes no audit row when the batch leaves verified after requireVerified", async () => {
 		await deps.db.insert(auditLogs).values({
 			id: "aud_purge_race",
-			actorEmail: "purge@test",
+			actor: "purge@test",
 			action: "settings.updated",
 			resourceType: "settings",
 			resourceId: "x",

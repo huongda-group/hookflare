@@ -10,7 +10,7 @@ import type { Role } from "../../src/core/rbac";
 function appAs(role: Role | undefined) {
 	const app = new Hono<AppBindings>();
 	app.use(async (c, next) => {
-		if (role) c.set("actor", { email: "x@example.com", role });
+		if (role) c.set("actor", { username: "x@example.com", role });
 		await next();
 	});
 	app.get("/x", requirePermission("payload.read"), (c) => c.text("ok"));

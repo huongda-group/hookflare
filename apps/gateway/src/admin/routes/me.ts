@@ -10,7 +10,7 @@ export function meRoutes() {
 		const actor = c.var.actor;
 		if (!actor) return c.json({ error: "forbidden" }, 403);
 		return c.json({
-			username: actor.email,
+			username: actor.username,
 			role: actor.role,
 			permissions: permissionsOf(actor.role),
 		} satisfies Me);

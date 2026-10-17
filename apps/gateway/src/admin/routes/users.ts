@@ -87,7 +87,7 @@ export function userRoutes() {
 		const existing = await getUser(db, email);
 		if (!existing) return c.json({ error: "not_found" }, 404);
 		const { role, disabled, reason } = body.value;
-		if (disabled === true && email === c.var.actor?.email) {
+		if (disabled === true && email === c.var.actor?.username) {
 			return c.json({ error: "self_disable" }, 409);
 		}
 		// Like a repeat Pause: nothing changes, so nothing is written or audited.
@@ -110,7 +110,7 @@ export function userRoutes() {
 		const [[row]] = await db.batch([
 			updateUserStmt(db, email, set),
 			auditInsertIfChanged(db, {
-				actor: c.var.actor?.email ?? "",
+				actor: c.var.actor?.username ?? "",
 				action,
 				resourceType: "user",
 				resourceId: email,

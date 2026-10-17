@@ -1,6 +1,5 @@
 import { asc, eq, inArray } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { clearAccessKeyCache } from "../../src/admin/auth/access";
 import { createApp } from "../../src/app";
 import {
 	auditLogs,
@@ -12,11 +11,6 @@ import { processDelivery } from "../../src/delivery/consumer";
 import { adminApp } from "../helpers/admin";
 import { type RecordingQueue, recordingQueue, testDeps } from "../helpers/deps";
 import { seedPipeline } from "../helpers/seed";
-
-// Each adminApp mints fresh keys under the same kid.
-beforeEach(() => {
-	clearAccessKeyCache();
-});
 
 describe("M3 exit criteria", () => {
 	it("replay preserves history and every replay is audited", async () => {
@@ -93,7 +87,7 @@ describe("M3 exit criteria", () => {
 			),
 		);
 		expect(audited.sort()).toEqual(replays.map((r) => r.id).sort());
-		expect(audits.every((a) => a.actorEmail === op.email && a.reason)).toBe(
+		expect(audits.every((a) => a.actor === op.username && a.reason)).toBe(
 			true,
 		);
 	});

@@ -1,6 +1,5 @@
 import type { EventSummary, WebhookEvent } from "@hookflare/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { clearAccessKeyCache } from "../../src/admin/auth/access";
 import { deliveries } from "../../src/core/db/schema";
 import { newId } from "../../src/core/ids";
 import { createLogger } from "../../src/core/log";
@@ -11,7 +10,6 @@ import { testDeps } from "../helpers/deps";
 import { seedDelivery, seedPipeline } from "../helpers/seed";
 
 beforeEach(() => {
-	clearAccessKeyCache();
 	clearSsrfCache();
 	for (const m of ["log", "warn", "error"] as const)
 		vi.spyOn(console, m).mockImplementation(() => {});

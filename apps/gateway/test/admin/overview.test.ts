@@ -1,6 +1,5 @@
 import type { Overview } from "@hookflare/shared";
 import { beforeEach, describe, expect, it } from "vitest";
-import { clearAccessKeyCache } from "../../src/admin/auth/access";
 import { alerts, destinations, statsHourly } from "../../src/core/db/schema";
 import { floorHour, HOUR_MS } from "../../src/core/db/stats";
 import { newId } from "../../src/core/ids";
@@ -8,10 +7,6 @@ import { adminApp } from "../helpers/admin";
 import { resetAlerts } from "../helpers/alerts";
 import { testDeps } from "../helpers/deps";
 import { seedDelivery, seedPipeline } from "../helpers/seed";
-
-beforeEach(() => {
-	clearAccessKeyCache();
-});
 
 const T = floorHour(1_900_000_000_000);
 const NOW = T + 30 * 60_000;

@@ -1,60 +1,63 @@
 import type { Page, User } from "@hookflare/shared";
-import { eq } from "drizzle-orm";
-import { beforeEach, describe, expect, it } from "vitest";
-import { clearAccessKeyCache } from "../../src/admin/auth/access";
+import { and, eq, ne } from "drizzle-orm";
+import { describe, expect, it } from "vitest";
 import { users } from "../../src/core/db/schema";
-import { adminApp, auditRows, uniqueEmail } from "../helpers/admin";
+import { adminApp, auditRows, uniqueUsername } from "../helpers/admin";
 import { testDeps } from "../helpers/deps";
 
-beforeEach(() => {
-	// Each adminApp mints fresh keys under the same kid.
-	clearAccessKeyCache();
-});
+/** A valid initial password (>= 12 chars); POST /users requires one. */
+const PASSWORD = "correct-horse-battery";
 
 /** Every test starts from migrations, so the only admin is whoever we create. */
 async function soleAdmin(deps: ReturnType<typeof testDeps>) {
 	const api = await adminApp(deps, { role: "admin" });
-	await deps.db.delete(users).where(eq(users.role, "admin"));
-	await deps.db.insert(users).values({
-		email: api.email,
-		role: "admin",
-		createdAt: deps.now(),
-		updatedAt: deps.now(),
-	});
+	// Drop every other admin, keeping this app's row (and session) intact.
+	await deps.db
+		.delete(users)
+		.where(and(eq(users.role, "admin"), ne(users.username, api.username)));
 	return api;
 }
 
 describe("/users", () => {
-	it("creates a user, lowercases the email, and audits it", async () => {
+	it("creates a user, lowercases the username, and audits it", async () => {
 		const deps = testDeps();
 		const api = await adminApp(deps, { role: "admin" });
-		const email = uniqueEmail("ops");
+		const username = uniqueUsername("ops");
 		const res = await api.request("POST", "/users", {
-			email: email.toUpperCase(),
+			username: username.toUpperCase(),
 			role: "operator",
+			password: PASSWORD,
 			reason: "on-call",
 		});
 		expect(res.status).toBe(201);
 		expect(await res.json<User>()).toMatchObject({
-			email,
+			username,
 			role: "operator",
 			disabled_at: null,
 		});
-		const [audit] = await auditRows(deps, email);
+		const [audit] = await auditRows(deps, username);
 		expect(audit).toMatchObject({ action: "user.created", reason: "on-call" });
-		const dup = await api.request("POST", "/users", { email, role: "viewer" });
+		const dup = await api.request("POST", "/users", {
+			username,
+			role: "viewer",
+			password: PASSWORD,
+		});
 		expect(dup.status).toBe(409);
 		expect(await dup.json()).toEqual({ error: "user_exists" });
 	});
 
-	it("matches user emails case-insensitively", async () => {
+	it("matches user usernames case-insensitively", async () => {
 		const deps = testDeps();
 		const api = await adminApp(deps, { role: "admin" });
-		const email = uniqueEmail("mixed");
-		await api.request("POST", "/users", { email, role: "viewer" });
+		const username = uniqueUsername("mixed");
+		await api.request("POST", "/users", {
+			username,
+			role: "viewer",
+			password: PASSWORD,
+		});
 		const res = await api.request(
 			"PATCH",
-			`/users/${encodeURIComponent(email.toUpperCase())}`,
+			`/users/${encodeURIComponent(username.toUpperCase())}`,
 			{
 				role: "operator",
 			},
@@ -66,53 +69,51 @@ describe("/users", () => {
 	it("changes role, disables, and re-enables with one audit row each", async () => {
 		const deps = testDeps();
 		const api = await adminApp(deps, { role: "admin" });
-		clearAccessKeyCache(); // second app minted fresh keys under the same kid
 		const target = await adminApp(deps, { role: "viewer" });
-		// The two apps hold different keys: reset the shared key cache
-		// before each request so it rebuilds from the requesting app.
-		const req = (
-			client: typeof api,
-			method: string,
-			path: string,
-			body?: unknown,
-		) => {
-			clearAccessKeyCache();
-			return client.request(method, path, body);
-		};
-		await req(api, "PATCH", `/users/${target.email}`, { role: "operator" });
-		await req(api, "PATCH", `/users/${target.email}`, { disabled: true });
-		expect((await req(target, "GET", "/me")).status).toBe(403); // immediate
-		await req(api, "PATCH", `/users/${target.email}`, { disabled: false });
-		expect((await req(target, "GET", "/me")).status).toBe(200);
-		expect((await auditRows(deps, target.email)).map((a) => a.action)).toEqual([
-			"user.role_changed",
-			"user.disabled",
-			"user.enabled",
-		]);
+		await api.request("PATCH", `/users/${target.username}`, {
+			role: "operator",
+		});
+		await api.request("PATCH", `/users/${target.username}`, {
+			disabled: true,
+		});
+		// Disabling takes effect on the very next request: the user row is read
+		// per request, so the session is rejected (401).
+		expect((await target.request("GET", "/me")).status).toBe(401);
+		await api.request("PATCH", `/users/${target.username}`, {
+			disabled: false,
+		});
+		expect((await target.request("GET", "/me")).status).toBe(200);
+		expect(
+			(await auditRows(deps, target.username)).map((a) => a.action),
+		).toEqual(["user.role_changed", "user.disabled", "user.enabled"]);
 	});
 
 	it("treats a PATCH that changes nothing as a no-op", async () => {
 		const deps = testDeps();
 		const api = await adminApp(deps, { role: "admin" });
-		const email = uniqueEmail("viewer");
+		const username = uniqueUsername("viewer");
 		await deps.db
 			.insert(users)
-			.values({ email, role: "viewer", createdAt: 1, updatedAt: 1 });
+			.values({ username, role: "viewer", createdAt: 1, updatedAt: 1 });
 		for (const body of [{ role: "viewer" }, { disabled: false }]) {
-			const res = await api.request("PATCH", `/users/${email}`, body);
+			const res = await api.request("PATCH", `/users/${username}`, body);
 			expect(res.status).toBe(200);
 			expect((await res.json<User>()).updated_at).toBe(1);
 		}
-		expect(await auditRows(deps, email)).toEqual([]);
+		expect(await auditRows(deps, username)).toEqual([]);
 	});
 
 	it("refuses to demote or disable the last active admin", async () => {
 		const deps = testDeps();
 		const api = await soleAdmin(deps);
-		const other = uniqueEmail("admin2");
-		await api.request("POST", "/users", { email: other, role: "admin" });
+		const other = uniqueUsername("admin2");
+		await api.request("POST", "/users", {
+			username: other,
+			role: "admin",
+			password: PASSWORD,
+		});
 		await api.request("PATCH", `/users/${other}`, { disabled: true });
-		const res = await api.request("PATCH", `/users/${api.email}`, {
+		const res = await api.request("PATCH", `/users/${api.username}`, {
 			role: "viewer",
 		});
 		expect(res.status).toBe(409);
@@ -120,24 +121,24 @@ describe("/users", () => {
 		const [row] = await deps.db
 			.select()
 			.from(users)
-			.where(eq(users.email, api.email));
+			.where(eq(users.username, api.username));
 		expect(row.role).toBe("admin");
 		expect(
-			(await auditRows(deps, api.email)).map((a) => a.action),
+			(await auditRows(deps, api.username)).map((a) => a.action),
 		).not.toContain("user.role_changed");
 	});
 
 	it("refuses to let an admin disable themselves", async () => {
 		const deps = testDeps();
 		const api = await adminApp(deps, { role: "admin" });
-		const res = await api.request("PATCH", `/users/${api.email}`, {
+		const res = await api.request("PATCH", `/users/${api.username}`, {
 			disabled: true,
 		});
 		expect(res.status).toBe(409);
 		expect(await res.json()).toEqual({ error: "self_disable" });
 	});
 
-	it("answers 404, not 500, for an email containing a percent sign", async () => {
+	it("answers 404, not 500, for a username containing a percent sign", async () => {
 		const api = await adminApp(testDeps(), { role: "admin" });
 		const res = await api.request(
 			"PATCH",
@@ -147,13 +148,14 @@ describe("/users", () => {
 		expect(res.status).toBe(404);
 	});
 
-	it("lists users by email with a cursor and answers 404 for an unknown user", async () => {
+	it("lists users by username with a cursor and answers 404 for an unknown user", async () => {
 		const deps = testDeps();
 		const api = await adminApp(deps, { role: "admin" });
 		for (const p of ["a", "b", "c"]) {
 			await api.request("POST", "/users", {
-				email: uniqueEmail(`list-${p}`),
+				username: uniqueUsername(`list-${p}`),
 				role: "viewer",
+				password: PASSWORD,
 			});
 		}
 		const all: string[] = [];
@@ -165,13 +167,13 @@ describe("/users", () => {
 					`/users?limit=2${cursor ? `&cursor=${cursor}` : ""}`,
 				)
 			).json();
-			all.push(...page.data.map((u) => u.email));
+			all.push(...page.data.map((u) => u.username));
 			cursor = page.next_cursor;
 		} while (cursor);
 		expect(all).toEqual([...all].sort());
 		expect(
 			(
-				await api.request("PATCH", `/users/${uniqueEmail("ghost")}`, {
+				await api.request("PATCH", `/users/${uniqueUsername("ghost")}`, {
 					role: "viewer",
 				})
 			).status,
