@@ -13,7 +13,7 @@ import { useCan } from "@/lib/permissions";
 import { qk } from "@/lib/queries/keys";
 
 export const auditSearch = z.object({
-	actor_email: z.string().optional().catch(undefined),
+	actor: z.string().optional().catch(undefined),
 	action: z.string().optional().catch(undefined),
 	resource_type: z.string().optional().catch(undefined),
 	resource_id: z.string().optional().catch(undefined),
@@ -76,7 +76,7 @@ export function AuditPage({
 		<div className="space-y-4">
 			<h1 className="text-xl font-semibold">Audit</h1>
 			<div className="flex flex-wrap gap-3">
-				{filter("actor_email", "Actor")}
+				{filter("actor", "Actor")}
 				{filter("action", "Action")}
 				{filter("resource_type", "Resource type")}
 				{filter("resource_id", "Resource ID")}
@@ -87,7 +87,7 @@ export function AuditPage({
 				empty="No audit entries match."
 				columns={[
 					{ header: "At", cell: (a) => <TimeText ms={a.at} /> },
-					{ header: "Actor", cell: (a) => a.actor_email },
+					{ header: "Actor", cell: (a) => a.actor },
 					{
 						header: "Action",
 						cell: (a) => <span className="font-mono text-xs">{a.action}</span>,

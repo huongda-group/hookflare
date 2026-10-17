@@ -32,9 +32,7 @@ export function TestDeliveryDialog({
 	const [invalid, setInvalid] = useState<string | null>(null);
 	const m = useMutation({
 		mutationFn: (payload: unknown) =>
-			api.post<
-				Omit<TestDelivery, "destination_id" | "actor_email" | "started_at">
-			>(
+			api.post<Omit<TestDelivery, "destination_id" | "actor" | "started_at">>(
 				`/destinations/${destinationId}/test`,
 				payload === undefined ? {} : { payload },
 			),

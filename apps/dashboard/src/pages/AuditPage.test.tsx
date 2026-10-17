@@ -7,7 +7,7 @@ import { apiUrl, server } from "@/test/server";
 
 const row = {
 	id: "aud_1",
-	actor_email: "admin@example.com",
+	actor: "ops-lead",
 	action: "destination.updated",
 	resource_type: "destination",
 	resource_id: "dst_1",
@@ -27,6 +27,7 @@ describe("Audit", () => {
 		);
 		const { user } = renderApp("/audit?action=destination.updated");
 		expect(await screen.findByText("destination.updated")).toBeInTheDocument();
+		expect(screen.getByText("ops-lead")).toBeInTheDocument();
 		expect(seen.get("action")).toBe("destination.updated");
 		await user.click(screen.getByRole("button", { name: "Show diff" }));
 		expect(screen.getByRole("list", { name: "JSON" })).toBeInTheDocument();

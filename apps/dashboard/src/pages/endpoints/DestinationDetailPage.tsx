@@ -156,7 +156,7 @@ function TestsSection({ destinationId }: { destinationId: string }) {
 				empty="No test deliveries yet."
 				columns={[
 					{ header: "Sent", cell: (t) => <TimeText ms={t.started_at} /> },
-					{ header: "By", cell: (t) => t.actor_email },
+					{ header: "By", cell: (t) => t.actor },
 					{
 						header: "Result",
 						cell: (t) =>

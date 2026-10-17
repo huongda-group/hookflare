@@ -1,17 +1,18 @@
-import {
-	isServiceIdentity,
-	type Page,
-	ROLES,
-	type Role,
-	type User,
-} from "@hookflare/shared";
+import { type Page, ROLES, type Role, type User } from "@hookflare/shared";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { ApiTokensDialog } from "@/components/ApiTokensDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CursorTable } from "@/components/CursorTable";
 import { TimeText } from "@/components/TimeText";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -27,7 +28,7 @@ import { useMe } from "@/lib/permissions";
 import { qk } from "@/lib/queries/keys";
 
 type Pending = {
-	email: string;
+	username: string;
 	body: { role?: Role; disabled?: boolean };
 	title: string;
 	label: string;
@@ -36,10 +37,14 @@ type Pending = {
 export function UsersTab() {
 	const qc = useQueryClient();
 	const me = useMe();
-	const [email, setEmail] = useState("");
+	const [username, setUsername] = useState("");
+	const [password, setPassword] = useState("");
 	const [role, setRole] = useState<Role>("viewer");
 	const [addError, setAddError] = useState<string | null>(null);
+	const [adding, setAdding] = useState(false);
 	const [pending, setPending] = useState<Pending | null>(null);
+	const [resetUser, setResetUser] = useState<string | null>(null);
+	const [tokensUser, setTokensUser] = useState<string | null>(null);
 	const query = useInfiniteQuery({
 		queryKey: qk.users.all,
 		queryFn: ({ pageParam }) =>
@@ -49,26 +54,47 @@ export function UsersTab() {
 	});
 	const refresh = () => qc.invalidateQueries({ queryKey: qk.users.all });
 	const add = async () => {
+		setAdding(true);
 		setAddError(null);
 		try {
-			await api.post("/users", { email: email.trim(), role });
-			setEmail("");
+			// The username is normalized like the server schema; the password
+			// is never trimmed or otherwise touched (spec M7 §6.2).
+			await api.post("/users", {
+				username: username.trim().toLowerCase(),
+				role,
+				password,
+			});
+			setUsername("");
+			setPassword("");
 			await refresh();
 		} catch (err) {
 			setAddError(errorText(err));
+		} finally {
+			setAdding(false);
 		}
 	};
 	return (
 		<div className="space-y-4">
 			<div className="flex items-end gap-3">
 				<div>
-					<Label htmlFor="u-email">Email</Label>
+					<Label htmlFor="u-username">Username</Label>
 					<Input
-						id="u-email"
-						type="email"
-						className="w-72"
-						value={email}
-						onChange={(e) => setEmail(e.target.value)}
+						id="u-username"
+						className="w-56"
+						autoComplete="off"
+						value={username}
+						onChange={(e) => setUsername(e.target.value)}
+					/>
+				</div>
+				<div>
+					<Label htmlFor="u-password">Password</Label>
+					<Input
+						id="u-password"
+						type="password"
+						className="w-56"
+						autoComplete="new-password"
+						value={password}
+						onChange={(e) => setPassword(e.target.value)}
 					/>
 				</div>
 				<Select value={role} onValueChange={(v) => setRole(v as Role)}>
@@ -83,45 +109,41 @@ export function UsersTab() {
 						))}
 					</SelectContent>
 				</Select>
-				<Button onClick={() => void add()} disabled={!email.trim()}>
+				<Button
+					onClick={() => void add()}
+					disabled={adding || !username.trim() || !password}
+				>
 					Add user
 				</Button>
 			</div>
 			{addError && <p className="text-sm text-red-700">{addError}</p>}
 			<CursorTable<User>
 				query={query}
-				rowKey={(u) => u.email}
+				rowKey={(u) => u.username}
 				empty="No users."
 				columns={[
 					{
-						header: "Email",
-						cell: (u) => (
-							<span className="flex items-center gap-2">
-								{u.email}
-								{isServiceIdentity(u.email) && (
-									<Badge variant="secondary">Service token</Badge>
-								)}
-							</span>
-						),
+						header: "Username",
+						cell: (u) => u.username,
 					},
 					{
 						header: "Role",
 						cell: (u) => (
 							<Select
 								value={u.role}
-								disabled={u.email === me?.email}
+								disabled={u.username === me?.username}
 								onValueChange={(v) =>
 									setPending({
-										email: u.email,
+										username: u.username,
 										body: { role: v as Role },
-										title: `Change ${u.email} to ${v}?`,
+										title: `Change ${u.username} to ${v}?`,
 										label: "Change role",
 									})
 								}
 							>
 								<SelectTrigger
 									className="w-32"
-									aria-label={`Role of ${u.email}`}
+									aria-label={`Role of ${u.username}`}
 								>
 									<SelectValue />
 								</SelectTrigger>
@@ -149,38 +171,58 @@ export function UsersTab() {
 					{
 						header: "",
 						cell: (u) =>
-							u.email === me?.email ? null : u.disabled_at ? (
-								<Button
-									variant="outline"
-									size="sm"
-									aria-label={`Enable ${u.email}`}
-									onClick={() =>
-										setPending({
-											email: u.email,
-											body: { disabled: false },
-											title: `Enable ${u.email}?`,
-											label: "Enable",
-										})
-									}
-								>
-									Enable
-								</Button>
-							) : (
-								<Button
-									variant="outline"
-									size="sm"
-									aria-label={`Disable ${u.email}`}
-									onClick={() =>
-										setPending({
-											email: u.email,
-											body: { disabled: true },
-											title: `Disable ${u.email}?`,
-											label: "Disable",
-										})
-									}
-								>
-									Disable
-								</Button>
+							u.username === me?.username ? null : (
+								<div className="flex gap-2">
+									<Button
+										variant="outline"
+										size="sm"
+										aria-label={`Reset password for ${u.username}`}
+										onClick={() => setResetUser(u.username)}
+									>
+										Reset password
+									</Button>
+									<Button
+										variant="outline"
+										size="sm"
+										aria-label={`API tokens for ${u.username}`}
+										onClick={() => setTokensUser(u.username)}
+									>
+										API tokens
+									</Button>
+									{u.disabled_at ? (
+										<Button
+											variant="outline"
+											size="sm"
+											aria-label={`Enable ${u.username}`}
+											onClick={() =>
+												setPending({
+													username: u.username,
+													body: { disabled: false },
+													title: `Enable ${u.username}?`,
+													label: "Enable",
+												})
+											}
+										>
+											Enable
+										</Button>
+									) : (
+										<Button
+											variant="outline"
+											size="sm"
+											aria-label={`Disable ${u.username}`}
+											onClick={() =>
+												setPending({
+													username: u.username,
+													body: { disabled: true },
+													title: `Disable ${u.username}?`,
+													label: "Disable",
+												})
+											}
+										>
+											Disable
+										</Button>
+									)}
+								</div>
 							),
 					},
 				]}
@@ -196,13 +238,109 @@ export function UsersTab() {
 				destructive={pending?.body.disabled === true}
 				onConfirm={async (reason) => {
 					if (!pending) return;
-					await api.patch(`/users/${encodeURIComponent(pending.email)}`, {
+					await api.patch(`/users/${encodeURIComponent(pending.username)}`, {
 						...pending.body,
 						...(reason ? { reason } : {}),
 					});
 					await refresh();
 				}}
 			/>
+			<ResetPasswordDialog
+				username={resetUser}
+				onOpenChange={(o) => {
+					if (!o) setResetUser(null);
+				}}
+			/>
+			{tokensUser !== null && (
+				<ApiTokensDialog
+					username={tokensUser}
+					open
+					onOpenChange={(o) => {
+						if (!o) setTokensUser(null);
+					}}
+				/>
+			)}
 		</div>
+	);
+}
+
+/** Admin reset: sets the password and signs the user out everywhere (spec M7 §6.6). */
+function ResetPasswordDialog({
+	username,
+	onOpenChange,
+}: {
+	username: string | null;
+	onOpenChange: (o: boolean) => void;
+}) {
+	const [password, setPassword] = useState("");
+	const [error, setError] = useState<string | null>(null);
+	const [busy, setBusy] = useState(false);
+	const [saved, setSaved] = useState(false);
+	const reset = async () => {
+		if (!username) return;
+		setBusy(true);
+		setError(null);
+		try {
+			await api.postVoid(`/users/${encodeURIComponent(username)}/password`, {
+				password,
+			});
+			setSaved(true);
+		} catch (err) {
+			setError(errorText(err));
+		} finally {
+			setBusy(false);
+		}
+	};
+	return (
+		<Dialog
+			open={username !== null}
+			onOpenChange={(o) => {
+				if (!o) {
+					setPassword("");
+					setError(null);
+					setSaved(false);
+				}
+				onOpenChange(o);
+			}}
+		>
+			<DialogContent>
+				<DialogHeader>
+					<DialogTitle>Reset password for {username}</DialogTitle>
+				</DialogHeader>
+				{saved ? (
+					<>
+						<p className="text-sm">
+							The password was reset. {username} was signed out everywhere; hand
+							over the new password out of band.
+						</p>
+						<DialogFooter>
+							<Button onClick={() => onOpenChange(false)}>Close</Button>
+						</DialogFooter>
+					</>
+				) : (
+					<>
+						<div>
+							<Label htmlFor="reset-password">New password</Label>
+							<Input
+								id="reset-password"
+								type="password"
+								autoComplete="new-password"
+								value={password}
+								onChange={(e) => setPassword(e.target.value)}
+							/>
+						</div>
+						{error && <p className="text-sm text-red-700">{error}</p>}
+						<DialogFooter>
+							<Button variant="outline" onClick={() => onOpenChange(false)}>
+								Cancel
+							</Button>
+							<Button disabled={busy || !password} onClick={() => void reset()}>
+								Reset password
+							</Button>
+						</DialogFooter>
+					</>
+				)}
+			</DialogContent>
+		</Dialog>
 	);
 }

@@ -62,7 +62,7 @@ describe("Destination detail", () => {
 						{
 							id: "tst_1",
 							destination_id: "dst_1",
-							actor_email: "ops@example.com",
+							actor: "ops",
 							started_at: T,
 							duration_ms: 87,
 							http_status: 204,
@@ -91,9 +91,7 @@ describe("Destination detail", () => {
 			),
 		);
 		renderApp(PATH);
-		const row = (await screen.findByText("ops@example.com")).closest(
-			"tr",
-		) as HTMLElement;
+		const row = (await screen.findByText("ops")).closest("tr") as HTMLElement;
 		expect(within(row).getByText("HTTP 204")).toBeInTheDocument();
 		expect(within(row).getByText("87 ms")).toBeInTheDocument();
 		expect(await screen.findByText("98.0%")).toBeInTheDocument();

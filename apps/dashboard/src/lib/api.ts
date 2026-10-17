@@ -62,10 +62,20 @@ export async function apiRaw(
 		const body = type.includes("json")
 			? ((await res.json()) as Record<string, unknown>)
 			: {};
-		if (res.status === 401 && !path.startsWith("/auth/")) notifyUnauthorized();
+		const code =
+			typeof body.error === "string" ? body.error : `http_${res.status}`;
+		// `POST /me/password` answers 401 `wrong_password` for a bad current
+		// password. That is a form error, not an expired session, so it must
+		// not send the user to /login (spec M7 §6.6).
+		if (
+			res.status === 401 &&
+			!path.startsWith("/auth/") &&
+			code !== "wrong_password"
+		)
+			notifyUnauthorized();
 		throw new ApiError(
 			res.status,
-			typeof body.error === "string" ? body.error : `http_${res.status}`,
+			code,
 			body.issues as Issue[] | undefined,
 			body.required as string | undefined,
 			body,
