@@ -53,8 +53,14 @@ export function apiTokenRoutes() {
 		const { db, now } = c.var.deps;
 		const username = (c.req.param("username") ?? "").trim().toLowerCase();
 		// A token belongs to an existing user; the FK would otherwise 500.
-		if (!(await getUser(db, username))) {
+		const target = await getUser(db, username);
+		if (!target) {
 			return c.json({ error: "not_found" }, 404);
+		}
+		// A token for a password-less user could never authenticate:
+		// `findTokenActor` requires `password_hash IS NOT NULL`.
+		if (target.passwordHash === null) {
+			return c.json({ error: "user_has_no_password" }, 409);
 		}
 		const { name, expires_in_days, reason } = body.value;
 		const at = now();

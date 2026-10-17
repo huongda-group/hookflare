@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { sha256Hex } from "../../../src/admin/auth/secrets";
 import { createApp } from "../../../src/app";
-import { apiTokens } from "../../../src/core/db/schema";
+import { apiTokens, users } from "../../../src/core/db/schema";
 import type { Deps } from "../../../src/deps";
 import { adminApp, auditRows, uniqueUsername } from "../../helpers/admin";
 import { testDeps } from "../../helpers/deps";
@@ -167,5 +167,31 @@ describe("/users/:username/tokens", () => {
 			{ name: "ci" },
 		);
 		expect(res.status).toBe(404);
+	});
+
+	it("refuses a token for a password-less user and stores nothing", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps, { role: "admin" });
+		const username = uniqueUsername("nopass");
+		await deps.db.insert(users).values({
+			username,
+			role: "viewer",
+			passwordHash: null,
+			passwordChangedAt: null,
+			createdAt: deps.now(),
+			updatedAt: deps.now(),
+			disabledAt: null,
+		});
+		const res = await api.request("POST", `/users/${username}/tokens`, {
+			name: "ci",
+		});
+		expect(res.status).toBe(409);
+		expect(await res.json()).toEqual({ error: "user_has_no_password" });
+		expect(
+			await deps.db
+				.select()
+				.from(apiTokens)
+				.where(eq(apiTokens.username, username)),
+		).toEqual([]);
 	});
 });

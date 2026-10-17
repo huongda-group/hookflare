@@ -451,7 +451,7 @@ describe("setSessionCookie", () => {
 		expect(loopback.headers.get("set-cookie")).not.toContain("Secure");
 	});
 
-	it("clears the cookie on the same path", async () => {
+	it("clears the cookie on the same path with matching Secure/SameSite", async () => {
 		const res = await cookieApp().request(
 			"https://hookflare.example.com/clear",
 		);
@@ -459,6 +459,17 @@ describe("setSessionCookie", () => {
 		expect(cookie).toContain(`${SESSION_COOKIE}=`);
 		expect(cookie).toContain("Path=/api/admin");
 		expect(cookie).toContain("Max-Age=0");
+		expect(cookie).toContain("SameSite=Strict");
+		expect(cookie).toContain("Secure");
+	});
+
+	it("omits Secure when clearing on localhost, like the set path", async () => {
+		const localhost = await cookieApp().request("http://localhost:8787/clear");
+		const cookie = localhost.headers.get("set-cookie") ?? "";
+		expect(cookie).toContain("SameSite=Strict");
+		expect(cookie).not.toContain("Secure");
+		const loopback = await cookieApp().request("http://127.0.0.1:8787/clear");
+		expect(loopback.headers.get("set-cookie")).not.toContain("Secure");
 	});
 });
 

@@ -130,12 +130,14 @@ export function userRoutes() {
 			},
 			at: ts,
 		});
-		// Disabling revokes the user's sessions in the same batch (spec §6.6).
-		const [[row]] =
-			disabled === true
-				? await db.batch([update, audit, deleteUserSessionsStmt(db, username)])
-				: await db.batch([update, audit]);
+		// Disabling revokes the user's sessions (spec §6.6), but only after the
+		// update is known to have applied: a rejected update must revoke
+		// nothing, so the delete runs in a second batch.
+		const [[row]] = await db.batch([update, audit]);
 		if (!row) return c.json({ error: "last_admin" }, 409);
+		if (disabled === true) {
+			await db.batch([deleteUserSessionsStmt(db, username)]);
+		}
 		return c.json(toUser(row));
 	});
 

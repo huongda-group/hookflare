@@ -149,6 +149,23 @@ describe("/users", () => {
 		expect(await res.json()).toEqual({ error: "self_disable" });
 	});
 
+	it("keeps the admin's sessions after a rejected self-disable", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps, { role: "admin" });
+		expect((await api.request("GET", "/me")).status).toBe(200);
+		const res = await api.request("PATCH", `/users/${api.username}`, {
+			disabled: true,
+		});
+		expect(res.status).toBe(409);
+		expect(
+			await deps.db
+				.select()
+				.from(sessions)
+				.where(eq(sessions.username, api.username)),
+		).toHaveLength(1);
+		expect((await api.request("GET", "/me")).status).toBe(200);
+	});
+
 	it("answers 404, not 500, for a username containing a percent sign", async () => {
 		const api = await adminApp(testDeps(), { role: "admin" });
 		const res = await api.request(

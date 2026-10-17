@@ -41,7 +41,12 @@ export function setSessionCookie(c: Context<AppBindings>, token: string): void {
 }
 
 export function clearSessionCookie(c: Context<AppBindings>): void {
-	deleteCookie(c, SESSION_COOKIE, { path: COOKIE_PATH });
+	const { hostname } = new URL(c.req.url);
+	deleteCookie(c, SESSION_COOKIE, {
+		path: COOKIE_PATH,
+		secure: !isLocalhost(hostname),
+		sameSite: "Strict",
+	});
 }
 
 /**
