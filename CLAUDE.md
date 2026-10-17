@@ -4,7 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Hookflare is an inbound webhook gateway on Cloudflare (Workers + Hono, D1, Queues, R2, Durable Objects, Access). Milestones M0 (Foundation) and M1 (Core pipeline) are done: ingress, D1 ledger via Drizzle, queue consumer with single-shot delivery, Standard Webhooks signing, SSRF guard, and a minimal admin API behind Access. M2 (Reliability) is done: retries with exponential backoff, lease fencing, DLQ consumer, dedup by provider event ID, R2 payloads, per-minute reconciler, per-destination retry policy, and pause/resume. M3 (Admin API & security) is done: users + RBAC (viewer/operator/admin) with bootstrap admins, audit_logs written in the same batch as every mutation, event search and failures views with cursors, single and bulk replay, synchronous test delivery, and source/destination secret rotation with a grace window. M4 (Dashboard) is done: React SPA served as Workers Static Assets from the same Worker, every §8 page except Archives and Alerts, `stats_hourly` rollup every 5 minutes, overview and per-destination stats, and editable retry defaults in Settings. M5a (Limiter) is done: a SQLite-backed DestinationLimiter DO per destination enforces max_in_flight and rate_limit_per_s before the lease, and a rejection is a new delayed message that never counts as an attempt. M5b (Alerts) is done: a per-minute alerts job evaluates consecutive_failures, new_dead, stuck_pending, and d1_storage, opens one incident per (rule, resource), and delivers opened/reminder/resolved notifications to Discord, Slack, and Telegram channels through an outbox. M5c (Archive & retention) is done: a daily ArchiveWorkflow marks eligible events, writes gzip NDJSON parts and a manifest to R2, verifies size, sha256, and counts, then purges D1 before R2; Settings › Storage controls retention and the Archives page lists and downloads batches. M6c (Backup & restore) is code-done: a daily `BackupWorkflow` copies every D1 table to R2 with a manifest, `scripts/restore-backup.mjs` restores a prefix into a new database, `scripts/verify-restore.mjs` checks it, and the backup/restore runbook pages exist; the live staging restore drill (and B6) are still pending.
+**1.0.0 is released** (git tag `1.0.0`, see `CHANGELOG.md`). Hookflare is an inbound webhook gateway on Cloudflare (Workers + Hono, D1, Queues, R2, Durable Objects, Workflows, Access). All milestones M0–M6 are code-complete:
+
+- **M0–M2 (pipeline & reliability):** ingress with signature verification, D1 ledger via Drizzle, queue consumer, Standard Webhooks signing, SSRF guard, retries with exponential backoff, lease fencing, DLQ consumer, dedup by provider event ID, R2 payloads, per-minute reconciler, per-destination retry policy, pause/resume.
+- **M3 (admin & security):** users + RBAC (viewer/operator/admin) with bootstrap admins, `audit_logs` in the same batch as every mutation, event search and failures views with cursors, single and bulk replay, synchronous test delivery, source/destination secret rotation with a grace window.
+- **M4 (dashboard):** React SPA served as Workers Static Assets from the same Worker, `stats_hourly` rollup every 5 minutes, overview and per-destination stats, editable retry defaults.
+- **M5 (operations):** `DestinationLimiter` DO (max_in_flight, rate_limit_per_s; a rejection never counts as an attempt); alerts job with Discord/Slack/Telegram channels through an outbox; daily `ArchiveWorkflow` (gzip NDJSON + verified manifest in R2, then purge D1) with the Archives page.
+- **M6 (production readiness):** staging config, `scripts/deploy.mjs` (restore point → build → migrate → deploy → smoke), migration safety check in CI, sink Worker and load generator (`tools/sink`, `tools/bench`), daily `BackupWorkflow` + restore/verify scripts, `/healthz` job heartbeat, and the runbook in `docs/runbook/`.
+
+Still pending after 1.0.0: the live staging drills (rollback, restore, canary), benchmark B6 and the recommended-limits results document, and the M6d production rollout. Runbook steps not yet run live are marked **(verify on staging in drill)** — keep that marker until a drill record in `docs/runbook/drills/` proves otherwise.
 
 ## Source documents and precedence
 
@@ -22,25 +30,33 @@ All commands run from the repository root.
 | `pnpm dev:dashboard` | `vite` on 5173, proxying `/api` to `wrangler dev` (run `pnpm dev` alongside) |
 | `pnpm build` | builds the dashboard into `apps/dashboard/dist` |
 | `pnpm --filter dashboard e2e` | Playwright smoke test against `wrangler dev` |
-| `pnpm test` | Vitest for every workspace |
+| `pnpm test` | Vitest for every workspace, plus `node --test scripts/test/*.test.mjs` |
 | `pnpm typecheck` | `tsc --noEmit` for every workspace |
 | `pnpm lint` / `pnpm format` | `biome check` / `biome check --write` |
 | `pnpm cf-typegen` | `wrangler types --strict-vars=false` (regenerates the committed `worker-configuration.d.ts`; run it without a local `.dev.vars`, or local secrets end up in `Env` and CI fails its staleness check) |
 | `pnpm db:migrate:local` | `wrangler d1 migrations apply DB --local` |
 | `pnpm db:generate` | `drizzle-kit generate` from `apps/gateway/src/core/db/schema.ts` into `apps/gateway/migrations/` (never hand-edit generated migrations; CI fails on drift) |
 | `pnpm db:migrate:remote` | `wrangler d1 migrations apply DB --remote` |
-| `pnpm run deploy` | `build`, `db:migrate:remote`, then `wrangler deploy` |
+| `pnpm db:migrate:remote:staging` | the same against `wrangler.staging.jsonc` |
+| `pnpm run deploy` / `pnpm deploy:staging` | `scripts/deploy.mjs`: record a restore point, `build`, remote migrations, `wrangler deploy`, smoke test (`--skip-smoke` to skip); see `docs/runbook/deploy.md` |
+| `pnpm run smoke` / `pnpm smoke:staging` | end-to-end smoke test through the sink (needs `HOOKFLARE_URL`/`HOOKFLARE_STAGING_URL`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET`, `SINK_URL`) |
 
 To run a single test: `pnpm --filter gateway exec vitest run test/core/ids.test.ts -t "strictly increasing"`.
 
 > `pnpm deploy` is a built-in pnpm command, so the deploy script must be invoked as **`pnpm run deploy`**.
 
-## Planned architecture (big picture)
+## Architecture (big picture)
 
 - **One Worker, three handlers** (DEC-7). `fetch` serves `/in/:sourceId` (public ingress), `/api/admin/v1/*` (behind Cloudflare Access + RBAC), and the dashboard as static assets. `queue` routes `hookflare-deliveries` batches to the delivery consumer and `hookflare-deliveries-dlq` batches to `delivery/dlq.ts`. `scheduled` runs the reconciler and the alerts job every minute, the rollup (`jobs/rollup.ts`) every 5 minutes, starts the archive workflow at `0 3 * * *` and the backup workflow at `0 20 * * *` (skipped while `backup_enabled` is off); the Worker also exports the `DestinationLimiter` DO and the `ArchiveWorkflow` and `BackupWorkflow` Workflow classes.
-- **Layout:** `apps/gateway` (Hono; modules `core/`, `ingress/`, `delivery/`, `admin/`, `jobs/`), `apps/dashboard` (React + Vite + Tailwind + TanStack), `packages/shared`. `ingress/` must not import from `admin/`, so ingress can later be split into its own Worker.
+- **Layout:** `apps/gateway` (Hono; modules `core/`, `ingress/`, `delivery/`, `admin/`, `jobs/`), `apps/dashboard` (React + Vite + Tailwind + TanStack), `packages/shared` (zod schemas and types shared by the API and the dashboard), `tools/sink` (throwaway fake backend for smoke tests and benchmarks), `tools/bench` (load generator and seeder), `scripts/` (deploy, smoke, migration check, backup restore/verify). `ingress/` must not import from `admin/`, so ingress can later be split into its own Worker.
 - **One deployment = one environment** (DEC-1). There is no `environment` column; staging and production are separate Workers with their own D1/R2/Queues.
 - **Data access** uses Drizzle ORM (`core/db/`); handlers get `db`, `queue`, `fetch`, `resolveDns`, and `now` from the `Deps` seam (`src/deps.ts`), never from `env` directly, so tests can inject them.
+
+## Releases
+
+- Versions follow SemVer; tags are `X.Y.Z` (annotated, no `v` prefix) on the `main` commit that ships, and each release has a section in `CHANGELOG.md` (Keep a Changelog format). The root `package.json` `version` matches the latest tag.
+- Update `CHANGELOG.md` (`## [Unreleased]`) in the same PR as any user-visible change. A release PR moves `Unreleased` under the new version and bumps `package.json`; the tag is created after it merges.
+- Keep `README.md` in sync with the code when a PR changes setup steps, bindings in `wrangler.jsonc`, env vars, or the admin API used in the quick start.
 
 ## Invariants that span multiple components
 

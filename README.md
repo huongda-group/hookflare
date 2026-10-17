@@ -5,7 +5,7 @@
 Hookflare sits between webhook providers (Stripe, GitHub, Shopify, your own services…) and your backends. It verifies each incoming webhook, persists it durably, and acknowledges it, all before your backend is involved. It then delivers the webhook with automatic retries, keeps a full delivery log, and lets you replay anything from a dashboard.
 
 > [!NOTE]
-> **Status: M5 (Operations) done.** Webhooks are received, verified, stored in D1 (and R2 for large payloads), queued, and delivered with retries, a reconciler, pause/resume, RBAC admin API, dashboard, alerts, archival, and per-destination limits. M6 (Production readiness) is in progress.
+> **1.0.0 — first release.** The full pipeline, admin API, dashboard, alerts, archival, backups, and the operations runbook are in place. See [`CHANGELOG.md`](CHANGELOG.md). The live staging drills (rollback, restore, canary) are still pending; runbook steps not yet run live are marked **(verify on staging in drill)**.
 
 Operations runbook: [`docs/runbook/`](docs/runbook/).
 
@@ -24,13 +24,13 @@ When your backend goes down, deploys, or gets overloaded, webhook providers retr
 
 | Area | What you get |
 |---|---|
-| **Ingress** | One public URL per source; HMAC / token / no-auth verification on the raw body; deduplication by provider event ID; body size limits and rate limits |
+| **Ingress** | One public URL per source; `hmac` (SHA-1/256/512, hex or base64) / `token` (header or query) / `none` verification on the raw body; deduplication by provider event ID (from a header or a JSON path); body size limit (1 MiB default, up to 10 MiB per source); 100 requests / 10 s per source |
 | **Delivery** | At-least-once delivery; [Standard Webhooks](https://www.standardwebhooks.com/) signing toward your backend; per-destination timeout, retry budget, backoff, concurrency, and rate limit |
 | **Retry & DLQ** | Retries on 408/429/5xx, network errors, and timeouts (honoring `Retry-After`); other 3xx/4xx responses fail immediately; events that exhaust their retries become dead-lettered |
 | **Recovery** | A cron reconciler re-enqueues stuck, lost, or never-enqueued deliveries; pausing an endpoint holds its deliveries and resuming it releases them |
-| **Dashboard** | Overview stats and trends, event search, delivery timelines, a failures / dead-letter view, single and bulk replay, endpoint management |
+| **Dashboard** | Overview stats and trends, projects and endpoints, event search, delivery timelines, a failures / dead-letter view, single and bulk replay, alerts, archives, audit log, users, and settings |
 | **Security** | Cloudflare Access login, Admin / Operator / Viewer roles, audit log for every change, encrypted secrets, SSRF protection, HTTPS-only destinations, credential headers stripped |
-| **Operations** | Alerts sent to Slack, Discord, or any webhook; daily archival of old data to R2; configurable retention |
+| **Operations** | Alerts (consecutive failures, new dead letters, stuck deliveries, D1 storage, stuck archive, stale backup) to Discord, Slack, or Telegram; daily archival of old data to R2 with configurable retention; daily D1 backup to R2 with restore scripts; `/healthz` with a job heartbeat |
 
 ## How it works
 
@@ -45,7 +45,7 @@ Provider ──POST /in/:sourceId──▶ Ingress ──▶ D1 ledger (+ R2 for
                                              D1 attempt log ──▶ dead letter after retry budget
 
 Dashboard ──(Cloudflare Access)──▶ Admin API ──▶ D1 / R2
-Cron ──▶ reconcile · alerts · stats rollup · archive & retention
+Cron ──▶ reconcile · alerts (1 min) · stats rollup (5 min) · archive (03:00 UTC) · D1 backup (20:00 UTC)
 ```
 
 D1 is the source of truth. The queue is only a transport, so the reconciler can always rebuild work from the database. Your backend must be idempotent: deduplicate by the `X-Webhook-Event-ID` (or `webhook-id`) header, because at-least-once delivery means the same event can occasionally arrive more than once.
@@ -53,70 +53,100 @@ D1 is the source of truth. The queue is only a transport, so the reconciler can 
 ## Tech stack
 
 - **Runtime:** Cloudflare Workers, [Hono](https://hono.dev/), TypeScript
-- **Storage:** Cloudflare D1 (ledger), R2 (large payloads and archives), Queues (delivery), Durable Objects (per-destination limiter)
+- **Storage:** Cloudflare D1 (ledger, via Drizzle ORM), R2 (large payloads, archives, and backups), Queues (delivery), Durable Objects (per-destination limiter), Workflows (archive and backup)
 - **Auth:** Cloudflare Access + server-side RBAC
 - **Dashboard:** React, Vite, Tailwind CSS, TanStack Router / Query
-- **Tooling:** pnpm workspaces, Wrangler, Vitest with `@cloudflare/vitest-plugin`
+- **Tooling:** pnpm workspaces, Wrangler, Vitest with `@cloudflare/vitest-plugin`, Playwright, Biome
 
-## Getting started
+## Installation
 
-> [!NOTE]
-> These steps describe the current M2 setup. Exact commands, resource names, and config files may still evolve as later milestones (Durable Objects) land.
+Two paths: run everything locally in a few minutes (no Cloudflare account needed), or deploy your own instance to Cloudflare.
 
 ### Prerequisites
 
-- A Cloudflare account with **Workers Paid** (recommended for 14-day queue retention)
-- A Cloudflare **Zero Trust** organization for Access
-- Node.js LTS, [pnpm](https://pnpm.io/), and [Wrangler](https://developers.cloudflare.com/workers/wrangler/)
+- Node.js 24 (see [`.nvmrc`](.nvmrc)) and [pnpm](https://pnpm.io/) (`corepack enable` picks the pinned version)
+- `git`, `openssl`, `curl`, and `jq` for the examples below
+- For a Cloudflare deployment: a Cloudflare account on **Workers Paid** (Queues, Durable Objects, and Workflows; 14-day queue retention) and a **Zero Trust** organization for Access
 
-### 1. Create Cloudflare resources
+Wrangler is a dev dependency, so `pnpm exec wrangler` needs no global install.
 
-Each deployment is one isolated environment. For another independent deployment, use a separate copy of `wrangler.jsonc` with its own resource names and IDs.
+### Option A: run locally
 
 ```bash
+git clone https://github.com/huongda-group/hookflare.git
+cd hookflare
+pnpm install
+cp apps/gateway/.dev.vars.example apps/gateway/.dev.vars
+# Set SECRETS_KEY to the output of: openssl rand -base64 32
+# Set ACCESS_DEV_EMAIL and BOOTSTRAP_ADMIN_EMAILS to the same email
+pnpm db:migrate:local   # applies migrations to local D1
+pnpm dev                # gateway on http://localhost:8787 (admin API + built dashboard)
+```
+
+`ACCESS_DEV_EMAIL` skips the Access JWT check only for requests to `localhost`/`127.0.0.1`, and that email must also be in `BOOTSTRAP_ADMIN_EMAILS` to get the admin role. Local D1, R2, Queues, Durable Objects, and Workflows are all simulated by `wrangler dev`.
+
+For dashboard development with hot reload, also run `pnpm dev:dashboard` and open http://localhost:5173 (Vite proxies `/api` to the Worker).
+
+Check it works:
+
+```bash
+curl http://localhost:8787/healthz   # {"status":"ok",...}
+pnpm test && pnpm typecheck && pnpm lint
+```
+
+### Option B: deploy to Cloudflare
+
+Each deployment is one isolated environment (production and staging are separate Workers with their own resources). The steps below are for production with [`apps/gateway/wrangler.jsonc`](apps/gateway/wrangler.jsonc); for staging use [`wrangler.staging.jsonc`](apps/gateway/wrangler.staging.jsonc), the `-staging` resource names, and `pnpm deploy:staging`. The full procedure, including the sink Worker and service token used by smoke tests, is in [`docs/runbook/setup.md`](docs/runbook/setup.md).
+
+**1. Log in and create resources**
+
+```bash
+pnpm exec wrangler login
 pnpm exec wrangler d1 create hookflare
 pnpm exec wrangler queues create hookflare-deliveries
 pnpm exec wrangler queues create hookflare-deliveries-dlq
 pnpm exec wrangler r2 bucket create hookflare-payloads
+pnpm exec wrangler r2 bucket create hookflare-backups
 ```
 
-The ingress rate limiter (`INGRESS_LIMITER`, 100 requests per 10 s per source) is declared in `wrangler.jsonc` and needs no setup. The cron trigger (`* * * * *`, reconciler) is likewise declared in `wrangler.jsonc` and deployed with the Worker.
+Put the `database_id` printed by `d1 create` into `apps/gateway/wrangler.jsonc` → `d1_databases[0].database_id` (the committed value is the maintainers' production database). The ingress rate limiter, cron triggers, the `DestinationLimiter` Durable Object, and the `hookflare-archive`/`hookflare-backup` Workflows are declared in the config and created by the deploy.
 
-Replace the committed `database_id` in `apps/gateway/wrangler.jsonc` (the maintainers' production database) with the ID from that command.
-
-Run Wrangler from the repository root with `pnpm exec wrangler … --config apps/gateway/wrangler.jsonc`, or `cd apps/gateway` first.
-
-### 2. Configure secrets
-
-`SECRETS_KEY` is 32 random bytes, base64-encoded. Generate one with:
+**2. Set the encryption key**
 
 ```bash
-openssl rand -base64 32
-```
-
-Then store it as a Worker secret (run from the repository root):
-
-```bash
+openssl rand -base64 32   # keep this value in your password manager
 pnpm exec wrangler secret put SECRETS_KEY --config apps/gateway/wrangler.jsonc
 ```
 
-For local development, copy `apps/gateway/.dev.vars.example` to `apps/gateway/.dev.vars` and fill in a key.
+`SECRETS_KEY` encrypts source secrets, signing secrets, and alert channel configs. A backup cannot replace it: without it a restored database is unreadable.
 
-### 3. Protect the dashboard with Cloudflare Access
+**3. Protect the dashboard with Cloudflare Access**
 
-Create an Access application that covers the dashboard (`/`) and the admin API (`/api/admin/*`). Bypass (leave public) `/in/*` and `/healthz`, because webhook providers and uptime monitors must be able to reach them without logging in.
+In Zero Trust, create a self-hosted Access application on the Worker's hostname that covers `/` and `/api/admin/*`, with **bypass** policies for `/in/*` and `/healthz` (webhook providers and uptime monitors must reach them without logging in). Then set in `apps/gateway/wrangler.jsonc` → `vars`:
 
-Then set the Access values in `apps/gateway/wrangler.jsonc` → `vars`: `ACCESS_TEAM_DOMAIN` (`https://<team>.cloudflareaccess.com`), `ACCESS_AUD` (the application's AUD tag), and `BOOTSTRAP_ADMIN_EMAILS` (comma-separated). The admin API fails closed (`500`) until both Access values are set. For local development, set `ACCESS_DEV_EMAIL` in `.dev.vars`; it is honored only on `localhost`. If the ingress hostname differs from the admin hostname, set `PUBLIC_BASE_URL` (e.g. `https://hooks.example.com`) so `ingress_url` in admin responses points at it.
+| Var | Value |
+|---|---|
+| `ACCESS_TEAM_DOMAIN` | `https://<team>.cloudflareaccess.com` |
+| `ACCESS_AUD` | the application's AUD tag |
+| `BOOTSTRAP_ADMIN_EMAILS` | comma-separated emails that become admins on first login |
+| `PUBLIC_BASE_URL` | optional; the ingress origin (e.g. `https://hooks.example.com`) when it differs from the admin hostname |
 
-### 4. Migrate and deploy
+The admin API fails closed (`500`) until both Access values are set.
+
+**4. Deploy**
 
 ```bash
-pnpm install
-pnpm run deploy   # applies remote D1 migrations, then deploys the Worker
-curl https://<your-worker-domain>/healthz   # {"status":"ok","version":"..."}
+pnpm run deploy -- --skip-smoke   # first deploy: no sink or service token yet
+curl https://<your-worker-domain>/healthz   # {"status":"ok","version":"<worker version id>"}
 ```
 
-### 5. Receive your first webhook
+`pnpm run deploy` runs [`scripts/deploy.mjs`](scripts/deploy.mjs): it records a restore point (D1 Time Travel bookmark and the live Worker version), builds the dashboard, applies remote D1 migrations, deploys the Worker, smoke-tests, and prints the exact rollback commands. Later deploys should run the smoke test; see [`docs/runbook/deploy.md`](docs/runbook/deploy.md). (`pnpm deploy` is a built-in pnpm command, so always use `pnpm run deploy`.)
+
+Open `https://<your-worker-domain>/`, log in through Access with a bootstrap admin email, and continue in the dashboard: create a project, a destination, and a source, then add alert channels and review Settings › Storage (retention and backups).
+
+### Receive your first webhook
+
+This uses the local instance from option A. On a deployed Worker, replace the host and call the admin API with [`cloudflared access curl`](https://developers.cloudflare.com/cloudflare-one/applications/non-http/cloudflared-authentication/) or an Access service token.
 
 ```bash
 API=http://localhost:8787/api/admin/v1
@@ -137,13 +167,43 @@ curl -i -X POST "$INGRESS_URL" -H 'content-type: application/json' -H "x-signatu
 # → 202 {"event_id":"evt_..."}; then GET $API/events/<event_id> shows the delivery and its attempt
 ```
 
-On a deployed Worker, replace the host and drop nothing else — Access adds the JWT for browser sessions; for `curl`, use `cloudflared access curl`.
+Destination URLs must be public HTTPS (the SSRF guard rejects private addresses), so point the destination at a real endpoint or a request bin. Verify the signature in your backend with any [Standard Webhooks library](https://github.com/standard-webhooks/standard-webhooks#reference-implementations). Source changes made with `PATCH` can take up to 30 seconds to reach ingress.
 
-Verify the signature in your backend with any [Standard Webhooks library](https://github.com/standard-webhooks/standard-webhooks#reference-implementations).
+### Install with an AI coding agent
 
-Source changes made with `PATCH` can take up to 30 seconds to reach ingress.
+Paste this prompt into Claude Code, Codex, or a similar agent running in an empty directory. It installs and verifies a local instance, and stops before anything that touches your Cloudflare account.
+
+```text
+Install Hookflare (https://github.com/huongda-group/hookflare), an inbound webhook
+gateway for Cloudflare Workers, and verify it runs locally.
+
+1. Check prerequisites: Node.js 24 (`.nvmrc`), pnpm via `corepack enable`, git,
+   openssl, curl, jq. Report anything missing instead of installing system
+   packages without asking me.
+2. Clone the repo (latest release: `git checkout 1.0.0`) and run `pnpm install`
+   at the repository root.
+3. Copy `apps/gateway/.dev.vars.example` to `apps/gateway/.dev.vars`. Set
+   SECRETS_KEY to a fresh `openssl rand -base64 32`, and set ACCESS_DEV_EMAIL and
+   BOOTSTRAP_ADMIN_EMAILS to the same email (ask me which one). Never commit
+   `.dev.vars` or print the key back to me.
+4. Run `pnpm db:migrate:local`, then start `pnpm dev` in the background and
+   wait until `curl http://localhost:8787/healthz` returns "status":"ok".
+5. Follow the README section "Receive your first webhook" against
+   http://localhost:8787 and confirm ingress returns 202 with an event_id.
+6. Run `pnpm test`, `pnpm typecheck`, and `pnpm lint`; report any failure with
+   its output instead of changing code to make it pass.
+7. Stop. Do NOT run `wrangler login`, create Cloudflare resources, set secrets,
+   or deploy unless I explicitly ask. If I do, follow README "Option B" and
+   `docs/runbook/setup.md` step by step, show me each command that changes my
+   Cloudflare account before running it, and use `pnpm run deploy`
+   (never `pnpm deploy`).
+
+Finish with a short summary: what was installed, the local URLs, and what is
+left for a Cloudflare deployment.
 
 ## Dashboard
+
+Pages: Overview, Projects, Endpoints (sources and destinations), Events, Failures, Alerts, Archives, Audit log, and Settings (retry defaults, storage and backups, users). What a user can do depends on their role: **viewer** reads events and deliveries, **operator** also sees payloads, replays, and pauses/resumes destinations, **admin** also changes configuration (projects, endpoints, alert channels), manages users and settings, and reads the audit log.
 
 For local development, run `pnpm dev` with `ACCESS_DEV_EMAIL` set in `apps/gateway/.dev.vars`, plus `pnpm dev:dashboard` (Vite on port 5173, proxying `/api` to the Worker).
 
@@ -173,10 +233,10 @@ Pausing a destination (`POST /api/admin/v1/destinations/:id/pause`) holds its de
 | **M0: Foundation** | Monorepo, Wrangler config, migrations, CI | Done |
 | **M1: Core pipeline** | Ingress, D1 ledger, queue, single-shot delivery, signing, SSRF guard | Done |
 | **M2: Reliability** | Retries, dead letter, idempotency, R2 payloads, reconciler, pause/resume | Done |
-| **M3: Admin API & security** | Access + RBAC, audit log, replay, test delivery, secret rotation | Planned |
-| **M4: Dashboard** | All dashboard pages, stats rollups | Planned |
-| **M5: Operations** | Alerting, R2 archival, per-destination concurrency and rate limits | Planned |
-| **M6: Production readiness** | Benchmarks, backup/restore, runbook, uptime monitoring | In progress (M6a) |
+| **M3: Admin API & security** | Access + RBAC, audit log, replay, test delivery, secret rotation | Done |
+| **M4: Dashboard** | All dashboard pages, stats rollups | Done |
+| **M5: Operations** | Alerting, R2 archival, per-destination concurrency and rate limits | Done |
+| **M6: Production readiness** | Staging, deploy & rollback, benchmarks, backup/restore, runbook, uptime monitoring | Code done (1.0.0); live staging drills pending |
 
 Full details: [`docs/superpowers/specs/2026-10-14-hookflare-roadmap.md`](docs/superpowers/specs/2026-10-14-hookflare-roadmap.md). The original system spec is in [`DESIGN.md`](DESIGN.md).
 
@@ -186,7 +246,17 @@ Hookflare is deliberately **not** an integration platform. The following are out
 
 ## Contributing
 
-The project is in development (M5 done, M6 in progress), and feedback on the [roadmap](docs/superpowers/specs/2026-10-14-hookflare-roadmap.md) is very welcome. Please open an issue to discuss a change before you send a pull request.
+1.0.0 is the first release, and feedback on the [roadmap](docs/superpowers/specs/2026-10-14-hookflare-roadmap.md) is very welcome. Please open an issue to discuss a change before you send a pull request.
+
+## Releases
+
+Releases follow [SemVer](https://semver.org/) and are tagged `X.Y.Z` (no `v` prefix) on `main`. Release notes live in [`CHANGELOG.md`](CHANGELOG.md).
+
+| Version | Date | Highlights |
+|---|---|---|
+| [1.0.0](CHANGELOG.md#100---2026-10-17) | 2026-10-17 | First release: milestones M0–M6 |
+
+To run a specific release, check out its tag before installing: `git checkout 1.0.0`.
 
 ## License
 
