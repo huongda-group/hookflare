@@ -13,6 +13,7 @@ export type PollOptions = {
 
 export function smokeEnv(
 	env?: Record<string, string | undefined>,
+	options?: { urlVar?: string },
 ): SmokeEnv | null;
 
 export function pollUntil<T>(
@@ -21,3 +22,10 @@ export function pollUntil<T>(
 ): Promise<T>;
 
 export function runId(): string;
+
+export function smokeUrlVar(worker: string): string;
+
+export function checkSmokeTarget(
+	url: string,
+	target: { worker: string; publicBaseUrl: string },
+): void;

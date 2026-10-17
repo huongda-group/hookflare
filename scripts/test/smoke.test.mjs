@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+	checkSmokeTarget,
 	httpSmokeApi,
 	pollUntil,
 	runSmoke,
 	signStandardWebhook,
 	smokeEnv,
+	smokeUrlVar,
 } from "../lib/smoke.mjs";
 
 /**
@@ -366,6 +368,64 @@ describe("smokeEnv", () => {
 				clientSecret: "secret",
 				sinkUrl: "https://sink.example.com",
 			},
+		);
+	});
+
+	it("reads the URL from the given variable", () => {
+		const env = {
+			HOOKFLARE_URL: "https://prod.example.com",
+			HOOKFLARE_STAGING_URL: "https://staging.example.com",
+			CF_ACCESS_CLIENT_ID: "id",
+			CF_ACCESS_CLIENT_SECRET: "secret",
+			SINK_URL: "https://sink.example.com",
+		};
+		assert.equal(
+			smokeEnv(env, { urlVar: "HOOKFLARE_STAGING_URL" })?.url,
+			"https://staging.example.com",
+		);
+		const { HOOKFLARE_STAGING_URL: _, ...prodOnly } = env;
+		assert.equal(smokeEnv(prodOnly, { urlVar: "HOOKFLARE_STAGING_URL" }), null);
+	});
+});
+
+describe("smokeUrlVar", () => {
+	it("derives the URL variable from the worker name", () => {
+		assert.equal(smokeUrlVar("hookflare"), "HOOKFLARE_URL");
+		assert.equal(smokeUrlVar("hookflare-staging"), "HOOKFLARE_STAGING_URL");
+	});
+});
+
+describe("checkSmokeTarget", () => {
+	it("accepts the worker's own workers.dev host", () => {
+		checkSmokeTarget("https://hookflare-staging.acme.workers.dev", {
+			worker: "hookflare-staging",
+			publicBaseUrl: "",
+		});
+	});
+
+	it("rejects another worker's workers.dev host", () => {
+		assert.throws(
+			() =>
+				checkSmokeTarget("https://hookflare.acme.workers.dev", {
+					worker: "hookflare-staging",
+					publicBaseUrl: "",
+				}),
+			/smoke: .*hookflare\.acme\.workers\.dev.* is not worker hookflare-staging/,
+		);
+	});
+
+	it("requires the PUBLIC_BASE_URL origin when the config sets one", () => {
+		checkSmokeTarget("https://hooks.example.com/", {
+			worker: "hookflare",
+			publicBaseUrl: "https://hooks.example.com",
+		});
+		assert.throws(
+			() =>
+				checkSmokeTarget("https://staging-hooks.example.com", {
+					worker: "hookflare",
+					publicBaseUrl: "https://hooks.example.com",
+				}),
+			/smoke: .* does not match PUBLIC_BASE_URL https:\/\/hooks\.example\.com/,
 		);
 	});
 });

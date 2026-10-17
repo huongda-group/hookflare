@@ -1,10 +1,19 @@
 #!/usr/bin/env node
-import { httpSmokeApi, runSmoke, smokeEnv } from "./lib/smoke.mjs";
 /**
- * Post-deploy smoke test CLI. Reads HOOKFLARE_URL, CF_ACCESS_CLIENT_ID,
- * CF_ACCESS_CLIENT_SECRET, and SINK_URL from the env; --config selects the
- * gateway config (used for the worker name in logs only).
+ * Post-deploy smoke test CLI. --config selects the gateway config; the
+ * gateway URL comes from that Worker's variable (`smokeUrlVar`:
+ * `HOOKFLARE_URL` for `hookflare`, `HOOKFLARE_STAGING_URL` for
+ * `hookflare-staging`), and it must match the config (`checkSmokeTarget`).
+ * CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET, and SINK_URL come from the
+ * env as well.
  */
+import {
+	checkSmokeTarget,
+	httpSmokeApi,
+	runSmoke,
+	smokeEnv,
+	smokeUrlVar,
+} from "./lib/smoke.mjs";
 import { readConfig } from "./lib/wrangler.mjs";
 
 /**
@@ -24,17 +33,19 @@ const config = option(
 	"--config",
 	"apps/gateway/wrangler.jsonc",
 );
-let worker = config;
-try {
-	worker = readConfig(config).name;
-} catch {
-	// Env, not config, drives the smoke test; keep going with the raw path.
-}
-const env = smokeEnv();
+const { name: worker, publicBaseUrl } = readConfig(config);
+const urlVar = smokeUrlVar(worker);
+const env = smokeEnv(process.env, { urlVar });
 if (env === null) {
 	console.error(
-		"smoke skipped: set HOOKFLARE_URL, CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET, SINK_URL",
+		`smoke: set ${urlVar}, CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET, SINK_URL`,
 	);
+	process.exit(1);
+}
+try {
+	checkSmokeTarget(env.url, { worker, publicBaseUrl });
+} catch (err) {
+	console.error(err instanceof Error ? err.message : String(err));
 	process.exit(1);
 }
 console.log(`smoke: worker ${worker} url ${env.url}`);

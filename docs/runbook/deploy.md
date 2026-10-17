@@ -23,15 +23,26 @@ against live staging.
 2. **build** — runs `pnpm build` (dashboard SPA + gateway).
 3. **migrate** — runs `wrangler d1 migrations apply DB --remote` with the
    selected config. Migrations only ever move forward; see
-   [migrations.md](migrations.md).
-4. **deploy** — runs `wrangler deploy` with the selected config, then reads
-   the new version from `wrangler deployments list --json`.
-5. **smoke** — runs the smoke test when `HOOKFLARE_URL`,
-   `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET`, and `SINK_URL` are set;
-   otherwise prints a warning and skips (so a first-time deployment works).
-   See below.
+   [migrations.md](migrations.md). Wrangler's output is streamed.
+4. **deploy** — runs `wrangler deploy` with the selected config (output
+   streamed), then reads the new version from `wrangler deployments list
+   --json`.
+5. **smoke** — runs the smoke test (see below). If the smoke env vars are
+   missing the deploy fails **before any step runs**; pass `--skip-smoke`
+   (e.g. a first-time deployment before the service token exists) to deploy
+   without it, which prints a loud notice and records `"smoke": "skipped"`.
 6. **report** — writes `.deploy/<timestamp>.json` (git-ignored) with the
-   timestamp, config, worker name, D1 name, deployed version, and bookmark.
+   timestamp, config, worker name, D1 name, `previousVersion` (live before
+   the deploy; the rollback target), `newVersion`, bookmark, smoke result,
+   and the rollback commands, and prints those rollback commands.
+
+The record step fails when the live deployment is a gradual split (no
+version at 100%): finish or roll back the gradual deployment first, so the
+restore point names a single version.
+
+```bash
+node scripts/deploy.mjs --config apps/gateway/wrangler.staging.jsonc --skip-smoke
+```
 
 ## Smoke test
 
@@ -40,9 +51,14 @@ pnpm smoke:staging   # node scripts/smoke.mjs --config apps/gateway/wrangler.sta
 pnpm run smoke        # production (verify: same script, production config)
 ```
 
-Export the four env vars first: `HOOKFLARE_URL` (worker origin),
-`CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` (service token),
-`SINK_URL` (sink origin). The script reuses the project with slug `smoke`
+Export the four env vars first: the gateway origin, `CF_ACCESS_CLIENT_ID` /
+`CF_ACCESS_CLIENT_SECRET` (service token), and `SINK_URL` (sink origin).
+The gateway origin variable is named after the Worker in the config, so a
+URL left in the shell can never smoke-test the wrong environment:
+`HOOKFLARE_URL` for `hookflare` (production) and `HOOKFLARE_STAGING_URL`
+for `hookflare-staging`. The URL must also match the config: its origin
+must equal `vars.PUBLIC_BASE_URL` when that is set, and a `*.workers.dev`
+host must start with the Worker name. The script reuses the project with slug `smoke`
 and, inside it, the destination and `hmac` source named `smoke` (creating
 them on the first run): the destination is repointed at a fresh sink run
 and the source secret is rotated to a new per-run secret with no grace
@@ -58,9 +74,15 @@ A failed step exits non-zero and prints the manual rollback commands with
 the recorded values, for example:
 
 ```text
-rollback: wrangler rollback <version> --config apps/gateway/wrangler.staging.jsonc
+rollback: wrangler rollback <previousVersion> --config apps/gateway/wrangler.staging.jsonc
 rollback: wrangler d1 time-travel restore <d1-name> --bookmark=<bookmark> --config apps/gateway/wrangler.staging.jsonc
 ```
+
+It lists only what the started steps may have changed: the Worker
+rollback once the deploy step started, the D1 restore once the migrate
+step started. A failure in record or build prints that there is nothing to
+roll back. The Worker rollback always targets the version that was live
+before the deploy, never the new one.
 
 The script **never runs them** — undoing a release stays a human decision,
 because a rollback may be wrong when a migration already ran. Decide with

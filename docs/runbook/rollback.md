@@ -24,11 +24,12 @@ against a contracted schema (or a migrated DO class) breaks.
 ## Procedure (verify on staging in drill)
 
 1. **Decide** with the table above. Find the restore point: the failed
-   deploy printed it, and it is stored in `.deploy/<timestamp>.json`
-   (`version` + `bookmark`, git-ignored).
-2. **Roll back the Worker** to the recorded version:
+   deploy printed it (a successful deploy prints it in its report too), and
+   it is stored in `.deploy/<timestamp>.json` (`previousVersion` +
+   `bookmark`, plus the ready-made `rollback` commands; git-ignored).
+2. **Roll back the Worker** to the version live before the deploy:
    ```bash
-   wrangler rollback <version> --config apps/gateway/wrangler.staging.jsonc
+   wrangler rollback <previousVersion> --config apps/gateway/wrangler.staging.jsonc
    ```
 3. **Smoke-test**:
    ```bash

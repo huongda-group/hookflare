@@ -19,12 +19,13 @@ import { parseJsonc } from "./jsonc.mjs";
 
 /**
  * Run `pnpm exec wrangler ...args --config <config>` and resolve with the
- * exit code plus captured output.
+ * exit code plus captured output. With `stream`, output is also echoed to
+ * this process's stdout/stderr as it arrives, so long steps are not silent.
  * @param {string[]} args
- * @param {WranglerOptions} options
+ * @param {WranglerOptions & { stream?: boolean }} options
  * @returns {Promise<WranglerResult>}
  */
-export function runWrangler(args, { config }) {
+export function runWrangler(args, { config, stream = false }) {
 	return new Promise((resolve, reject) => {
 		const child = spawn(
 			"pnpm",
@@ -37,9 +38,15 @@ export function runWrangler(args, { config }) {
 		let stderr = "";
 		child.stdout.on("data", (chunk) => {
 			stdout += chunk;
+			if (stream) {
+				process.stdout.write(chunk);
+			}
 		});
 		child.stderr.on("data", (chunk) => {
 			stderr += chunk;
+			if (stream) {
+				process.stderr.write(chunk);
+			}
 		});
 		child.on("error", reject);
 		child.on("close", (code) => {
@@ -50,12 +57,13 @@ export function runWrangler(args, { config }) {
 
 /**
  * Names read from a gateway wrangler config.
- * @typedef {{ name: string, d1Name: string }} WorkerConfig
+ * @typedef {{ name: string, d1Name: string, publicBaseUrl: string }} WorkerConfig
  */
 
 /**
- * Read a wrangler config and return the Worker name plus the first D1
- * database name. Throws when either is missing.
+ * Read a wrangler config and return the Worker name, the first D1
+ * database name, and `vars.PUBLIC_BASE_URL` ("" when unset). Throws when
+ * the name or D1 database is missing.
  * @param {string} path
  * @returns {WorkerConfig}
  */
@@ -74,5 +82,11 @@ export function readConfig(path) {
 	if (typeof d1Name !== "string" || d1Name.length === 0) {
 		throw new Error(`wrangler: ${path} has no d1_databases entry`);
 	}
-	return { name, d1Name };
+	const vars = /** @type {Record<string, unknown> | undefined} */ (parsed.vars);
+	const base = vars?.PUBLIC_BASE_URL;
+	return {
+		name,
+		d1Name,
+		publicBaseUrl: typeof base === "string" ? base : "",
+	};
 }

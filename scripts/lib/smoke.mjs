@@ -14,13 +14,15 @@
 
 /**
  * Read the smoke env from a `process.env`-shaped object. Returns null when
- * any of `HOOKFLARE_URL`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET`,
- * or `SINK_URL` is missing.
+ * any of the URL variable (`HOOKFLARE_URL` by default; see `smokeUrlVar`),
+ * `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET`, or `SINK_URL` is
+ * missing.
  * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} [env]
+ * @param {{ urlVar?: string }} [options]
  * @returns {SmokeEnv | null}
  */
-export function smokeEnv(env = process.env) {
-	const url = env.HOOKFLARE_URL;
+export function smokeEnv(env = process.env, { urlVar = "HOOKFLARE_URL" } = {}) {
+	const url = env[urlVar];
 	const clientId = env.CF_ACCESS_CLIENT_ID;
 	const clientSecret = env.CF_ACCESS_CLIENT_SECRET;
 	const sinkUrl = env.SINK_URL;
@@ -28,6 +30,41 @@ export function smokeEnv(env = process.env) {
 		return null;
 	}
 	return { url, clientId, clientSecret, sinkUrl };
+}
+
+/**
+ * Gateway URL variable for a Worker: its name upper-cased with `-` as `_`,
+ * plus `_URL` (`hookflare` → `HOOKFLARE_URL`, `hookflare-staging` →
+ * `HOOKFLARE_STAGING_URL`). Per-Worker names keep a production URL left in
+ * the shell from smoke-testing a staging deploy, and vice versa.
+ * @param {string} worker
+ * @returns {string}
+ */
+export function smokeUrlVar(worker) {
+	return `${worker.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_URL`;
+}
+
+/**
+ * Throw unless the smoke URL plausibly belongs to the Worker being tested:
+ * it must be the config's `PUBLIC_BASE_URL` origin when that is set, and a
+ * `*.workers.dev` URL must name this Worker in its first label.
+ * @param {string} url
+ * @param {{ worker: string, publicBaseUrl: string }} target
+ */
+export function checkSmokeTarget(url, { worker, publicBaseUrl }) {
+	const origin = new URL(url).origin;
+	if (publicBaseUrl) {
+		const expected = new URL(publicBaseUrl).origin;
+		if (origin !== expected) {
+			throw new Error(
+				`smoke: ${origin} does not match PUBLIC_BASE_URL ${expected} of worker ${worker}`,
+			);
+		}
+	}
+	const host = new URL(url).hostname;
+	if (host.endsWith(".workers.dev") && host.split(".")[0] !== worker) {
+		throw new Error(`smoke: ${host} is not worker ${worker}`);
+	}
 }
 
 /**
