@@ -1,7 +1,7 @@
 {
 	"version": "6",
 	"dialect": "sqlite",
-	"id": "8cbab770-703f-4ab7-b5d2-f2e62f808a38",
+	"id": "b92dd430-4a72-4004-99b0-796ae36553c9",
 	"prevId": "ba5a28cb-2f0c-47ca-9f14-2ab002e98f22",
 	"tables": {
 		"alert_channels": {
@@ -710,6 +710,12 @@
 					"name": "backups_started_at_idx",
 					"columns": ["started_at"],
 					"isUnique": false
+				},
+				"backups_one_running_idx": {
+					"name": "backups_one_running_idx",
+					"columns": ["status"],
+					"isUnique": true,
+					"where": "status = 'running'"
 				}
 			},
 			"foreignKeys": {},
@@ -718,7 +724,7 @@
 			"checkConstraints": {
 				"backups_status_check": {
 					"name": "backups_status_check",
-					"value": "\"status\" IN ('running', 'verified', 'failed')"
+					"value": "\"status\" IN ('running', 'verified', 'failed', 'expiring')"
 				}
 			}
 		},

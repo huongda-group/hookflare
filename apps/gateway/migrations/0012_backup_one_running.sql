@@ -1,1 +1,0 @@
-CREATE UNIQUE INDEX `backups_one_running_idx` ON `backups` (`status`) WHERE status = 'running';

@@ -11,8 +11,9 @@ CREATE TABLE `backups` (
 	`started_at` integer NOT NULL,
 	`finished_at` integer,
 	`error` text,
-	CONSTRAINT "backups_status_check" CHECK("status" IN ('running', 'verified', 'failed'))
+	CONSTRAINT "backups_status_check" CHECK("status" IN ('running', 'verified', 'failed', 'expiring'))
 );
 --> statement-breakpoint
 CREATE INDEX `backups_status_idx` ON `backups` (`status`);--> statement-breakpoint
-CREATE INDEX `backups_started_at_idx` ON `backups` (`started_at`);
+CREATE INDEX `backups_started_at_idx` ON `backups` (`started_at`);--> statement-breakpoint
+CREATE UNIQUE INDEX `backups_one_running_idx` ON `backups` (`status`) WHERE status = 'running';
