@@ -2,8 +2,11 @@ import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { idTimestamp, isId } from "../../../apps/gateway/src/core/ids";
+import { productionTarget } from "../src/guard";
 import {
+	main,
 	mulberry32,
+	type SeedDeps,
 	type SeedRow,
 	STATEMENT_LIMIT,
 	seedRows,
@@ -283,5 +286,93 @@ describe("big payload mix", () => {
 		expect(() =>
 			writeSqlFiles(seedRows(300, seeded(3), AT, { big: true }), { dir }),
 		).not.toThrow();
+	});
+});
+
+describe("seed main", () => {
+	const PROD = JSON.stringify({
+		name: "hookflare",
+		d1_databases: [
+			{ binding: "DB", database_name: "hookflare", database_id: "prod-id" },
+		],
+	});
+	const STAGING = JSON.stringify({
+		name: "hookflare-staging",
+		d1_databases: [
+			{ binding: "DB", database_name: "hookflare-staging", database_id: "s" },
+		],
+	});
+
+	function harness(configText: string, name: string) {
+		const calls: string[][] = [];
+		const lines: string[] = [];
+		const deps: SeedDeps = {
+			exec: (args) => {
+				calls.push(args);
+			},
+			readConfig: () => configText,
+			production: productionTarget(PROD),
+			log: (line) => {
+				lines.push(line);
+			},
+			exit: (code) => {
+				throw new Error(`exit ${code}`);
+			},
+			dir: testDir(name),
+			now: () => AT,
+		};
+		return { calls, lines, deps };
+	}
+
+	const args = [
+		"--n",
+		"50",
+		"--project",
+		"prj_x",
+		"--source",
+		"src_x",
+		"--destination",
+		"dst_x",
+		"--config",
+		"staging.jsonc",
+		"--seed",
+		"9",
+	];
+
+	it("is a dry run by default: writes files, prints estimate, runs nothing", async () => {
+		const h = harness(STAGING, "dry");
+		await main(args, h.deps);
+		expect(h.calls).toEqual([]);
+		const text = h.lines.join("\n");
+		expect(text).toMatch(/--seed 9/);
+		expect(text).toMatch(/webhook_events 50/);
+		expect(text).toMatch(/estimated D1 rows written/);
+		expect(text).toMatch(/dry run/);
+		expect(readdirSync(h.deps.dir as string)).toContain("seed-001.sql");
+	});
+
+	it("loads every file with --yes", async () => {
+		const h = harness(STAGING, "yes");
+		await main([...args, "--yes"], h.deps);
+		expect(h.calls.length).toBeGreaterThan(0);
+		for (const call of h.calls) {
+			expect(call.slice(0, 6)).toEqual([
+				"d1",
+				"execute",
+				"DB",
+				"--remote",
+				"--config",
+				"staging.jsonc",
+			]);
+		}
+	});
+
+	it("refuses a production config before writing or loading", async () => {
+		const h = harness(PROD, "prod");
+		writeFileSync(`${h.deps.dir}seed-001.sql`, "old", "utf8");
+		await expect(main([...args, "--yes"], h.deps)).rejects.toThrow("exit 2");
+		expect(h.calls).toEqual([]);
+		expect(h.lines.join("\n")).toMatch(/production/);
+		expect(await readFile(`${h.deps.dir}seed-001.sql`, "utf8")).toBe("old");
 	});
 });

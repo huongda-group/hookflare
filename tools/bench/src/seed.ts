@@ -10,6 +10,10 @@
  * multi-row `INSERT` files under `tools/bench/results/seed-NNN.sql`. Memory
  * stays bounded by one statement per table, independent of `--n`.
  *
+ * Default is a dry run: files plus row count and estimated cost only. Pass
+ * `--yes` to load each file with `wrangler d1 execute DB --remote`. A
+ * config that names the production Worker or database is always refused.
+ *
  * Node 24 runs this file directly through type stripping. The gateway never
  * imports it; row IDs use the gateway `<prefix>_<ULID>` format.
  */
@@ -21,11 +25,18 @@ import {
 	mkdirSync,
 	openSync,
 	readdirSync,
+	readFileSync,
 	renameSync,
 	unlinkSync,
 	writeSync,
 } from "node:fs";
 import { newId } from "../../../apps/gateway/src/core/ids.ts";
+import { estimateSeed } from "./cost.ts";
+import {
+	assertNotProductionConfig,
+	loadProductionTarget,
+	type ProductionTarget,
+} from "./guard.ts";
 
 export type SeedRow = {
 	table: string;
@@ -452,7 +463,39 @@ export function randomSeed(): number {
 	return randomBytes(4).readUInt32BE(0);
 }
 
-export async function main(argv: string[]): Promise<void> {
+export type SeedDeps = {
+	/** Runs one `wrangler` invocation. */
+	exec: (args: string[]) => void;
+	readConfig: (path: string) => string;
+	production: ProductionTarget;
+	log: (line: string) => void;
+	exit: (code: number) => never;
+	/** Output directory for seed files. */
+	dir?: string;
+	now?: () => number;
+};
+
+function defaultSeedDeps(): SeedDeps {
+	return {
+		exec: (args) => execFileSync("wrangler", args, { stdio: "inherit" }),
+		readConfig: (path) => readFileSync(path, "utf8"),
+		production: loadProductionTarget(),
+		log: (line) => console.error(line),
+		exit: (code) => process.exit(code),
+	};
+}
+
+/**
+ * Writes the seed files, then prints file count, rows, and estimated cost.
+ * Without `--yes` it stops there (dry run); with `--yes` it loads every
+ * file into the `--config` database. A production config is refused
+ * before anything is written.
+ */
+export async function main(
+	argv: string[],
+	deps: SeedDeps = defaultSeedDeps(),
+): Promise<void> {
+	const { log, exit } = deps;
 	const n = Number(flag(argv, "n") ?? "NaN");
 	const projectId = flag(argv, "project") ?? "";
 	const sourceId = flag(argv, "source") ?? "";
@@ -475,13 +518,19 @@ export async function main(argv: string[]): Promise<void> {
 		seed < 0 ||
 		seed > 0xffffffff
 	) {
-		console.error(
-			"usage: node src/seed.ts --n <events> --project <id> --source <id> --destination <id> [--big] [--days 30] [--seed <uint32>] --config <wrangler config>",
+		log(
+			"usage: node src/seed.ts --n <events> --project <id> --source <id> --destination <id> [--big] [--days 30] [--seed <uint32>] --config <wrangler config> [--yes]",
 		);
-		return process.exit(2);
+		return exit(2);
 	}
-	console.error(`seed: --seed ${seed}`);
-	const at = Date.now();
+	try {
+		assertNotProductionConfig(deps.readConfig(config), deps.production);
+	} catch (err) {
+		log(`seed: ${(err as Error).message}`);
+		return exit(2);
+	}
+	log(`seed: --seed ${seed}`);
+	const at = (deps.now ?? Date.now)();
 	const rows = seedRows(n, mulberry32(seed), at, {
 		projectId,
 		sourceId,
@@ -489,17 +538,36 @@ export async function main(argv: string[]): Promise<void> {
 		days,
 		big,
 	});
-	const files = toSqlFiles(rows);
-	console.error(`seed: wrote ${n} events to ${files.length} file(s)`);
-	for (const file of files) {
-		console.error(`seed: loading ${file}`);
-		execFileSync(
-			"wrangler",
-			["d1", "execute", "DB", "--remote", "--config", config, "--file", file],
-			{ stdio: "inherit" },
-		);
+	const result = writeSqlFiles(rows, deps.dir ? { dir: deps.dir } : {});
+	const cost = estimateSeed(result.rows);
+	log(
+		`seed: wrote ${result.files.length} file(s), ${(result.bytes / 1e6).toFixed(1)} MB: ${Object.entries(
+			result.rows,
+		)
+			.map(([table, count]) => `${table} ${count}`)
+			.join(", ")}`,
+	);
+	log(
+		`seed: estimated D1 rows written ${cost.d1_rows_written.toLocaleString("en-US")} (with index entries), ~$${cost.usd.toFixed(2)} gross; verify against current pricing (src/cost.ts)`,
+	);
+	if (!has(argv, "yes")) {
+		log(`seed: dry run; re-run with --yes to load into ${config}`);
+		return;
 	}
-	console.error("seed: done");
+	for (const file of result.files) {
+		log(`seed: loading ${file}`);
+		deps.exec([
+			"d1",
+			"execute",
+			"DB",
+			"--remote",
+			"--config",
+			config,
+			"--file",
+			file,
+		]);
+	}
+	log("seed: done");
 }
 
 const invoked = (process.argv[1] ?? "")
