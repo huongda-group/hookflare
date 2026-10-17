@@ -319,11 +319,7 @@ const queryBool = z.enum(["true", "false"]).transform((v) => v === "true");
  * identity). `@` stays allowed so migrated email identities are valid.
  */
 export const USERNAME_PATTERN = /^[a-z0-9][a-z0-9._@+-]{2,63}$/;
-export const username = z
-	.string()
-	.trim()
-	.toLowerCase()
-	.regex(USERNAME_PATTERN);
+export const username = z.string().trim().toLowerCase().regex(USERNAME_PATTERN);
 /** 12–256 characters, no composition rules, and never trimmed (spec M7). */
 export const password = z.string().min(12).max(256);
 
