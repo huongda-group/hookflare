@@ -1,5 +1,6 @@
 import { startArchiveRun } from "../core/archive-run";
 import { isBackupRunning, startBackupRun } from "../core/backup-run";
+import { purgeExpiredSessions } from "../core/db/sessions";
 import { beat, type JobName } from "../core/heartbeat";
 import { createLogger, type Logger } from "../core/log";
 import { readSetting, STORAGE_SETTING } from "../core/settings";
@@ -44,6 +45,13 @@ export async function runScheduled(cron: string, deps: Deps): Promise<void> {
 			await beatSafe(deps, logger, "alerts");
 		} catch (err) {
 			logger.error("alerts.failed", { error: String(err) });
+		}
+		try {
+			const count = await purgeExpiredSessions(deps.db, deps.now());
+			logger.info("sessions.purged", { count });
+		} catch (err) {
+			// Cleanup is best-effort: a failure must not reject the minute beat.
+			logger.error("sessions.purge_failed", { error: String(err) });
 		}
 		return;
 	}
