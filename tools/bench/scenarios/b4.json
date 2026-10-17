@@ -1,12 +1,12 @@
 {
 	"name": "b4",
 	"steps": [
-		{ "rate_per_s": 50, "duration_s": 600 },
-		{ "rate_per_s": 50, "duration_s": 300 }
+		{ "rate_per_s": 50, "duration_s": 600, "sink": { "fail_pct": 30 } },
+		{ "rate_per_s": 50, "duration_s": 300, "sink": { "fail_pct": 0 } }
 	],
 	"sources": 10,
 	"body_bytes": 1024,
-	"sink": { "fail_pct": 30 },
+	"sink": {},
 	"drain_timeout_s": 1800,
-	"notes": "Retry storm: sink fail_pct 30 for the first 600 s, then healthy. The runner applies one sink spec per run, so run the second 300 s step separately with fail_pct 0 (or clear the sink query param before the backlog drains) to measure recovery time."
+	"notes": "Retry storm: sink fail_pct 30 for the first 600 s, then healthy for 300 s. The runner PATCHes the destination URL with each step's sink query at the step boundary, so the retry backlog drains against the healthy sink; measure recovery time from the start of step 2 to drain."
 }

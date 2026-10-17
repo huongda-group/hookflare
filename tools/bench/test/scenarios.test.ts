@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { parseScenario } from "../src/scenario";
+import { parseScenario, stepSink } from "../src/scenario";
 
 async function loadScenario(name: string): Promise<unknown> {
 	const text = await readFile(
@@ -34,6 +34,7 @@ describe("scenarios", () => {
 		expect(typeof b3.notes).toBe("string");
 
 		const b4 = parseScenario(await loadScenario("b4"));
-		expect(b4.sink.fail_pct).toBe(30);
+		expect(stepSink(b4, 0).fail_pct).toBe(30);
+		expect(stepSink(b4, 1).fail_pct ?? 0).toBe(0);
 	});
 });

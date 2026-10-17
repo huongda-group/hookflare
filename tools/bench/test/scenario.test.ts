@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseScenario } from "../src/scenario";
+import { parseScenario, stepSink } from "../src/scenario";
 
 const valid = {
 	name: "b1",
@@ -28,6 +28,34 @@ describe("parseScenario", () => {
 				steps: [{ rate_per_s: -5, duration_s: 10 }],
 			}),
 		).toThrow();
+	});
+
+	it("accepts a per-step sink and resolves it over the scenario sink", () => {
+		const s = parseScenario({
+			...valid,
+			sink: { delay_ms: 100 },
+			steps: [
+				{ rate_per_s: 50, duration_s: 10, sink: { fail_pct: 30 } },
+				{ rate_per_s: 50, duration_s: 10 },
+			],
+		});
+		expect(stepSink(s, 0)).toEqual({ fail_pct: 30 });
+		expect(stepSink(s, 1)).toEqual({ delay_ms: 100 });
+	});
+
+	it("rejects an invalid per-step sink", () => {
+		expect(() =>
+			parseScenario({
+				...valid,
+				steps: [{ rate_per_s: 1, duration_s: 1, sink: { fail_pct: 101 } }],
+			}),
+		).toThrow(/fail_pct/);
+		expect(() =>
+			parseScenario({
+				...valid,
+				steps: [{ rate_per_s: 1, duration_s: 1, sink: { bogus: 1 } }],
+			}),
+		).toThrow(/unknown sink key/);
 	});
 
 	it("rejects unknown keys", () => {

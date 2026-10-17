@@ -5,9 +5,12 @@ export type SinkSpec = {
 	fail_pct?: number;
 };
 
+/** A load step, optionally with its own sink behaviour. */
+export type ScenarioStep = Step & { sink?: SinkSpec };
+
 export type Scenario = {
 	name: string;
-	steps: Step[];
+	steps: ScenarioStep[];
 	sources: number;
 	body_bytes: number;
 	sink: SinkSpec;
@@ -25,7 +28,7 @@ const TOP_KEYS = new Set([
 	"notes",
 ]);
 
-const STEP_KEYS = new Set(["rate_per_s", "duration_s"]);
+const STEP_KEYS = new Set(["rate_per_s", "duration_s", "sink"]);
 
 const SINK_KEYS = new Set(["delay_ms", "fail_pct"]);
 
@@ -35,6 +38,33 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function fail(what: string): never {
 	throw new Error(`scenario: invalid ${what}`);
+}
+
+function parseSink(raw: unknown): SinkSpec {
+	if (!isRecord(raw)) fail("sink must be an object");
+	for (const key of Object.keys(raw)) {
+		if (!SINK_KEYS.has(key)) fail(`unknown sink key ${JSON.stringify(key)}`);
+	}
+	if (
+		raw.delay_ms !== undefined &&
+		(typeof raw.delay_ms !== "number" || !(raw.delay_ms >= 0))
+	) {
+		fail("sink delay_ms must be >= 0");
+	}
+	if (
+		raw.fail_pct !== undefined &&
+		(typeof raw.fail_pct !== "number" ||
+			!(raw.fail_pct >= 0) ||
+			!(raw.fail_pct <= 100))
+	) {
+		fail("sink fail_pct must be within 0..100");
+	}
+	return raw as SinkSpec;
+}
+
+/** The sink spec in effect for step `index`: its own, else the scenario's. */
+export function stepSink(scenario: Scenario, index: number): SinkSpec {
+	return scenario.steps[index]?.sink ?? scenario.sink;
 }
 
 /**
@@ -48,7 +78,7 @@ export function parseScenario(raw: unknown): Scenario {
 	}
 	if (typeof raw.name !== "string" || raw.name === "") fail("name");
 	if (!Array.isArray(raw.steps) || raw.steps.length === 0) fail("steps");
-	const steps: Step[] = raw.steps.map((entry) => {
+	const steps: ScenarioStep[] = raw.steps.map((entry) => {
 		if (!isRecord(entry)) fail("step must be an object");
 		for (const key of Object.keys(entry)) {
 			if (!STEP_KEYS.has(key)) fail(`unknown step key ${JSON.stringify(key)}`);
@@ -70,6 +100,7 @@ export function parseScenario(raw: unknown): Scenario {
 		return {
 			rate_per_s: entry.rate_per_s,
 			duration_s: entry.duration_s,
+			...(entry.sink === undefined ? {} : { sink: parseSink(entry.sink) }),
 		};
 	});
 	if (
@@ -86,28 +117,7 @@ export function parseScenario(raw: unknown): Scenario {
 	) {
 		fail("body_bytes must be an integer >= 1");
 	}
-	let sink: SinkSpec = {};
-	if (raw.sink !== undefined) {
-		if (!isRecord(raw.sink)) fail("sink must be an object");
-		for (const key of Object.keys(raw.sink)) {
-			if (!SINK_KEYS.has(key)) fail(`unknown sink key ${JSON.stringify(key)}`);
-		}
-		if (
-			raw.sink.delay_ms !== undefined &&
-			(typeof raw.sink.delay_ms !== "number" || !(raw.sink.delay_ms >= 0))
-		) {
-			fail("sink delay_ms must be >= 0");
-		}
-		if (
-			raw.sink.fail_pct !== undefined &&
-			(typeof raw.sink.fail_pct !== "number" ||
-				!(raw.sink.fail_pct >= 0) ||
-				!(raw.sink.fail_pct <= 100))
-		) {
-			fail("sink fail_pct must be within 0..100");
-		}
-		sink = raw.sink as SinkSpec;
-	}
+	const sink: SinkSpec = raw.sink === undefined ? {} : parseSink(raw.sink);
 	if (
 		typeof raw.drain_timeout_s !== "number" ||
 		!(raw.drain_timeout_s > 0) ||
