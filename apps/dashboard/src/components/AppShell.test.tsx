@@ -145,6 +145,38 @@ describe("AppShell", () => {
 		).not.toBeInTheDocument();
 	});
 
+	it("preserves leading/trailing spaces in the new password", async () => {
+		const changed = vi.fn();
+		server.use(
+			http.post(apiUrl("/me/password"), async ({ request }) => {
+				changed(await request.json());
+				return new HttpResponse(null, { status: 204 });
+			}),
+		);
+		const { user } = renderApp("/");
+		await screen.findByText("admin@example.com");
+		await user.click(screen.getByRole("button", { name: "Change password" }));
+		await user.type(
+			await screen.findByLabelText("Current password"),
+			"old-password-is-long",
+		);
+		await user.type(
+			screen.getByLabelText("New password"),
+			"  secret-with-spaces  ",
+		);
+		await user.type(
+			screen.getByLabelText("Confirm new password"),
+			"  secret-with-spaces  ",
+		);
+		await user.click(screen.getByRole("button", { name: "Save password" }));
+		await waitFor(() =>
+			expect(changed).toHaveBeenCalledWith({
+				current_password: "old-password-is-long",
+				new_password: "  secret-with-spaces  ",
+			}),
+		);
+	});
+
 	it("sends an expired session to /login?next=<here> on a 401", async () => {
 		server.use(
 			http.get(apiUrl("/projects"), () =>

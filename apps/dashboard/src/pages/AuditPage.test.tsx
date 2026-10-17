@@ -25,10 +25,13 @@ describe("Audit", () => {
 				return HttpResponse.json({ data: [row], next_cursor: null });
 			}),
 		);
-		const { user } = renderApp("/audit?action=destination.updated");
+		const { user } = renderApp(
+			"/audit?action=destination.updated&actor=ops-lead",
+		);
 		expect(await screen.findByText("destination.updated")).toBeInTheDocument();
 		expect(screen.getByText("ops-lead")).toBeInTheDocument();
 		expect(seen.get("action")).toBe("destination.updated");
+		expect(seen.get("actor")).toBe("ops-lead");
 		await user.click(screen.getByRole("button", { name: "Show diff" }));
 		expect(screen.getByRole("list", { name: "JSON" })).toBeInTheDocument();
 	});

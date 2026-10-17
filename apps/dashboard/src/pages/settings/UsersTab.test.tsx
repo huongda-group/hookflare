@@ -47,6 +47,32 @@ describe("Settings › Users", () => {
 		);
 	});
 
+	it("normalizes a padded username but preserves a padded password on create", async () => {
+		const created = vi.fn();
+		usersList();
+		server.use(
+			http.post(apiUrl("/users"), async ({ request }) => {
+				created(await request.json());
+				return HttpResponse.json({}, { status: 201 });
+			}),
+		);
+		const { user } = renderApp("/settings?tab=users");
+		expect(await screen.findByText("op")).toBeInTheDocument();
+		await user.type(screen.getByLabelText("Username"), "  NewOp  ");
+		await user.type(
+			screen.getByLabelText("Password"),
+			"  secret-with-spaces  ",
+		);
+		await user.click(screen.getByRole("button", { name: "Add user" }));
+		await waitFor(() =>
+			expect(created).toHaveBeenCalledWith({
+				username: "newop",
+				role: "viewer",
+				password: "  secret-with-spaces  ",
+			}),
+		);
+	});
+
 	it("resets a password via POST /users/:username/password", async () => {
 		const reset = vi.fn();
 		usersList();
@@ -68,6 +94,31 @@ describe("Settings › Users", () => {
 		await waitFor(() =>
 			expect(reset).toHaveBeenCalledWith({
 				password: "a-long-reset-password",
+			}),
+		);
+	});
+
+	it("preserves leading/trailing spaces when resetting a password", async () => {
+		const reset = vi.fn();
+		usersList();
+		server.use(
+			http.post(apiUrl("/users/op/password"), async ({ request }) => {
+				reset(await request.json());
+				return new HttpResponse(null, { status: 204 });
+			}),
+		);
+		const { user } = renderApp("/settings?tab=users");
+		await user.click(
+			await screen.findByRole("button", { name: "Reset password for op" }),
+		);
+		await user.type(
+			await screen.findByLabelText("New password"),
+			"  secret-with-spaces  ",
+		);
+		await user.click(screen.getByRole("button", { name: "Reset password" }));
+		await waitFor(() =>
+			expect(reset).toHaveBeenCalledWith({
+				password: "  secret-with-spaces  ",
 			}),
 		);
 	});
@@ -177,5 +228,41 @@ describe("Settings › Users", () => {
 		await user.click(screen.getByRole("button", { name: "Revoke" }));
 		await waitFor(() => expect(revoked).toHaveBeenCalled());
 		await waitFor(() => expect(listCalls).toBeGreaterThanOrEqual(3));
+	});
+
+	it("keeps the revoke confirm open and shows the error when revoke fails", async () => {
+		usersList();
+		server.use(
+			http.get(apiUrl("/users/op/tokens"), () =>
+				HttpResponse.json({
+					data: [
+						{
+							id: "tok_1",
+							username: "op",
+							name: "smoke",
+							created_at: 1,
+							expires_at: null,
+							last_used_at: null,
+							revoked_at: null,
+						},
+					],
+				}),
+			),
+			http.post(apiUrl("/users/op/tokens/tok_1/revoke"), () =>
+				HttpResponse.json({ error: "internal" }, { status: 500 }),
+			),
+		);
+		const { user } = renderApp("/settings?tab=users");
+		await user.click(
+			await screen.findByRole("button", { name: "API tokens for op" }),
+		);
+		await user.click(
+			await screen.findByRole("button", { name: "Revoke token smoke" }),
+		);
+		await user.click(await screen.findByRole("button", { name: "Revoke" }));
+		// The ConfirmDialog catches the onConfirm rejection, shows it inline,
+		// and stays open instead of closing or refetching.
+		expect(await screen.findByText("internal")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Revoke" })).toBeInTheDocument();
 	});
 });
