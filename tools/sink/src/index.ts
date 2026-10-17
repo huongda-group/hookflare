@@ -9,10 +9,13 @@ export type Stats = {
 	by_status: Record<string, number>;
 	first_at: number;
 	last_at: number;
+	/** Distinct webhook IDs, sorted; only with `?ids=1`. */
+	ids?: string[];
 };
 
 const SHARD_COUNT = 16;
 const MAX_DELAY_MS = 30000;
+const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 
 let sleep: (ms: number) => Promise<void> = (ms) =>
 	new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -62,7 +65,12 @@ async function handleHook(
 		return Response.json({ error: "missing_webhook_id" }, { status: 400 });
 	}
 	const url = new URL(request.url);
-	const status = Math.trunc(numParam(url, "status", 200));
+	const rawStatus = url.searchParams.get("status");
+	const status = rawStatus === null ? 200 : Number(rawStatus);
+	// `new Response` throws outside 200-599, so reject before recording a hit.
+	if (!Number.isInteger(status) || status < 200 || status > 599) {
+		return Response.json({ error: "invalid_status" }, { status: 400 });
+	}
 	const delayMs = Math.min(
 		Math.max(numParam(url, "delay_ms", 0), 0),
 		MAX_DELAY_MS,
@@ -73,10 +81,21 @@ async function handleHook(
 	if (delayMs > 0) {
 		await sleep(delayMs);
 	}
-	return new Response("ok", { status: chosen });
+	// Null-body statuses must not carry a body.
+	const body = NULL_BODY_STATUSES.has(chosen) ? null : "ok";
+	return new Response(body, { status: chosen });
 }
 
-async function handleStats(env: SinkEnv, run: string): Promise<Response> {
+/**
+ * Merged run stats. `?ids=1` adds the distinct webhook IDs (capped per
+ * shard), which the smoke test uses to check exactly which deliveries
+ * arrived; load runs leave it off.
+ */
+async function handleStats(
+	env: SinkEnv,
+	run: string,
+	withIds: boolean,
+): Promise<Response> {
 	const shards: ShardStats[] = await Promise.all(
 		Array.from({ length: SHARD_COUNT }, (_, n) => shardStub(env, n).stats(run)),
 	);
@@ -105,6 +124,12 @@ async function handleStats(env: SinkEnv, run: string): Promise<Response> {
 		}
 	}
 	body.duplicates = body.received - body.unique;
+	if (withIds) {
+		const lists = await Promise.all(
+			Array.from({ length: SHARD_COUNT }, (_, n) => shardStub(env, n).ids(run)),
+		);
+		body.ids = lists.flat().sort();
+	}
 	return Response.json(body);
 }
 
@@ -121,7 +146,8 @@ function notFound(): Response {
 
 export default {
 	async fetch(request: Request, env: SinkEnv): Promise<Response> {
-		const parts = new URL(request.url).pathname.split("/");
+		const url = new URL(request.url);
+		const parts = url.pathname.split("/");
 		// ["", "r", run, action?]
 		if (parts.length < 3 || parts[1] !== "r" || !parts[2]) {
 			return notFound();
@@ -139,7 +165,7 @@ export default {
 			parts.length === 4 &&
 			parts[3] === "stats"
 		) {
-			return handleStats(env, run);
+			return handleStats(env, run, url.searchParams.get("ids") === "1");
 		}
 		if (request.method === "DELETE" && parts.length === 3) {
 			return handleClear(env, run);

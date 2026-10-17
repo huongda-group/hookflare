@@ -115,8 +115,8 @@ docs/
 
 ### 5.2 Sink Worker (`tools/sink`)
 
-- `POST /r/<run>/hook`: reads `status` (default 200), `delay_ms` (default 0, max 30,000), and `fail_pct` (default 0; that share of requests returns 503 instead of `status`). Records `webhook-id`, the response it chose, and the time, then responds.
-- `GET /r/<run>/stats`: merges the 16 shards: `received`, `unique`, `duplicates`, counts by status, and the first and last receive time.
+- `POST /r/<run>/hook`: reads `status` (default 200; an integer in 200–599, anything else is a `400 invalid_status` and is not recorded), `delay_ms` (default 0, max 30,000), and `fail_pct` (default 0; that share of requests returns 503 instead of `status`). Records `webhook-id`, the response it chose, and the time, then responds (`ok`, or an empty body for 204, 205, and 304).
+- `GET /r/<run>/stats`: merges the 16 shards: `received`, `unique`, `duplicates`, counts by status, and the first and last receive time. `?ids=1` adds `ids`, the sorted distinct `webhook-id` values (at most 1,000 per shard; meant for smoke-sized runs).
 - `DELETE /r/<run>`: clears a run.
 - It does not verify signatures; the gateway's signing is covered by M1 tests. It has no auth, so a run ID must be random (the bench and smoke scripts use a ULID). Stored data expires after 7 days through a DO alarm.
 

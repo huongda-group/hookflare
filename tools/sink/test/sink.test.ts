@@ -99,6 +99,39 @@ describe("sink", () => {
 		}
 	});
 
+	it("status=204 returns an empty body", async () => {
+		const run = runId();
+		const res = await postHook(run, "msg_204", "?status=204");
+		expect(res.status).toBe(204);
+		expect(await res.text()).toBe("");
+		const { body } = await statsOf(run);
+		expect(body.by_status).toEqual({ 204: 1 });
+	});
+
+	it("rejects a status outside 200-599 without recording the hit", async () => {
+		const run = runId();
+		for (const bad of ["0", "999", "199", "abc"]) {
+			const res = await postHook(run, `msg_bad_${bad}`, `?status=${bad}`);
+			expect(res.status).toBe(400);
+			await expect(res.json()).resolves.toEqual({ error: "invalid_status" });
+		}
+		const { body } = await statsOf(run);
+		expect(body.received).toBe(0);
+	});
+
+	it("stats?ids=1 lists the distinct webhook IDs of the run", async () => {
+		const run = runId();
+		await postHook(run, "msg_b");
+		await postHook(run, "msg_a");
+		await postHook(run, "msg_a");
+		const plain = await statsOf(run);
+		expect(plain.body.ids).toBeUndefined();
+		const res = await SELF.fetch(`https://sink.test/r/${run}/stats?ids=1`);
+		const body = (await res.json()) as Record<string, unknown>;
+		expect(body.received).toBe(3);
+		expect(body.ids).toEqual(["msg_a", "msg_b"]);
+	});
+
 	it("DELETE clears", async () => {
 		const run = runId();
 		await postHook(run, "msg_a");
