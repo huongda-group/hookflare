@@ -322,4 +322,39 @@ describe("AppShell", () => {
 		).not.toBeInTheDocument();
 		expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument();
 	});
+
+	it("clears a seeded token secret from the cache on logout even when logout fails", async () => {
+		const secret = "hf_seeded-secret-value";
+		let attempts = 0;
+		server.use(
+			http.post(apiUrl("/auth/logout"), () => {
+				attempts++;
+				return HttpResponse.json({ error: "internal" }, { status: 500 });
+			}),
+		);
+		const { user, router, queryClient } = renderApp("/");
+		await screen.findByText("admin@example.com");
+		queryClient.setQueryData(["users", "op", "tokens"], {
+			data: [{ id: "tok_1", name: "smoke", token: secret }],
+		});
+		expect(
+			JSON.stringify(queryClient.getQueryCache().getAll()),
+		).toContain(secret);
+		await user.click(screen.getByRole("button", { name: "Log out" }));
+		await waitFor(() => expect(attempts).toBeGreaterThanOrEqual(1));
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe("/login"),
+		);
+		for (const q of queryClient.getQueryCache().getAll()) {
+			expect(JSON.stringify(q.state.data ?? null)).not.toContain(secret);
+		}
+	});
+
+	it("offers password change to viewers", async () => {
+		renderApp("/", { role: "viewer" });
+		await screen.findByText("viewer@example.com");
+		expect(
+			screen.getByRole("button", { name: "Change password" }),
+		).toBeInTheDocument();
+	});
 });

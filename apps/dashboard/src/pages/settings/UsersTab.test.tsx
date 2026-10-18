@@ -265,4 +265,170 @@ describe("Settings › Users", () => {
 		expect(await screen.findByText("internal")).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Revoke" })).toBeInTheDocument();
 	});
+
+	it("surfaces a create conflict inline without clearing the form", async () => {
+		usersList();
+		server.use(
+			http.post(apiUrl("/users"), () =>
+				HttpResponse.json(
+					{ error: "conflict", reason: "username is taken" },
+					{ status: 409 },
+				),
+			),
+		);
+		const { user } = renderApp("/settings?tab=users");
+		expect(await screen.findByText("op")).toBeInTheDocument();
+		await user.type(screen.getByLabelText("Username"), "op");
+		await user.type(
+			screen.getByLabelText("Password"),
+			"a-long-initial-password",
+		);
+		await user.click(screen.getByRole("button", { name: "Add user" }));
+		expect(await screen.findByText(/conflict/)).toBeInTheDocument();
+		expect(screen.getByLabelText("Username")).toHaveValue("op");
+	});
+
+	it("keeps the role confirm open and shows the error when the server rejects it", async () => {
+		usersList();
+		server.use(
+			http.patch(apiUrl("/users/op"), () =>
+				HttpResponse.json(
+					{ error: "conflict", reason: "cannot demote the last admin" },
+					{ status: 409 },
+				),
+			),
+		);
+		const { user } = renderApp("/settings?tab=users");
+		expect(await screen.findByText("op")).toBeInTheDocument();
+		await user.click(
+			screen.getByRole("combobox", { name: "Role of op" }),
+		);
+		await user.click(screen.getByRole("option", { name: "admin" }));
+		expect(
+			await screen.findByRole("heading", { name: "Change op to admin?" }),
+		).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Change role" }));
+		expect(await screen.findByText(/last admin/)).toBeInTheDocument();
+		expect(
+			screen.getByRole("heading", { name: "Change op to admin?" }),
+		).toBeInTheDocument();
+	});
+
+	it("keeps the disable confirm open on a last-admin conflict", async () => {
+		usersList();
+		server.use(
+			http.patch(apiUrl("/users/op"), () =>
+				HttpResponse.json(
+					{ error: "conflict", reason: "cannot disable the last admin" },
+					{ status: 409 },
+				),
+			),
+		);
+		const { user } = renderApp("/settings?tab=users");
+		await user.click(
+			await screen.findByRole("button", { name: "Disable op" }),
+		);
+		await user.click(
+			await screen.findByRole("button", { name: "Disable" }),
+		);
+		expect(await screen.findByText(/last admin/)).toBeInTheDocument();
+		expect(
+			screen.getByRole("heading", { name: "Disable op?" }),
+		).toBeInTheDocument();
+	});
+
+	it("shows a reset conflict inline and clears the secret on close", async () => {
+		usersList();
+		server.use(
+			http.post(apiUrl("/users/op/password"), () =>
+				HttpResponse.json(
+					{ error: "conflict", reason: "reset is locked right now" },
+					{ status: 409 },
+				),
+			),
+		);
+		const { user } = renderApp("/settings?tab=users");
+		await user.click(
+			await screen.findByRole("button", { name: "Reset password for op" }),
+		);
+		await user.type(
+			await screen.findByLabelText("New password"),
+			"a-long-reset-password",
+		);
+		await user.click(screen.getByRole("button", { name: "Reset password" }));
+		expect(await screen.findByText(/locked/)).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Cancel" }));
+		// The discard guard prompts because the form is dirty.
+		await user.click(
+			await screen.findByRole("button", { name: "Discard changes" }),
+		);
+		await waitFor(() =>
+			expect(
+				screen.queryByRole("heading", { name: "Reset password for op" }),
+			).not.toBeInTheDocument(),
+		);
+		await user.click(
+			await screen.findByRole("button", { name: "Reset password for op" }),
+		);
+		expect(screen.getByLabelText("New password")).toHaveValue("");
+		expect(screen.queryByText(/locked/)).not.toBeInTheDocument();
+	});
+
+	it("shows Active and Disabled badges and hides self actions", async () => {
+		server.use(
+			http.get(apiUrl("/users"), () =>
+				HttpResponse.json({
+					data: [
+						{
+							username: "admin@example.com",
+							role: "admin",
+							created_at: 0,
+							updated_at: 0,
+							disabled_at: null,
+							has_password: true,
+						},
+						{
+							...op,
+							username: "gone",
+							disabled_at: 5,
+						},
+					],
+					next_cursor: null,
+				}),
+			),
+		);
+		renderApp("/settings?tab=users");
+		expect(await screen.findByText("gone")).toBeInTheDocument();
+		expect(screen.getByText("Active")).toBeInTheDocument();
+		expect(screen.getByText("Disabled")).toBeInTheDocument();
+		// The signed-in admin cannot disable, reset, or token-manage themselves.
+		expect(
+			screen.queryByRole("button", { name: "Disable admin@example.com" }),
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", {
+				name: "Reset password for admin@example.com",
+			}),
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", {
+				name: "API tokens for admin@example.com",
+			}),
+		).not.toBeInTheDocument();
+	});
+
+	it("prompts before discarding a dirty create form on navigation", async () => {
+		usersList();
+		const { user, router } = renderApp("/settings?tab=users");
+		expect(await screen.findByText("op")).toBeInTheDocument();
+		await user.type(screen.getByLabelText("Username"), "newop");
+		await user.click(screen.getByRole("link", { name: "Projects" }));
+		expect(
+			await screen.findByRole("heading", {
+				name: "Discard unsaved changes?",
+			}),
+		).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Discard changes" }));
+		await waitFor(() => expect(router.state.location.pathname).toBe("/projects"));
+	});
 });

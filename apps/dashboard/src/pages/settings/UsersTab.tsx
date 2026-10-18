@@ -4,6 +4,8 @@ import { useState } from "react";
 import { ApiTokensDialog } from "@/components/ApiTokensDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CursorTable } from "@/components/CursorTable";
+import { DirtyFormGuard } from "@/components/DirtyFormGuard";
+import { StatusBadge } from "@/components/StatusBadge";
 import { TimeText } from "@/components/TimeText";
 import { Button } from "@/components/ui/button";
 import {
@@ -75,48 +77,52 @@ export function UsersTab() {
 	};
 	return (
 		<div className="space-y-4">
-			<div className="flex items-end gap-3">
-				<div>
-					<Label htmlFor="u-username">Username</Label>
-					<Input
-						id="u-username"
-						className="w-56"
-						autoComplete="off"
-						value={username}
-						onChange={(e) => setUsername(e.target.value)}
-					/>
-				</div>
-				<div>
-					<Label htmlFor="u-password">Password</Label>
-					<Input
-						id="u-password"
-						type="password"
-						className="w-56"
-						autoComplete="new-password"
-						value={password}
-						onChange={(e) => setPassword(e.target.value)}
-					/>
-				</div>
-				<Select value={role} onValueChange={(v) => setRole(v as Role)}>
-					<SelectTrigger className="w-36" aria-label="Role">
-						<SelectValue />
-					</SelectTrigger>
-					<SelectContent>
-						{ROLES.map((r) => (
-							<SelectItem key={r} value={r}>
-								{r}
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
-				<Button
-					onClick={() => void add()}
-					disabled={adding || !username.trim() || !password}
-				>
-					Add user
-				</Button>
-			</div>
-			{addError && <p className="text-sm text-red-700">{addError}</p>}
+			<DirtyFormGuard dirty={username !== "" || password !== ""}>
+				{() => (
+					<div className="flex items-end gap-3">
+						<div>
+							<Label htmlFor="u-username">Username</Label>
+							<Input
+								id="u-username"
+								className="w-56"
+								autoComplete="off"
+								value={username}
+								onChange={(e) => setUsername(e.target.value)}
+							/>
+						</div>
+						<div>
+							<Label htmlFor="u-password">Password</Label>
+							<Input
+								id="u-password"
+								type="password"
+								className="w-56"
+								autoComplete="new-password"
+								value={password}
+								onChange={(e) => setPassword(e.target.value)}
+							/>
+						</div>
+						<Select value={role} onValueChange={(v) => setRole(v as Role)}>
+							<SelectTrigger className="w-36" aria-label="Role">
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								{ROLES.map((r) => (
+									<SelectItem key={r} value={r}>
+										{r}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+						<Button
+							onClick={() => void add()}
+							disabled={adding || !username.trim() || !password}
+						>
+							Add user
+						</Button>
+					</div>
+				)}
+			</DirtyFormGuard>
+			{addError && <p className="text-sm text-failure">{addError}</p>}
 			<CursorTable<User>
 				query={query}
 				rowKey={(u) => u.username}
@@ -159,14 +165,12 @@ export function UsersTab() {
 					},
 					{
 						header: "Status",
-						cell: (u) =>
-							u.disabled_at ? (
-								<span>
-									Disabled <TimeText ms={u.disabled_at} />
-								</span>
-							) : (
-								"Active"
-							),
+						cell: (u) => (
+							<span className="inline-flex items-center gap-2">
+								<StatusBadge status={u.disabled_at ? "disabled" : "active"} />
+								{u.disabled_at !== null && <TimeText ms={u.disabled_at} />}
+							</span>
+						),
 					},
 					{
 						header: "",
@@ -276,6 +280,15 @@ function ResetPasswordDialog({
 	const [error, setError] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [saved, setSaved] = useState(false);
+	// The typed password is sensitive: closing the dialog while it is dirty
+	// asks first, and every close path clears it without touching Query storage.
+	const dirty = password.length > 0 && !saved;
+	const close = () => {
+		setPassword("");
+		setError(null);
+		setSaved(false);
+		onOpenChange(false);
+	};
 	const reset = async () => {
 		if (!username) return;
 		setBusy(true);
@@ -292,18 +305,15 @@ function ResetPasswordDialog({
 		}
 	};
 	return (
-		<Dialog
-			open={username !== null}
-			onOpenChange={(o) => {
-				if (!o) {
-					setPassword("");
-					setError(null);
-					setSaved(false);
-				}
-				onOpenChange(o);
-			}}
-		>
-			<DialogContent>
+		<DirtyFormGuard dirty={dirty}>
+			{(requestClose) => (
+				<Dialog
+					open={username !== null}
+					onOpenChange={(o) => {
+						if (!o) requestClose(close);
+					}}
+				>
+					<DialogContent>
 				<DialogHeader>
 					<DialogTitle>Reset password for {username}</DialogTitle>
 				</DialogHeader>
@@ -314,7 +324,7 @@ function ResetPasswordDialog({
 							over the new password out of band.
 						</p>
 						<DialogFooter>
-							<Button onClick={() => onOpenChange(false)}>Close</Button>
+							<Button onClick={close}>Close</Button>
 						</DialogFooter>
 					</>
 				) : (
@@ -329,9 +339,12 @@ function ResetPasswordDialog({
 								onChange={(e) => setPassword(e.target.value)}
 							/>
 						</div>
-						{error && <p className="text-sm text-red-700">{error}</p>}
+						{error && <p className="text-sm text-failure">{error}</p>}
 						<DialogFooter>
-							<Button variant="outline" onClick={() => onOpenChange(false)}>
+							<Button
+								variant="outline"
+								onClick={() => requestClose(close)}
+							>
 								Cancel
 							</Button>
 							<Button disabled={busy || !password} onClick={() => void reset()}>
@@ -340,7 +353,9 @@ function ResetPasswordDialog({
 						</DialogFooter>
 					</>
 				)}
-			</DialogContent>
-		</Dialog>
+					</DialogContent>
+				</Dialog>
+			)}
+		</DirtyFormGuard>
 	);
 }

@@ -66,7 +66,19 @@ export function ApiTokensDialog({
 
 	return (
 		<>
-			<Dialog open={open} onOpenChange={onOpenChange}>
+			<Dialog
+		open={open}
+		onOpenChange={(o) => {
+			// The parent unmounts on close, which drops every local state;
+			// clearing the disclosure here too keeps the one-time token and
+			// the last server error out of any remount.
+			if (!o) {
+				setSecret(null);
+				setCreateError(null);
+			}
+			onOpenChange(o);
+		}}
+	>
 				<DialogContent className="max-w-lg">
 					<DialogHeader>
 						<DialogTitle>API tokens for {username}</DialogTitle>
@@ -77,7 +89,7 @@ export function ApiTokensDialog({
 					</DialogHeader>
 					{tokens.data ? (
 						tokens.data.data.length === 0 ? (
-							<p className="text-sm text-neutral-500">No API tokens yet.</p>
+							<p className="text-sm text-muted-foreground">No API tokens yet.</p>
 						) : (
 							<ul className="space-y-2">
 								{tokens.data.data.map((t) => (
@@ -87,7 +99,7 @@ export function ApiTokensDialog({
 									>
 										<div className="min-w-0 flex-1">
 											<div className="font-medium">{t.name}</div>
-											<div className="text-xs text-neutral-500">
+											<div className="text-xs text-muted-foreground">
 												Created <TimeText ms={t.created_at} />
 												{t.expires_at !== null && (
 													<>
@@ -112,9 +124,9 @@ export function ApiTokensDialog({
 							</ul>
 						)
 					) : tokens.error ? (
-						<p className="text-sm text-red-700">{errorText(tokens.error)}</p>
+						<p className="text-sm text-failure">{errorText(tokens.error)}</p>
 					) : (
-						<p className="text-sm text-neutral-500">Loading…</p>
+						<p className="text-sm text-muted-foreground">Loading…</p>
 					)}
 					<div className="flex items-end gap-2">
 						<div className="flex-1">
@@ -139,7 +151,7 @@ export function ApiTokensDialog({
 							Refresh
 						</Button>
 					</div>
-					{createError && <p className="text-sm text-red-700">{createError}</p>}
+					{createError && <p className="text-sm text-failure">{createError}</p>}
 				</DialogContent>
 			</Dialog>
 			<SecretRevealDialog
