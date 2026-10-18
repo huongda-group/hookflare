@@ -7,6 +7,35 @@ import { Dialog as DialogPrimitive } from "radix-ui"
 
 import { Button } from "@/components/ui/button"
 
+// The element that had focus before a dialog took over. Tracked globally
+// (not per-dialog) because `DialogContent` only mounts on open — after the
+// opening click's `focusin` has already fired. Focus inside a dialog is
+// ignored so the opener survives the dialog's own focus trap. Radix
+// restores trigger-associated dialogs itself; this only matters for
+// state-driven dialogs with no `DialogTrigger`.
+let lastDialogOpener: HTMLElement | null = null
+let dialogOpenerTrackingInstalled = false
+
+function installDialogOpenerTracking() {
+  if (dialogOpenerTrackingInstalled || typeof document === "undefined") return
+  dialogOpenerTrackingInstalled = true
+  document.addEventListener(
+    "focusin",
+    (event) => {
+      const target = event.target
+      if (
+        target instanceof HTMLElement &&
+        !target.closest('[data-slot="dialog-content"]')
+      ) {
+        lastDialogOpener = target
+      }
+    },
+    true,
+  )
+}
+
+installDialogOpenerTracking()
+
 function Dialog({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Root>) {
@@ -51,6 +80,7 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
@@ -64,6 +94,19 @@ function DialogContent({
           "fixed top-[50%] left-[50%] z-50 grid max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto rounded-lg border bg-card p-6 shadow-lg duration-150 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
           className
         )}
+        onCloseAutoFocus={(event) => {
+          onCloseAutoFocus?.(event)
+          // State-driven dialogs (`open`/`onOpenChange` with no
+          // `DialogTrigger`) have no Radix trigger association, so the
+          // default `onCloseAutoFocus` falls back to `document.body`.
+          // Return focus to whatever opened the dialog instead.
+          if (event.defaultPrevented) return
+          const opener = lastDialogOpener
+          if (opener && document.contains(opener)) {
+            event.preventDefault()
+            opener.focus({ preventScroll: true })
+          }
+        }}
         {...props}
       >
         {children}

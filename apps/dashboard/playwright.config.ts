@@ -5,6 +5,11 @@ import { defineConfig } from "@playwright/test";
 // keys. The Worker serves both the assets and the API on one origin.
 const PORT = 8788;
 
+// Suite separation is mandatory: the fixture suite (redesign.spec.ts,
+// route interception, never touches D1) and the live suite (smoke.spec.ts,
+// real Worker + fresh D1) MUST run in separate processes
+// (`pnpm e2e redesign.spec.ts`, then `pnpm e2e smoke.spec.ts`) — never one
+// shared run — so fixture and live suites cannot share worker state.
 export default defineConfig({
 	testDir: "./e2e",
 	timeout: 60_000,

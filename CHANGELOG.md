@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Light dashboard redesign: single light theme with documented WCAG 2.2 AA
-  tokens (`apps/dashboard/DESIGN.md`), responsive sidebar/drawer cutover at
+- Light dashboard redesign: single light theme with documented,
+  contrast-computed tokens (`apps/dashboard/DESIGN.md`; author-side check,
+  not a certification), responsive sidebar/drawer cutover at
   1024px, skip link, keyboard-operable recovery flows, role-matrix UI
   gating, explicit payload reveal, and one-time secret acknowledgement.
   Browser coverage is split: `e2e/redesign.spec.ts` (route-intercepted

@@ -2,8 +2,10 @@
 
 Single light theme. Components consume the Tailwind aliases below and never
 a raw palette value (`apps/dashboard/src/index.css`). Contrast figures are
-WCAG 2.2 AA, measured against the surfaces each token is used on; the full
+computed against the surfaces each token is used on; the full
 table lives in the comment block at the top of `index.css`.
+Ratios use the WCAG 2.2 contrast formula as an author-side check, not a
+certification claim.
 
 ## Tokens
 
@@ -37,7 +39,9 @@ Radii: `--radius-control: 0.5rem` (6–8px controls), `--radius-panel: 0.75rem`
   abbreviated (`…Z`) with the full value in `title`.
 - Tables scroll internally (`overflow-x-auto` region); the page itself must
   not scroll horizontally — enforced by `pageOverflow()` in
-  `e2e/redesign.spec.ts` at 1440/1280/768/390/320px and at 640px (≈200% zoom).
+  `e2e/redesign.spec.ts` at 1440/1280/768/390/320px and at 640px (viewport
+  equivalence for 200% zoom at 1280px, plus a CSS-zoom approximation —
+  not manual browser zoom; see the review doc).
 
 ## Behaviour contracts verified by `e2e/redesign.spec.ts`
 
@@ -52,9 +56,11 @@ Radii: `--radius-control: 0.5rem` (6–8px controls), `--radius-panel: 0.75rem`
   per reveal); a missing payload disables replay with an explanation.
 - One-time secrets (`whsec_…`) reveal once behind an acknowledgement
   checkbox.
-- State-driven dialogs close on Escape; focus falls back to the document
-  body (no Radix trigger association) with the opener keyboard-reachable.
-  The nav drawer restores focus to its trigger.
+- State-driven dialogs close on Escape and return focus to the opener via
+  the app-wide `onCloseAutoFocus` restoration in `components/ui/dialog.tsx`
+  (state-driven dialogs have no Radix trigger association, so the default
+  would fall back to the document body). The nav drawer restores its
+  trigger via its Radix `DialogTrigger` association.
 
 ## Verification split
 

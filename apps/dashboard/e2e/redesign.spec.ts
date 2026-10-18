@@ -221,11 +221,12 @@ test("blocked role mutation shows feedback and a downgrade removes admin UI", as
 	await expect(page.getByRole("tab", { name: "Retry defaults" })).toBeVisible();
 });
 
-test("200% zoom equivalent layout keeps every screen within the viewport", async ({
+test("zoom approximation (640 CSS px viewport plus CSS zoom) keeps every screen within the viewport", async ({
 	page,
 }, testInfo) => {
 	await installApp(page, { role: "admin" });
-	// 1280px at 200% zoom == 640 CSS px.
+	// 1280px at 200% zoom == 640 CSS px (viewport equivalence, not a
+	// browser-zoom proof on its own).
 	await page.setViewportSize({ width: 640, height: 900 });
 	for (const [name, url] of [
 		["overview", "/"],
@@ -243,7 +244,10 @@ test("200% zoom equivalent layout keeps every screen within the viewport", async
 			contentType: "image/png",
 		});
 	}
-	// In-browser zoom rendering (CSS zoom is what the engine lays out).
+	// Programmatic CSS zoom is an approximation: it exercises the engine's
+	// zoom layout but is NOT manual browser zoom (no CDP-driven real zoom
+	// is available in this environment). Manual browser-zoom verification
+	// is an OPEN follow-up recorded in the review doc.
 	await page.setViewportSize({ width: 1280, height: 900 });
 	await page.goto("/events");
 	await page.evaluate(() => {
@@ -281,9 +285,8 @@ test("drawer and dialogs close on Escape and restore focus", async ({
 		}),
 	).toBe(true);
 
-	// Dialog Escape closes; state-driven dialogs (no Radix trigger
-	// association) fall back to the document body, and the opener stays
-	// keyboard-reachable with no focus trap.
+	// State-driven dialogs (no Radix trigger association) return focus to
+	// the opener on every close path, with no focus trap.
 	await page.goto("/projects");
 	const opener = page.getByRole("button", { name: "New project" });
 	await opener.click();
@@ -294,9 +297,19 @@ test("drawer and dialogs close on Escape and restore focus", async ({
 	await expect(
 		page.getByRole("heading", { name: "New project" }),
 	).not.toBeVisible();
-	expect(await page.evaluate(() => document.hasFocus())).toBe(true);
-	await opener.focus();
 	await expect(opener).toBeFocused();
+
+	// The Close (X) button path restores the opener too.
+	await opener.click();
+	await expect(
+		page.getByRole("heading", { name: "New project" }),
+	).toBeVisible();
+	await page.getByRole("dialog").getByRole("button", { name: "Close" }).click();
+	await expect(
+		page.getByRole("heading", { name: "New project" }),
+	).not.toBeVisible();
+	await expect(opener).toBeFocused();
+	expect(await page.evaluate(() => document.hasFocus())).toBe(true);
 });
 
 test("payload needs an explicit action, stays bounded, and missing disables replay", async ({
@@ -426,7 +439,7 @@ test("named screens render their headings and landmarks", async ({
 		archives: { kind: "data", items: [rows.archive()] },
 	});
 	const screens = [
-		["setup", "/login", "Sign in to Hookflare"],
+		["login", "/login", "Sign in to Hookflare"],
 		["overview", "/", "Overview"],
 		["events", "/events", "Events"],
 		["event-detail", "/events/evt_1", "evt_1"],
