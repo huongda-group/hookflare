@@ -62,11 +62,7 @@ export function EventsPage({
 					}
 				/>
 			</div>
-			<EventFilters
-				key={JSON.stringify(search)}
-				value={search}
-				onApply={(patch) => setSearch(patch)}
-			/>
+			<EventFilters value={search} onApply={(patch) => setSearch(patch)} />
 			<p className="text-xs text-muted-foreground">
 				Status and delivery columns describe the latest delivery for each
 				event. A status filter matches delivery history, which can differ

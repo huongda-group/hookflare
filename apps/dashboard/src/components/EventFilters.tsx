@@ -1,6 +1,6 @@
 import { DELIVERY_STATUS_VALUES } from "@hookflare/shared";
 import { useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ResourcePicker } from "@/components/ResourcePicker";
 import { TimeRangeFilter } from "@/components/TimeRangeFilter";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,27 @@ export function EventFilters({
 	const [to, setTo] = useState<number | undefined>(value.to);
 	const [hint, setHint] = useState<string | null>(null);
 	const [httpError, setHttpError] = useState<string | null>(null);
+
+	// Follow committed URL values without remounting: each draft syncs only
+	// from its own committed field. Unrelated commits (e.g. a status toggle)
+	// leave in-progress text/time drafts alone, while Back/Forward navigation
+	// to a different committed value refreshes the matching draft.
+	useEffect(() => {
+		setProvider(value.provider_event_id ?? "");
+	}, [value.provider_event_id]);
+	useEffect(() => {
+		setHttpText(value.http_status?.toString() ?? "");
+		setHttpError(null);
+	}, [value.http_status]);
+	useEffect(() => {
+		setFrom(value.from);
+	}, [value.from]);
+	useEffect(() => {
+		setTo(value.to);
+	}, [value.to]);
+	useEffect(() => {
+		setHint(null);
+	}, [value.source_id]);
 
 	const commit = () => {
 		const v = provider.trim();

@@ -79,6 +79,49 @@ describe("Events", () => {
 		expect(screen.getByLabelText("Destination")).toHaveTextContent("dst_1");
 	});
 
+	it("preserves text drafts on unrelated commits but refreshes on navigation", async () => {
+		server.use(
+			http.get(apiUrl("/events"), () =>
+				HttpResponse.json({ data: [eventSummary()], next_cursor: null }),
+			),
+		);
+		const { user, router } = renderApp(
+			"/events?project_id=prj_1&source_id=src_1",
+		);
+		await screen.findByRole("link", { name: "evt_1" });
+		const box = screen.getByLabelText("Search");
+		const httpBox = screen.getByLabelText("HTTP status");
+		await user.type(box, "pi_draft");
+		await user.type(httpBox, "50");
+		// Unrelated commit: toggling a status must not drop uncommitted drafts.
+		await user.click(screen.getByRole("button", { name: "dead" }));
+		await waitFor(() =>
+			expect(router.state.location.search).toMatchObject({
+				status: ["dead"],
+			}),
+		);
+		expect(box).toHaveValue("pi_draft");
+		expect(httpBox).toHaveValue(50);
+		expect(router.state.location.search).not.toMatchObject({
+			provider_event_id: "pi_draft",
+		});
+		// Navigation to a different committed value refreshes the drafts.
+		await router.navigate({
+			to: "/events",
+			search: {
+				project_id: "prj_1",
+				source_id: "src_1",
+				provider_event_id: "pi_nav",
+				http_status: 503,
+			},
+		});
+		await waitFor(() => expect(box).toHaveValue("pi_nav"));
+		expect(httpBox).toHaveValue(503);
+		router.history.back();
+		await waitFor(() => expect(box).toHaveValue(""));
+		expect(httpBox).toHaveValue(null);
+	});
+
 	it("sends an exact provider event ID only on submit, never per keystroke", async () => {
 		let seen = new URLSearchParams();
 		server.use(
