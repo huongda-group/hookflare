@@ -9,11 +9,13 @@ import {
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { type ReactNode, useState } from "react";
+import type { AlertChannel } from "@hookflare/shared";
 import { describe, expect, it, vi } from "vitest";
 import { createQueryClient } from "@/router";
 import { destination, project } from "@/test/fixtures";
 import { apiUrl, server } from "@/test/server";
 import { invalidateDeliveryViews } from "@/lib/queries/invalidate-delivery-views";
+import { AlertChannelDialog } from "./AlertChannelDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { DestinationFormDialog } from "./DestinationFormDialog";
 import { ReplayDialog } from "./ReplayDialog";
@@ -803,6 +805,82 @@ describe("RotateSecretDialog naming", () => {
 			/>,
 		);
 		expect(await screen.findByText(/billing api/i)).toBeInTheDocument();
+	});
+});
+
+describe("AlertChannelDialog", () => {
+	const channel: AlertChannel = {
+		id: "ach_1",
+		name: "ops",
+		type: "discord",
+		enabled: true,
+		rules: [],
+		project_ids: [],
+		config_fingerprint: "a1b2c3d4",
+		chat_id: null,
+		created_at: 1,
+		updated_at: 1,
+	};
+
+	it("creates with the webhook config through the current API", async () => {
+		const bodies: unknown[] = [];
+		server.use(
+			http.post(apiUrl("/alert-channels"), async ({ request }) => {
+				bodies.push(await request.json());
+				return HttpResponse.json(channel, { status: 201 });
+			}),
+		);
+		const { user } = await wrap(
+			<AlertChannelDialog onOpenChange={() => {}} onSaved={() => {}} />,
+		);
+		await user.type(screen.getByLabelText("Name"), "ops");
+		await user.type(
+			screen.getByLabelText("Webhook URL"),
+			"https://discord.com/api/webhooks/123/abc",
+		);
+		await user.click(screen.getByRole("button", { name: "Save" }));
+		await waitFor(() => expect(bodies).toHaveLength(1));
+		expect(bodies[0]).toMatchObject({
+			name: "ops",
+			config: {
+				type: "discord",
+				url: "https://discord.com/api/webhooks/123/abc",
+			},
+		});
+	});
+
+	it("edits metadata without re-sending untouched credentials", async () => {
+		const bodies: unknown[] = [];
+		server.use(
+			http.patch(apiUrl("/alert-channels/ach_1"), async ({ request }) => {
+				bodies.push(await request.json());
+				return HttpResponse.json(channel);
+			}),
+		);
+		const { user } = await wrap(
+			<AlertChannelDialog
+				channel={channel}
+				onOpenChange={() => {}}
+				onSaved={() => {}}
+			/>,
+		);
+		expect(await screen.findByLabelText(/New webhook URL/)).toHaveValue("");
+		await user.clear(screen.getByLabelText("Name"));
+		await user.type(screen.getByLabelText("Name"), "ops v2");
+		await user.click(screen.getByRole("button", { name: "Save" }));
+		await waitFor(() => expect(bodies).toHaveLength(1));
+		expect(bodies[0]).toMatchObject({ name: "ops v2" });
+		expect(bodies[0]).not.toHaveProperty("config");
+	});
+
+	it("only offers supported channel types", async () => {
+		await wrap(
+			<AlertChannelDialog onOpenChange={() => {}} onSaved={() => {}} />,
+		);
+		const options = Array.from(
+			screen.getByLabelText("Type").querySelectorAll("option"),
+		).map((o) => o.textContent);
+		expect(options.sort()).toEqual(["discord", "slack", "telegram"]);
 	});
 });
 
