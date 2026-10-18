@@ -1,5 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import {
 	createMemoryHistory,
 	createRootRoute,
@@ -13,11 +13,16 @@ import { describe, expect, it, vi } from "vitest";
 import { createQueryClient } from "@/router";
 import { destination, project } from "@/test/fixtures";
 import { apiUrl, server } from "@/test/server";
+import { invalidateDeliveryViews } from "@/lib/queries/invalidate-delivery-views";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { DestinationFormDialog } from "./DestinationFormDialog";
 import { ReplayDialog } from "./ReplayDialog";
 import { RotateSecretDialog } from "./RotateSecretDialog";
 import { SecretRevealDialog } from "./SecretRevealDialog";
+
+vi.mock("@/lib/queries/invalidate-delivery-views", () => ({
+	invalidateDeliveryViews: vi.fn(),
+}));
 
 const wrap = (ui: ReactNode) =>
 	render(
@@ -413,12 +418,66 @@ describe("ReplayDialog validation and outcomes (spec §8.8)", () => {
 				target={{ kind: "bulk", deliveryIds: ["dlv_1"] }}
 			/>,
 		);
-		fireEvent.change(screen.getByLabelText("Reason"), {
-			target: { value: "x".repeat(501) },
-		});
-		await userEvent.click(screen.getByRole("button", { name: "Replay 1" }));
+		// Typed keystrokes (not a programmatic change event), so a maxLength
+		// cap would silently truncate and no error could ever appear.
+		await userEvent.type(screen.getByLabelText("Reason"), "x".repeat(501));
 		expect(await screen.findByText(/1–500 characters/i)).toBeInTheDocument();
+		await userEvent.click(screen.getByRole("button", { name: "Replay 1" }));
 		expect(sent).not.toHaveBeenCalled();
+	});
+
+	it("invalidates all delivery views after a successful replay", async () => {
+		server.use(
+			http.post(apiUrl("/failures/replay"), () =>
+				HttpResponse.json({
+					replayed: [
+						{ delivery_id: "dlv_1", new_delivery_id: "dlv_9", enqueued: true },
+					],
+					skipped: [],
+				}),
+			),
+		);
+		wrap(
+			<ReplayDialog
+				open
+				onOpenChange={() => {}}
+				target={{ kind: "bulk", deliveryIds: ["dlv_1"] }}
+			/>,
+		);
+		await userEvent.type(screen.getByLabelText("Reason"), "backend fixed");
+		await userEvent.click(screen.getByRole("button", { name: "Replay 1" }));
+		await waitFor(() => expect(invalidateDeliveryViews).toHaveBeenCalled());
+	});
+
+	it("keeps the returned status for a bulk replay", async () => {
+		server.use(
+			http.post(apiUrl("/failures/replay"), () =>
+				HttpResponse.json({
+					replayed: [
+						{
+							delivery_id: "dlv_1",
+							new_delivery_id: "dlv_9",
+							status: "paused",
+							enqueued: false,
+						},
+					],
+					skipped: [],
+				}),
+			),
+		);
+		wrap(
+			<ReplayDialog
+				open
+				onOpenChange={() => {}}
+				target={{ kind: "bulk", deliveryIds: ["dlv_1"] }}
+			/>,
+		);
+		await userEvent.type(screen.getByLabelText("Reason"), "backend fixed");
+		await userEvent.click(screen.getByRole("button", { name: "Replay 1" }));
+		expect(await screen.findByText("dlv_9")).toBeInTheDocument();
+		expect(screen.getByText("Paused")).toBeInTheDocument();
+		expect(screen.getByText(/destination is paused/i)).toBeInTheDocument();
+		expect(screen.queryByText(/delivered/i)).not.toBeInTheDocument();
 	});
 
 	it("issues one POST for a duplicate submit while pending", async () => {

@@ -45,6 +45,19 @@ type Outcome = {
  */
 type Submission = { target: ReplayTarget; reason: string };
 
+/**
+ * The bulk endpoint returns one row per replayed delivery. The shared
+ * `BulkReplayResult` row carries `delivery_id`/`new_delivery_id`/`enqueued`;
+ * a row may additionally carry the new delivery's `status` (same field name
+ * as `ReplayResult.status`), which the outcome view needs for the
+ * paused/not-enqueued branch. Read it defensively so older responses without
+ * the field keep rendering the generic reconciler note.
+ */
+type BulkReplayResponse = {
+	replayed: (BulkReplayResult["replayed"][number] & { status?: string })[];
+	skipped: BulkReplayResult["skipped"];
+};
+
 async function replay({ target, reason }: Submission): Promise<Outcome> {
 	if (target.kind === "event") {
 		const r = await api.post<ReplayResult>(`/events/${target.eventId}/replay`, {
@@ -63,7 +76,7 @@ async function replay({ target, reason }: Submission): Promise<Outcome> {
 			skipped: [],
 		};
 	}
-	const r = await api.post<BulkReplayResult>("/failures/replay", {
+	const r = await api.post<BulkReplayResponse>("/failures/replay", {
 		delivery_ids: target.deliveryIds,
 		reason,
 	});
@@ -72,6 +85,7 @@ async function replay({ target, reason }: Submission): Promise<Outcome> {
 			from: x.delivery_id,
 			to: x.new_delivery_id,
 			enqueued: x.enqueued,
+			status: x.status,
 			eventId: target.eventsByDelivery?.[x.delivery_id],
 		})),
 		skipped: r.skipped,
@@ -150,6 +164,17 @@ export function ReplayDialog({
 			setInvalid(null);
 		}
 		onOpenChange(o);
+	};
+	const onReasonChange = (value: string) => {
+		setReason(value);
+		// Live 1–500 validation: no maxLength cap, so over-length input stays
+		// editable and surfaces the inline error immediately instead of being
+		// silently truncated by the browser.
+		if (value.trim().length > 500) {
+			setInvalid("Reason must be 1–500 characters.");
+		} else if (invalid !== null && value.trim().length > 0) {
+			setInvalid(null);
+		}
 	};
 	const submit = () => {
 		const trimmed = reason.trim();
@@ -239,9 +264,8 @@ export function ReplayDialog({
 						<Label htmlFor="replay-reason">Reason</Label>
 						<Textarea
 							id="replay-reason"
-							maxLength={500}
 							value={reason}
-							onChange={(e) => setReason(e.target.value)}
+							onChange={(e) => onReasonChange(e.target.value)}
 							aria-invalid={invalid !== null}
 						/>
 						{invalid && (

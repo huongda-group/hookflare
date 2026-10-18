@@ -313,7 +313,12 @@ describe("Failures", () => {
 					HttpResponse.json({
 						replayed: [
 							{ delivery_id: "dlv_1", new_delivery_id: "dlv_9", enqueued: true },
-							{ delivery_id: "dlv_2", new_delivery_id: "dlv_8", enqueued: false },
+							{
+								delivery_id: "dlv_2",
+								new_delivery_id: "dlv_8",
+								status: "paused",
+								enqueued: false,
+							},
 						],
 						skipped: [{ delivery_id: "dlv_3", reason: "not_found" }],
 					}),
@@ -343,8 +348,9 @@ describe("Failures", () => {
 			);
 			expect(dialog.getByText("dlv_1")).toBeInTheDocument();
 			expect(dialog.getByText(/not_found/)).toBeInTheDocument();
+			expect(dialog.getByText("Paused")).toBeInTheDocument();
 			expect(
-				dialog.getByText(/reconciler enqueues it within a minute/i),
+				dialog.getByText(/destination is paused/i),
 			).toBeInTheDocument();
 			expect(dialog.queryByText(/delivered/i)).not.toBeInTheDocument();
 			// Original rows stay listed; the completed replay cleared the selection.
