@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { PasswordField } from "@/components/PasswordField";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -7,8 +8,6 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { ApiError } from "@/lib/api";
 import { errorText } from "@/lib/forms";
 import { changePassword } from "@/lib/queries/auth";
@@ -92,30 +91,27 @@ function ChangePasswordForm({
 				<DialogTitle>Change password</DialogTitle>
 			</DialogHeader>
 			<div className="space-y-2">
-				<Label htmlFor="pw-current">Current password</Label>
-				<Input
+				<PasswordField
 					id="pw-current"
-					type="password"
+					label="Current password"
 					autoComplete="current-password"
 					value={current}
 					onChange={(e) => setCurrent(e.target.value)}
 				/>
 			</div>
 			<div className="space-y-2">
-				<Label htmlFor="pw-new">New password</Label>
-				<Input
+				<PasswordField
 					id="pw-new"
-					type="password"
+					label="New password"
 					autoComplete="new-password"
 					value={next}
 					onChange={(e) => setNext(e.target.value)}
 				/>
 			</div>
 			<div className="space-y-2">
-				<Label htmlFor="pw-confirm">Confirm new password</Label>
-				<Input
+				<PasswordField
 					id="pw-confirm"
-					type="password"
+					label="Confirm new password"
 					autoComplete="new-password"
 					value={confirm}
 					onChange={(e) => setConfirm(e.target.value)}

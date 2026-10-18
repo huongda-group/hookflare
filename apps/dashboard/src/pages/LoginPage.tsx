@@ -5,17 +5,15 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
+import {
+	AuthLayout,
+	focusFirstInvalidField,
+} from "@/components/AuthLayout";
+import { PasswordField } from "@/components/PasswordField";
 import { FieldError } from "@/components/ProjectFormDialog";
 import { TurnstileWidget } from "@/components/TurnstileWidget";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ApiError } from "@/lib/api";
@@ -28,9 +26,20 @@ export const loginSearch = z.object({
 });
 export type LoginSearch = z.infer<typeof loginSearch>;
 
+const FIELD_IDS: Record<string, string> = {
+	username: "login-username",
+	password: "login-password",
+};
+
 export function LoginPage({ next }: { next?: string }) {
 	const navigate = useNavigate();
-	const { data: state } = useQuery(authStateQuery);
+	const {
+		data: state,
+		isPending: authPending,
+		isError: authFailed,
+		refetch: refetchAuth,
+		isFetching: authRefetching,
+	} = useQuery(authStateQuery);
 	const siteKey = state?.turnstile_site_key ?? null;
 	const [token, setToken] = useState<string | null>(null);
 	const [resetKey, setResetKey] = useState(0);
@@ -43,79 +52,99 @@ export function LoginPage({ next }: { next?: string }) {
 		resolver: zodResolver(loginRequest),
 		defaultValues: { username: "", password: "" },
 	});
-	const submit = form.handleSubmit(async (values) => {
-		setError(null);
-		// Drop any root error from a previous attempt so only the latest shows.
-		form.clearErrors("root");
-		try {
-			await login({ ...values, turnstile_token: token ?? undefined });
-			await navigate({ href: safeNext(next) });
-		} catch (err) {
-			// Turnstile tokens are single-use: drop it and reset the widget.
-			setToken(null);
-			setResetKey((k) => k + 1);
-			if (err instanceof ApiError && err.status === 401) {
-				setError("Invalid username or password");
-			} else if (err instanceof ApiError && err.status === 429) {
-				setError("Too many attempts, try again in a minute");
-			} else {
-				applyServerIssues(form, err);
+	const errors = form.formState.errors;
+	const submit = form.handleSubmit(
+		async (values) => {
+			setError(null);
+			// Drop any root error from a previous attempt so only the latest shows.
+			form.clearErrors("root");
+			try {
+				await login({ ...values, turnstile_token: token ?? undefined });
+				await navigate({ href: safeNext(next) });
+			} catch (err) {
+				// Turnstile tokens are single-use: drop it and reset the widget.
+				setToken(null);
+				setResetKey((k) => k + 1);
+				if (err instanceof ApiError && err.status === 401) {
+					setError("Invalid username or password");
+				} else if (err instanceof ApiError && err.status === 429) {
+					setError("Too many attempts, try again in a minute");
+				} else {
+					applyServerIssues(form, err);
+				}
 			}
-		}
-	});
+		},
+		(submitErrors) => {
+			focusFirstInvalidField(FIELD_IDS, (name) => name in submitErrors);
+		},
+	);
+	const blocked = authPending || authFailed;
 	return (
-		<main className="mx-auto mt-24 w-full max-w-sm px-4">
-			<Card>
-				<CardHeader>
-					<CardTitle>Sign in</CardTitle>
-					<CardDescription>Hookflare administration</CardDescription>
-				</CardHeader>
-				<CardContent>
-					<form onSubmit={submit} className="space-y-3">
-						<div>
-							<Label htmlFor="login-username">Username</Label>
-							<Input
-								id="login-username"
-								autoComplete="username"
-								{...form.register("username")}
-							/>
-							<FieldError message={form.formState.errors.username?.message} />
-						</div>
-						<div>
-							<Label htmlFor="login-password">Password</Label>
-							<Input
-								id="login-password"
-								type="password"
-								autoComplete="current-password"
-								{...form.register("password")}
-							/>
-							<FieldError message={form.formState.errors.password?.message} />
-						</div>
-						<TurnstileWidget
-							siteKey={siteKey}
-							action="login"
-							onToken={setToken}
-							resetKey={resetKey}
-						/>
-						{error && (
-							<Alert variant="destructive">
-								<AlertDescription>{error}</AlertDescription>
-							</Alert>
-						)}
-						<FieldError message={form.formState.errors.root?.message} />
-						<Button
-							type="submit"
-							className="w-full"
-							disabled={
-								form.formState.isSubmitting ||
-								(siteKey !== null && token === null)
-							}
-						>
-							Sign in
-						</Button>
-					</form>
-				</CardContent>
-			</Card>
-		</main>
+		<AuthLayout
+			title="Sign in to Hookflare"
+			description="Welcome back — sign in to manage webhook delivery."
+		>
+			{authPending ? <p role="status">Loading…</p> : null}
+			{authFailed ? (
+				<div
+					role="alert"
+					className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-failure-surface px-4 py-3 text-sm text-failure"
+				>
+					<p>Could not load sign-in state. Check your connection.</p>
+					<Button
+						variant="outline"
+						disabled={authRefetching}
+						onClick={() => void refetchAuth()}
+					>
+						Retry
+					</Button>
+				</div>
+			) : null}
+			<form onSubmit={submit} className="space-y-4">
+				<div>
+					<Label htmlFor="login-username">Username</Label>
+					<Input
+						id="login-username"
+						autoComplete="username"
+						{...form.register("username")}
+					/>
+					<FieldError message={errors.username?.message} />
+				</div>
+				<div>
+					<PasswordField
+						id="login-password"
+						label="Password"
+						autoComplete="current-password"
+						{...form.register("password")}
+					/>
+					<FieldError message={errors.password?.message} />
+				</div>
+				{blocked ? null : (
+					<TurnstileWidget
+						siteKey={siteKey}
+						action="login"
+						onToken={setToken}
+						resetKey={resetKey}
+					/>
+				)}
+				{error && (
+					<Alert variant="destructive">
+						<AlertDescription>{error}</AlertDescription>
+					</Alert>
+				)}
+				<FieldError message={errors.root?.message} />
+				<Button
+					type="submit"
+					className="w-full"
+					disabled={
+						form.formState.isSubmitting ||
+						blocked ||
+						(siteKey !== null && token === null)
+					}
+				>
+					{form.formState.isSubmitting ? "Signing in…" : "Sign in"}
+				</Button>
+			</form>
+		</AuthLayout>
 	);
 }

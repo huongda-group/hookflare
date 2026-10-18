@@ -17,9 +17,15 @@ import { api } from "@/lib/api";
 import { applyServerIssues } from "@/lib/forms";
 import { qk } from "@/lib/queries/keys";
 
-export function FieldError({ message }: { message?: string }) {
+export function FieldError({
+	message,
+	id,
+}: {
+	message?: string;
+	id?: string;
+}) {
 	return message ? (
-		<p data-field-error className="text-sm text-red-700">
+		<p id={id} data-field-error className="text-sm text-red-700">
 			{message}
 		</p>
 	) : null;

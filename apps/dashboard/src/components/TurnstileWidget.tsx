@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const SCRIPT_SRC =
 	"https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
@@ -8,6 +8,7 @@ type TurnstileRenderOptions = {
 	action: string;
 	callback: (token: string) => void;
 	"expired-callback": () => void;
+	"error-callback": () => void;
 };
 
 type TurnstileApi = {
@@ -42,9 +43,11 @@ function loadTurnstile(): Promise<void> {
 }
 
 /**
- * The explicit-render Turnstile widget (spec §6.5.1). Tokens are single-use,
- * so the page bumps `resetKey` after every failed submit and the yielded token
- * is dropped. With `siteKey === null` Turnstile is off and only a notice shows.
+ * The explicit-render Turnstile widget (spec §6.5.1, §8.1–8.2). States are
+ * explicit: loading while the script renders, off (a neutral notice naming
+ * what still protects the form), and error/expiry (a blocking server error
+ * is surfaced, never a UI bypass). Tokens are single-use, so the page bumps
+ * `resetKey` after every failed submit and the yielded token is dropped.
  */
 export function TurnstileWidget({
 	siteKey,
@@ -59,6 +62,7 @@ export function TurnstileWidget({
 }) {
 	const container = useRef<HTMLDivElement>(null);
 	const widgetId = useRef<string | null>(null);
+	const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
 	// The callback is read through a ref so a re-render never re-renders the widget.
 	const onTokenRef = useRef(onToken);
 	useEffect(() => {
@@ -67,6 +71,7 @@ export function TurnstileWidget({
 
 	useEffect(() => {
 		if (siteKey === null) return;
+		setStatus("loading");
 		let cancelled = false;
 		void loadTurnstile()
 			.then(() => {
@@ -76,9 +81,18 @@ export function TurnstileWidget({
 					action,
 					callback: (token) => onTokenRef.current(token),
 					"expired-callback": () => onTokenRef.current(null),
+					"error-callback": () => {
+						if (!cancelled) setStatus("error");
+						onTokenRef.current(null);
+					},
 				});
+				if (!cancelled) setStatus("ready");
 			})
-			.catch(() => onTokenRef.current(null));
+			.catch(() => {
+				if (cancelled) return;
+				setStatus("error");
+				onTokenRef.current(null);
+			});
 		return () => {
 			cancelled = true;
 		};
@@ -91,6 +105,28 @@ export function TurnstileWidget({
 	}, [resetKey, siteKey]);
 
 	if (siteKey === null)
-		return <p className="text-neutral-500">Turnstile is off</p>;
-	return <div ref={container} />;
+		return (
+			<p className="text-sm text-muted-foreground">
+				{action === "setup"
+					? "Bot protection is off. The setup token is still required."
+					: "Bot protection is off."}
+			</p>
+		);
+	if (status === "error")
+		return (
+			<p role="alert" className="text-sm text-failure">
+				The security check failed to load. Reload the page and try again —
+				sign-in stays blocked until it succeeds.
+			</p>
+		);
+	return (
+		<div>
+			<div ref={container} />
+			{status === "loading" ? (
+				<p role="status" className="text-sm text-muted-foreground">
+					Loading security check…
+				</p>
+			) : null}
+		</div>
+	);
 }
