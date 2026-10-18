@@ -5,6 +5,7 @@ import { z } from "zod";
 import { CursorTable } from "@/components/CursorTable";
 import { IdText } from "@/components/IdText";
 import { JsonViewer } from "@/components/JsonViewer";
+import { PageHeader } from "@/components/PageHeader";
 import { TimeText } from "@/components/TimeText";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,7 +24,7 @@ export type AuditSearch = z.infer<typeof auditSearch>;
 function Diff({ diff }: { diff: unknown }) {
 	const [open, setOpen] = useState(false);
 	if (diff === null || diff === undefined)
-		return <span className="text-neutral-400">—</span>;
+		return <span className="text-muted-foreground">—</span>;
 	return (
 		<div>
 			<button
@@ -74,13 +75,17 @@ export function AuditPage({
 	);
 	return (
 		<div className="space-y-4">
-			<h1 className="text-xl font-semibold">Audit</h1>
-			<div className="flex flex-wrap gap-3">
-				{filter("actor", "Actor")}
-				{filter("action", "Action")}
-				{filter("resource_type", "Resource type")}
-				{filter("resource_id", "Resource ID")}
-			</div>
+			<PageHeader
+				title="Audit"
+				description="Admin-only: who changed what, with the redacted diff behind each change."
+			>
+				<div className="flex flex-wrap gap-3">
+					{filter("actor", "Actor")}
+					{filter("action", "Action")}
+					{filter("resource_type", "Resource type")}
+					{filter("resource_id", "Resource ID")}
+				</div>
+			</PageHeader>
 			<CursorTable<AuditLog>
 				query={query}
 				rowKey={(a) => a.id}
