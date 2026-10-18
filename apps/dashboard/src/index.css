@@ -1,1 +1,203 @@
 @import "tailwindcss";
+
+/*
+ * Hookflare dashboard — semantic light theme (spec §5, direction B).
+ *
+ * This iteration is a fixed light theme: there is no dark palette, no theme
+ * switch, and no dark-mode-dependent styling. The `dark:` variant is kept
+ * compiling (existing components still use it) but is scoped to a `.dark`
+ * class that is never applied, so `prefers-color-scheme: dark` cannot flip
+ * individual controls into a half-styled dark variant.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Typography: system UI stack for interface text; the system monospace stack
+ * only for IDs, code, JSON, hashes, and measured values. No external fonts.
+ */
+@theme {
+	--font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+		"Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji",
+		"Segoe UI Emoji";
+	--font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+		"Liberation Mono", monospace;
+}
+
+/*
+ * Raw design tokens (spec §5).
+ *
+ * Contrast (WCAG 2.2 AA, measured against the surfaces the token is used on):
+ * - foreground #202831 on canvas/surface/sidebar: 14.1–14.9:1
+ * - muted-foreground #536371 on canvas/surface/sidebar: 5.5–6.2:1
+ * - action #246A9E with white label: 5.8:1; hover #1C567F with white: 7.8:1
+ * - selected #215C87 on #DCE8F2: 5.7:1
+ * - success #29624B on #EAF4EF: 6.3:1
+ * - warning #855B16 on #FCF0DD: 5.3:1
+ * - failure #963B34 on #FBEAE8: 6.1:1 (white on #963B34: 7.1:1)
+ * - focus #246A9E vs surface 5.8:1, canvas 5.5:1, sidebar 5.2:1 (≥3:1)
+ * - border #D6DFE6 is the spec's boundary value: 1.35:1 against white. It is
+ *   a low-emphasis separator/outline, so form controls also carry a visible
+ *   label, text, and a 5.8:1 focus indicator to identify the control.
+ */
+:root {
+	/* Surfaces */
+	--canvas: #f8fafb;
+	--surface: #ffffff;
+	--sidebar: #f0f3f5;
+
+	/* Boundaries */
+	--border: #d6dfe6;
+	--input: #d6dfe6;
+
+	/* Text */
+	--foreground: #202831;
+	--muted-foreground: #536371;
+
+	/* Action */
+	--action: #246a9e;
+	--action-hover: #1c567f;
+	--action-foreground: #ffffff;
+
+	/* Selected navigation */
+	--selected: #dce8f2;
+	--selected-foreground: #215c87;
+
+	/* Status */
+	--success: #29624b;
+	--success-surface: #eaf4ef;
+	--warning: #855b16;
+	--warning-surface: #fcf0dd;
+	--failure: #963b34;
+	--failure-surface: #fbeae8;
+	--info: #215c87;
+	--info-surface: #dce8f2;
+
+	/* Hover surface for ghost/outline controls and menu items */
+	--accent: #e9eef3;
+
+	/* Focus indicator */
+	--focus: #246a9e;
+
+	/* Radii: 6–8px controls, 12px panels */
+	--radius-control: 0.5rem;
+	--radius-panel: 0.75rem;
+}
+
+/*
+ * Tailwind aliases. Components consume these names and never a raw palette
+ * value. The second group keeps the existing shadcn/ui component vocabulary
+ * (bg-background, text-foreground, bg-primary, …) working on the same values.
+ */
+@theme inline {
+	--color-canvas: var(--canvas);
+	--color-surface: var(--surface);
+	--color-sidebar: var(--sidebar);
+	--color-border: var(--border);
+	--color-input: var(--input);
+	--color-foreground: var(--foreground);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-action: var(--action);
+	--color-action-hover: var(--action-hover);
+	--color-action-foreground: var(--action-foreground);
+	--color-selected: var(--selected);
+	--color-selected-foreground: var(--selected-foreground);
+	--color-success: var(--success);
+	--color-success-surface: var(--success-surface);
+	--color-warning: var(--warning);
+	--color-warning-surface: var(--warning-surface);
+	--color-failure: var(--failure);
+	--color-failure-surface: var(--failure-surface);
+	--color-info: var(--info);
+	--color-info-surface: var(--info-surface);
+
+	--color-background: var(--canvas);
+	--color-card: var(--surface);
+	--color-card-foreground: var(--foreground);
+	--color-popover: var(--surface);
+	--color-popover-foreground: var(--foreground);
+	--color-primary: var(--action);
+	--color-primary-foreground: var(--action-foreground);
+	--color-secondary: var(--sidebar);
+	--color-secondary-foreground: var(--foreground);
+	--color-muted: var(--sidebar);
+	--color-accent: var(--accent);
+	--color-accent-foreground: var(--foreground);
+	--color-destructive: var(--failure);
+	--color-ring: var(--focus);
+
+	--radius-sm: 0.375rem;
+	--radius-md: var(--radius-control);
+	--radius-lg: var(--radius-panel);
+}
+
+@layer base {
+	*,
+	::before,
+	::after {
+		border-color: var(--border);
+	}
+
+	html {
+		color-scheme: light;
+	}
+
+	body {
+		background-color: var(--canvas);
+		color: var(--foreground);
+		font-family: var(--font-sans);
+		/* Body 14px desktop / 15px mobile (spec §5). */
+		font-size: 0.875rem;
+		line-height: 1.5;
+		-webkit-font-smoothing: antialiased;
+	}
+
+	@media (max-width: 767px) {
+		body {
+			font-size: 0.9375rem;
+		}
+	}
+
+	/* Baseline visible focus: 2px blue outline with a 2px offset. */
+	:focus-visible {
+		outline: 2px solid var(--focus);
+		outline-offset: 2px;
+	}
+}
+
+/* Only short focus/hover/disclosure transitions; honor reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	::before,
+	::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
+}
+
+/*
+ * Touch targets (spec §5): desktop controls stay 40–44px high, but on a coarse
+ * (touch) pointer every interactive control must offer at least a 44px target.
+ * `min-height`/`min-width` clamp the utility height/width, so the desktop
+ * sizing utilities are untouched and only touch devices grow. Checkboxes and
+ * radios keep their small visible box and instead grow their invisible hit
+ * area (20px box + 2×12px inset = 44px).
+ */
+@media (pointer: coarse) {
+	[data-slot="button"],
+	[data-slot="input"],
+	[data-slot="select-trigger"],
+	button:not([data-slot="checkbox"]):not([data-slot="radio"]),
+	input:not([type="checkbox"]):not([type="radio"]),
+	select,
+	textarea {
+		min-height: 44px;
+		min-width: 44px;
+	}
+
+	[data-slot="checkbox"]::after,
+	[data-slot="radio"]::after {
+		inset: -0.75rem;
+	}
+}

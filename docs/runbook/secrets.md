@@ -31,14 +31,16 @@ A restored (or brand-new) deployment needs these secrets before it works:
 | Secret | How to set |
 |---|---|
 | `SECRETS_KEY` | `pnpm exec wrangler secret put SECRETS_KEY --config <config>` (verify on staging in drill), pasting the value from the password manager |
-| `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` | Service token for automation; add its `svc:<client id>` identity as operator through the dashboard Users page (see [setup.md](setup.md)) |
+| `SETUP_TOKEN` | Claim token for the first-admin onboarding page; `pnpm exec wrangler secret put SETUP_TOKEN --config <config>`. No longer used after onboarding (it can be deleted) |
+| `TURNSTILE_SECRET_KEY` | Secret key of the Turnstile widget for the Worker hostname (see [setup.md](setup.md)); the site key goes in `vars` as `TURNSTILE_SITE_KEY` |
+| `HOOKFLARE_API_TOKEN` | Not a Worker secret — an API token created in Settings › Users for the smoke/bench user (role `admin`); export it on the machine that runs the smoke |
 | Source webhook secrets | Re-create each source through the dashboard or admin API; providers must be given the new signing secret |
 | Destination signing secrets | Re-enter per destination through the dashboard or admin API |
 | Alert channel configs (Discord/Slack/Telegram) | Re-enter through the dashboard or admin API; channel configs are encrypted and never returned by the API |
 
-For local development, `SECRETS_KEY` (and `ACCESS_DEV_EMAIL`) live in
-`apps/gateway/.dev.vars`, copied from `.dev.vars.example` — never commit
-the real file.
+For local development, `SECRETS_KEY` (plus `SETUP_TOKEN` and the Turnstile
+test keys) live in `apps/gateway/.dev.vars`, copied from
+`.dev.vars.example` — never commit the real file.
 
 ## Leaked secrets: rotate through the API
 

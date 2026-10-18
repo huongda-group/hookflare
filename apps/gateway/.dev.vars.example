@@ -2,7 +2,12 @@
 # Never commit real secrets.
 # Generate a key with: openssl rand -base64 32
 SECRETS_KEY="REPLACE_ME"
-# Local only: skips Access JWT checks for requests to localhost/127.0.0.1 and
-# acts as this email (it must also be in BOOTSTRAP_ADMIN_EMAILS).
-ACCESS_DEV_EMAIL="you@example.com"
-BOOTSTRAP_ADMIN_EMAILS="you@example.com"
+# Claim token for the first-admin onboarding page at /setup. Any random
+# value works locally; the setup page asks for it on a fresh database.
+SETUP_TOKEN="dev-setup-token"
+# Cloudflare Turnstile test keys (always pass; see
+# https://developers.cloudflare.com/turnstile/troubleshooting/testing/).
+# Production keys come from a Turnstile widget created for the Worker
+# hostname (see docs/runbook/setup.md).
+TURNSTILE_SITE_KEY="1x00000000000000000000AA"
+TURNSTILE_SECRET_KEY="1x0000000000000000000000000000000AA"

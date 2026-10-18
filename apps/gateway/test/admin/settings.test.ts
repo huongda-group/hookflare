@@ -5,7 +5,6 @@ import {
 } from "@hookflare/shared";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
-import { clearAccessKeyCache } from "../../src/admin/auth/access";
 import { startArchiveRun } from "../../src/core/archive-run";
 import { auditLogs, settings } from "../../src/core/db/schema";
 import { createLogger } from "../../src/core/log";
@@ -27,7 +26,6 @@ const next = {
 };
 
 beforeEach(async () => {
-	clearAccessKeyCache();
 	clearSettingsCache();
 	const deps = testDeps();
 	await deps.db.delete(settings).where(eq(settings.key, RETRY_DEFAULTS_KEY));

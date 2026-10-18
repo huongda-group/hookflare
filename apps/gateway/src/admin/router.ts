@@ -1,10 +1,11 @@
 import { Hono } from "hono";
 import type { AppBindings } from "../app";
-import { accessMiddleware } from "./auth/access";
+import { authMiddleware } from "./auth/session";
 import { alertChannelRoutes } from "./routes/alert-channels";
 import { alertRoutes } from "./routes/alerts";
 import { archiveRoutes } from "./routes/archives";
 import { auditLogRoutes } from "./routes/audit-logs";
+import { authRoutes } from "./routes/auth";
 import { backupRoutes } from "./routes/backups";
 import { destinationRoutes } from "./routes/destinations";
 import { eventRoutes } from "./routes/events";
@@ -16,10 +17,13 @@ import { settingsRoutes } from "./routes/settings";
 import { sourceRoutes } from "./routes/sources";
 import { userRoutes } from "./routes/users";
 
-/** /api/admin/v1 — Access, then a users row, then a per-route permission. */
-export function adminRoutes(options: { accessFetch?: typeof fetch } = {}) {
+/** /api/admin/v1 — built-in auth, then a per-route permission. */
+export function adminRoutes() {
 	const routes = new Hono<AppBindings>();
-	routes.use("*", accessMiddleware({ fetch: options.accessFetch }));
+	// Public auth routes are registered before the middleware, so their
+	// handlers respond first and authMiddleware never runs for /auth/*.
+	routes.route("/auth", authRoutes());
+	routes.use("*", authMiddleware());
 	routes.route("/me", meRoutes());
 	routes.route("/overview", overviewRoutes());
 	routes.route("/projects", projectRoutes());

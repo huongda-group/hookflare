@@ -314,25 +314,33 @@ const pageLimit = z.coerce.number().int().min(1).max(100).default(50);
 const cursor = z.string().max(512).optional();
 /** Query flags arrive as strings. */
 const queryBool = z.enum(["true", "false"]).transform((v) => v === "true");
-const email = z.string().trim().toLowerCase().pipe(z.email().max(254));
+/**
+ * M7: usernames replace the M3 identity union (an email or a `svc:` service
+ * identity). `@` stays allowed so migrated email identities are valid.
+ */
+export const USERNAME_PATTERN = /^[a-z0-9][a-z0-9._@+-]{2,63}$/;
+export const username = z.string().trim().toLowerCase().regex(USERNAME_PATTERN);
+/** 12–256 characters, no composition rules, and never trimmed (spec M7). */
+export const password = z.string().min(12).max(256);
 
-/** Service-token identities (`svc:`) authenticate like users (§6.1). */
-export function isServiceIdentity(id: string): boolean {
-	return id.startsWith("svc:");
-}
-
-/** The only `svc:` identities a users row can be created for. */
-export const SERVICE_IDENTITY_PATTERN = /^svc:[a-z0-9._-]{1,200}$/;
-
-const serviceIdentity = z
-	.string()
-	.trim()
-	.toLowerCase()
-	.regex(SERVICE_IDENTITY_PATTERN);
-/** Either a user email or a service-token identity. */
-export const userId = z.union([email, serviceIdentity]);
+export const loginRequest = z.strictObject({
+	/** Free-form, not `username`: legacy keys like `svc:legacy` can still log in. */
+	username: z.string().trim().toLowerCase().min(1).max(254),
+	password: z.string().min(1).max(256),
+	turnstile_token: z.string().max(2048).optional(),
+});
+export const setupRequest = z.strictObject({
+	username,
+	password,
+	setup_token: z.string().min(1).max(256),
+	turnstile_token: z.string().max(2048).optional(),
+});
+/** `GET /auth/state` (spec M7). */
+export type AuthState = {
+	setup_required: boolean;
+	turnstile_site_key: string | null;
+};
 const graceHours = z.number().int().min(0).max(168).default(24);
-
 /** `status` and `destination_id`-style filters may repeat (`?status=a&status=b`). */
 export const eventSearchQuery = z
 	.object({
@@ -364,7 +372,7 @@ export const failuresQuery = z.object({
 });
 
 export const auditLogQuery = z.object({
-	actor_email: userId.optional(),
+	actor: z.string().trim().toLowerCase().min(1).max(254).optional(),
 	resource_type: z.string().min(1).max(50).optional(),
 	resource_id: z.string().min(1).max(64).optional(),
 	action: z.string().min(1).max(100).optional(),
@@ -406,8 +414,9 @@ export const rotateDestinationSecretRequest = z.strictObject({
 export const operateRequest = z.strictObject({ ...optionalReason });
 
 export const createUserRequest = z.strictObject({
-	email: userId,
+	username,
 	role: z.enum(ROLES),
+	password,
 	...optionalReason,
 });
 export const patchUserRequest = z
@@ -419,6 +428,22 @@ export const patchUserRequest = z
 	.refine((v) => v.role !== undefined || v.disabled !== undefined, {
 		message: "role or disabled is required",
 	});
+/** `POST /users/:username/password` (spec M7). */
+export const resetPasswordRequest = z.strictObject({
+	password,
+	...optionalReason,
+});
+/** `POST /me/password` (spec M7). */
+export const changePasswordRequest = z.strictObject({
+	current_password: z.string().min(1).max(256),
+	new_password: password,
+});
+/** `POST /users/:username/tokens` (spec M7). */
+export const createApiTokenRequest = z.strictObject({
+	name,
+	expires_in_days: z.number().int().min(1).max(365).optional(),
+	...optionalReason,
+});
 
 export type DeliveryStatusValue = (typeof DELIVERY_STATUS_VALUES)[number];
 export type EventSummary = {
@@ -462,7 +487,7 @@ export type BulkReplayResult = {
 export type TestDelivery = {
 	id: string;
 	destination_id: string;
-	actor_email: string;
+	actor: string;
 	started_at: number;
 	duration_ms: number;
 	http_status: number | null;
@@ -471,16 +496,28 @@ export type TestDelivery = {
 	response_snippet: string | null;
 };
 export type User = {
-	email: string;
+	username: string;
 	role: Role;
 	created_at: number;
 	updated_at: number;
 	disabled_at: number | null;
+	has_password: boolean;
 };
-export type Me = { email: string; role: Role; permissions: Permission[] };
+export type Me = { username: string; role: Role; permissions: Permission[] };
+export type ApiToken = {
+	id: string;
+	username: string;
+	name: string;
+	created_at: number;
+	expires_at: number | null;
+	last_used_at: number | null;
+	revoked_at: number | null;
+};
+/** The one response that carries the secret; list responses never do. */
+export type CreatedApiToken = ApiToken & { token: string };
 export type AuditLog = {
 	id: string;
-	actor_email: string;
+	actor: string;
 	action: string;
 	resource_type: string;
 	resource_id: string | null;

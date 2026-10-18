@@ -8,7 +8,7 @@ the drill is run on live staging. Procedures:
 
 - Staging Worker URL: _
 - Sink URL: _
-- Service token client ID (`svc:<client id>` added as operator): _
+- API token (created for an admin user; exported as `HOOKFLARE_API_TOKEN`): _
 - Starting version (`wrangler deployments list --json`): _
 - Backup prefix under test (`d1/YYYY/MM/DD/<backup_id>/`): _
 

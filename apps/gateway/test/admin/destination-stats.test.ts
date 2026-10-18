@@ -1,16 +1,11 @@
 import type { DestinationStats } from "@hookflare/shared";
-import { beforeEach, describe, expect, it } from "vitest";
-import { clearAccessKeyCache } from "../../src/admin/auth/access";
+import { describe, expect, it } from "vitest";
 import { destinations, statsHourly } from "../../src/core/db/schema";
 import { floorHour } from "../../src/core/db/stats";
 import { newId } from "../../src/core/ids";
 import { adminApp } from "../helpers/admin";
 import { testDeps } from "../helpers/deps";
 import { seedDelivery, seedPipeline } from "../helpers/seed";
-
-beforeEach(() => {
-	clearAccessKeyCache();
-});
 
 describe("GET /destinations/stats", () => {
 	it("combines window counts with the newest terminal delivery", async () => {

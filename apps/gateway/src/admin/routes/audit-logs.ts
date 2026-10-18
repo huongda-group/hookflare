@@ -15,7 +15,7 @@ export function auditLogRoutes() {
 		const after = decodeCursor(q.value.cursor);
 		if (after === "invalid") return badCursor(c);
 		const rows = await searchAuditLogs(c.var.deps.db, {
-			actorEmail: q.value.actor_email,
+			actor: q.value.actor,
 			resourceType: q.value.resource_type,
 			resourceId: q.value.resource_id,
 			action: q.value.action,
@@ -30,7 +30,7 @@ export function auditLogRoutes() {
 			data: page.map(
 				(r): AuditLog => ({
 					id: r.id,
-					actor_email: r.actorEmail,
+					actor: r.actor,
 					action: r.action,
 					resource_type: r.resourceType,
 					resource_id: r.resourceId,

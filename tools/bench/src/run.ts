@@ -3,7 +3,7 @@
  *
  * Without `--yes` (or with `--estimate`) it only prints the offline cost
  * estimate for the scenario and exits; nothing is sent. With `--yes` it
- * reads HOOKFLARE_URL, CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET, and
+ * reads HOOKFLARE_URL, HOOKFLARE_API_TOKEN, and
  * SINK_URL from the environment, refuses a production URL, provisions one
  * project, one destination, and N hmac sources through the admin API the
  * smoke test uses, fires the arrival schedule without awaiting earlier
@@ -135,11 +135,10 @@ export function accountDelivery(
 	};
 }
 
-function accessHeaders(env: { clientId: string; clientSecret: string }) {
+function accessHeaders(env: { token: string }) {
 	return {
 		"content-type": "application/json",
-		"CF-Access-Client-Id": env.clientId,
-		"CF-Access-Client-Secret": env.clientSecret,
+		authorization: `Bearer ${env.token}`,
 	};
 }
 
@@ -344,9 +343,7 @@ export async function main(
 	}
 	const env = smokeEnv(deps.env);
 	if (!env) {
-		log(
-			"bench: missing one of HOOKFLARE_URL, CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET, SINK_URL",
-		);
+		log("bench: missing one of HOOKFLARE_URL, HOOKFLARE_API_TOKEN, SINK_URL");
 		return exit(2);
 	}
 	try {

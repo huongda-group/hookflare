@@ -99,4 +99,20 @@ describe("JsonViewer", () => {
 		).not.toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Raw" })).toBeInTheDocument();
 	});
+
+	it("explains malformed JSON and falls back to text", () => {
+		render(<JsonViewer text="{broken" contentType="application/json" />);
+		expect(screen.getByText(/not valid JSON/i)).toBeInTheDocument();
+		expect(screen.getByText("{broken")).toBeInTheDocument();
+	});
+
+	it("bounds trees above 256 KB with a notice and collapsed nodes", () => {
+		const big = JSON.stringify({ blob: { data: "x".repeat(300_000) } });
+		render(<JsonViewer text={big} contentType="application/json" />);
+		expect(screen.getByText(/large payload/i)).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /blob/ })).toHaveAttribute(
+			"aria-expanded",
+			"false",
+		);
+	});
 });

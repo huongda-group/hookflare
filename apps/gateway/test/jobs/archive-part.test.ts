@@ -126,13 +126,11 @@ describe("buildEventPart", () => {
 
 describe("buildAuditPart", () => {
 	it("archives the day's audit rows in ID order across parts", async () => {
-		await deps.db
-			.delete(auditLogs)
-			.where(eq(auditLogs.actorEmail, "archive@test"));
+		await deps.db.delete(auditLogs).where(eq(auditLogs.actor, "archive@test"));
 		for (let i = 0; i < 3; i++) {
 			await deps.db.insert(auditLogs).values({
 				id: `aud_arch_${i}`,
-				actorEmail: "archive@test",
+				actor: "archive@test",
 				action: "settings.updated",
 				resourceType: "settings",
 				resourceId: "x",
@@ -144,8 +142,8 @@ describe("buildAuditPart", () => {
 			(await buildAuditPart(deps, batch.id, 1)).itemCount,
 		).toBeGreaterThanOrEqual(3);
 		const { lines } = await readPart(batch.id, 1);
-		expect(
-			lines.filter((l) => l.audit.actor_email === "archive@test"),
-		).toHaveLength(3);
+		expect(lines.filter((l) => l.audit.actor === "archive@test")).toHaveLength(
+			3,
+		);
 	});
 });

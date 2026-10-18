@@ -123,7 +123,7 @@ describe("planRun", () => {
 		const { auditLogs } = await import("../../src/core/db/schema");
 		await deps.db.insert(auditLogs).values({
 			id: "aud_plan_1",
-			actorEmail: "plan@test",
+			actor: "plan@test",
 			action: "settings.updated",
 			resourceType: "settings",
 			resourceId: "x",

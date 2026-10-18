@@ -21,6 +21,13 @@ Durable Object `migrations`-block / Workflow-class change → roll forward
 with a fix, because deploying older code cannot undo those. Older code
 against a contracted schema (or a migrated DO class) breaks.
 
+**2.0.0 is a contract release.** Its migration renames `users.email`,
+`audit_logs.actor_email`, and `test_deliveries.actor_email` in place, so a
+1.x Worker against the migrated database fails on the admin API and test
+deliveries (ingress keeps working). Fix 2.x forward; going below 2.0.0
+means a Time Travel restore to the pre-deploy bookmark first, then the
+Worker rollback — and losing every write since the bookmark.
+
 ## Procedure (verify on staging in drill)
 
 1. **Decide** with the table above. Find the restore point: the failed

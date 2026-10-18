@@ -1,13 +1,7 @@
 import type { AuditLog, Page } from "@hookflare/shared";
-import { beforeEach, describe, expect, it } from "vitest";
-import { clearAccessKeyCache } from "../../src/admin/auth/access";
+import { describe, expect, it } from "vitest";
 import { adminApp } from "../helpers/admin";
 import { testDeps } from "../helpers/deps";
-
-beforeEach(() => {
-	// Each adminApp mints fresh keys under the same kid.
-	clearAccessKeyCache();
-});
 
 describe("GET /audit-logs", () => {
 	it("filters by actor, resource, and action, newest first, with a cursor", async () => {
@@ -21,7 +15,7 @@ describe("GET /audit-logs", () => {
 			});
 			created.push((await res.json<{ id: string }>()).id);
 		}
-		const base = `/audit-logs?actor_email=${encodeURIComponent(api.email)}&action=project.created`;
+		const base = `/audit-logs?actor=${encodeURIComponent(api.username)}&action=project.created`;
 		const first = await (await api.request("GET", `${base}&limit=2`)).json<
 			Page<AuditLog>
 		>();
@@ -41,7 +35,7 @@ describe("GET /audit-logs", () => {
 		expect(one.data).toHaveLength(1);
 		expect(one.data[0]).toMatchObject({
 			action: "project.created",
-			actor_email: api.email,
+			actor: api.username,
 		});
 	});
 
@@ -51,7 +45,6 @@ describe("GET /audit-logs", () => {
 		expect((await admin.request("GET", "/audit-logs?cursor=@@")).status).toBe(
 			400,
 		);
-		clearAccessKeyCache(); // second app minted fresh keys under the same kid
 		const op = await adminApp(deps, { role: "operator" });
 		expect((await op.request("GET", "/audit-logs")).status).toBe(403);
 	});

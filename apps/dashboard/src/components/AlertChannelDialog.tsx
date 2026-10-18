@@ -192,7 +192,7 @@ export function AlertChannelDialog({
 							</div>
 						))}
 					</fieldset>
-					{error && <p className="text-sm text-red-700">{error}</p>}
+					{error && <p className="text-sm text-failure">{error}</p>}
 				</div>
 				<DialogFooter>
 					<Button onClick={save}>Save</Button>

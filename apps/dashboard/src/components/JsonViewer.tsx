@@ -71,8 +71,10 @@ export function JsonViewer(props: Props) {
 		return parsed.ok ? <Tree value={parsed.value} size={0} /> : null;
 	}
 	const name = props.filename || "payload.txt";
+	const looksJson = /[/+]json\b/i.test(props.contentType ?? "");
+	const bounded = parsed.ok && parsed.size > BIG;
 	const view = (
-		<pre className="max-h-[480px] overflow-auto whitespace-pre-wrap break-all rounded bg-neutral-50 p-3 font-mono text-xs">
+		<pre className="max-h-[480px] overflow-auto whitespace-pre-wrap break-all rounded bg-secondary p-3 font-mono text-xs">
 			{props.text}
 		</pre>
 	);
@@ -92,11 +94,22 @@ export function JsonViewer(props: Props) {
 						</Button>
 					))}
 					{parsed.unsafe && (
-						<span className="text-amber-700 text-xs">
+						<span className="text-xs text-warning">
 							Large numbers may be rounded in tree view — see Raw
 						</span>
 					)}
 				</div>
+			)}
+			{!parsed.ok && looksJson && (
+				<p className="mb-2 text-xs text-muted-foreground">
+					Not valid JSON — showing as text.
+				</p>
+			)}
+			{bounded && !raw && (
+				<p className="mb-2 text-xs text-muted-foreground">
+					Large payload — showing a collapsed tree. Expand nodes to inspect,
+					or switch to Raw for the full text.
+				</p>
 			)}
 			{parsed.ok && !raw ? (
 				<Tree value={parsed.value} size={parsed.size} />
@@ -126,7 +139,7 @@ function Tree({ value, size }: { value: unknown; size: number }) {
 	return (
 		<ul
 			aria-label="JSON"
-			className="max-h-[480px] overflow-auto rounded bg-neutral-50 p-3 font-mono text-xs"
+			className="max-h-[480px] overflow-auto rounded bg-secondary p-3 font-mono text-xs"
 		>
 			<Node name={null} value={value} depth={0} openDepth={openDepth} />
 		</ul>

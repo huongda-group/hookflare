@@ -37,6 +37,18 @@ This roadmap covers features and their dependency order only. It does not cover 
 | §10 Retention: delivered payloads 30 days, metadata 180 days | Replaced by archival: fully delivered events are archived after `hot_retention_days` (default 30); events with `failed_final`/`dead` deliveries after `failed_retention_days` (default 90) | DEC-12 |
 | §2 Reconciliation | The reconciler's scope now also covers the `paused` status and Resume | DEC-10 |
 
+### M7 deviations
+
+M7 replaces Cloudflare Access with built-in authentication (spec:
+[2026-10-17-m7-built-in-auth-design.md](2026-10-17-m7-built-in-auth-design.md)),
+deviating from DEC-5 and §6.1/§8:
+
+| Source | Change | Reason |
+|---|---|---|
+| DEC-5 (`users` keyed by the email from the Access JWT, first admin from `BOOTSTRAP_ADMIN_EMAILS`) | Username/password login with server-side sessions in D1; `users` keyed by username; the first admin comes from one-time onboarding protected by `SETUP_TOKEN`; automation uses API tokens (`HOOKFLARE_API_TOKEN`) | A fresh Worker answered `500 internal_error` until a Zero Trust application, its AUD tag, and bootstrap emails were configured by hand — the hardest step of a deployment |
+| §6.1/§8 (Access JWT middleware, `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD`) | Removed, with it `BOOTSTRAP_ADMIN_EMAILS`, `ACCESS_DEV_EMAIL`, the `jose` dependency, and `actor_email` (now `actor`). The admin API accepts a session cookie or a Bearer API token; the per-request `users` read, RBAC, and audit logging are unchanged | One code path only |
+| §8 smoke test (Access service token) | Smoke and bench authenticate with `HOOKFLARE_API_TOKEN` (Bearer) | Scripts cannot solve Turnstile |
+
 ### M2 deviations
 
 M2 implements this roadmap with the deviations recorded in the [M2 spec §3.1](2026-10-15-m2-reliability-design.md#31-deviations-from-the-roadmap-and-m1), copied here verbatim:
@@ -240,6 +252,10 @@ M0 ─▶ M1 ─▶ M2 ─▶ M3 ─┬─▶ M4 ─┬─▶ M6
 ### M6 — Production readiness
 - **Scope:** benchmarks (ingress D1 write throughput, consumer concurrency, D1 size as a function of `hot_retention_days`); D1 backup/restore (Time Travel + scheduled exports) and a restore drill; operations runbook; migration and rollback procedures; external uptime monitoring; queue configuration tuning.
 - **Exit (§11):** the runbook, migrations, backup/restore, and rollback exist and have been tested; benchmark results and recommended limits are documented.
+
+### M7 — Built-in auth
+- **Scope:** username/password login with server-side sessions, one-time onboarding protected by `SETUP_TOKEN`, API tokens, Turnstile on the login/setup forms, smoke/bench via `HOOKFLARE_API_TOKEN`; Access removed.
+- **Exit:** a first deploy needs no Zero Trust setup — open the Worker URL, claim the first admin, and use the dashboard; every test in the M7 spec §10 passes.
 
 ### Backlog (outside the current roadmap)
 Provider presets (Stripe/GitHub/Shopify) with timestamp tolerance; per-project RBAC; restoring an archived day into D1; splitting ingress into its own Worker; the "out of MVP scope" items in `DESIGN.md` §12.

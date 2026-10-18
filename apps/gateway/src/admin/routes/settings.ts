@@ -65,7 +65,7 @@ export function settingsRoutes() {
 		if (!body.ok) return body.response;
 		const { db, now } = c.var.deps;
 		const before = await readAll(db);
-		const actor = c.var.actor?.email ?? "";
+		const actor = c.var.actor?.username ?? "";
 		const reason = body.value.reason;
 		// Each section is its own compare-and-swap row; updated_at must move even
 		// when two writes share a millisecond.

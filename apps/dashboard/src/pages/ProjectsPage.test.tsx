@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { project } from "@/test/fixtures";
@@ -109,5 +109,49 @@ describe("Projects", () => {
 		);
 		await user.click(screen.getByRole("button", { name: "Edit" }));
 		expect(screen.getByLabelText("Name")).toHaveValue("Billing");
+	});
+
+	it("links each project to its scoped detail page", async () => {
+		server.use(
+			http.get(apiUrl("/projects"), () =>
+				HttpResponse.json({ data: [project()], next_cursor: null }),
+			),
+		);
+		renderApp("/projects");
+		const link = await screen.findByRole("link", { name: "Payments" });
+		expect(link).toHaveAttribute("href", "/projects/prj_1");
+	});
+
+	it("offers New project as the empty next step when creation is allowed", async () => {
+		renderApp("/projects");
+		const table = await screen.findByRole("table");
+		expect(
+			within(table).getByRole("button", { name: "New project" }),
+		).toBeInTheDocument();
+	});
+
+	it("offers no empty next step to viewers", async () => {
+		renderApp("/projects", { role: "viewer" });
+		const table = await screen.findByRole("table");
+		expect(
+			within(table).queryByRole("button", { name: "New project" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("blocks an accidental cancel and keeps the edits", async () => {
+		const { user } = renderApp("/projects");
+		await user.click(
+			await screen.findByRole("button", { name: "New project" }),
+		);
+		await user.type(screen.getByLabelText("Name"), "Billing");
+		await user.click(screen.getByRole("button", { name: "Cancel" }));
+		expect(
+			await screen.findByRole("heading", { name: /discard/i }),
+		).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Keep editing" }));
+		expect(screen.getByLabelText("Name")).toHaveValue("Billing");
+		expect(
+			screen.queryByRole("heading", { name: /discard/i }),
+		).not.toBeInTheDocument();
 	});
 });

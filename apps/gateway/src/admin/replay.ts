@@ -89,7 +89,7 @@ export async function writeReplays(
 	},
 ) {
 	const deps = c.var.deps;
-	const actor = c.var.actor?.email ?? "";
+	const actor = c.var.actor?.username ?? "";
 	const now = deps.now();
 	const rows = input.ready.map((t) => ({
 		source: t.sourceDeliveryId,

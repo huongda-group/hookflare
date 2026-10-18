@@ -10,6 +10,8 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { AlertChannelDialog } from "@/components/AlertChannelDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DirtyFormGuard } from "@/components/DirtyFormGuard";
+import { FormSection } from "@/components/FormSection";
 import { FieldError } from "@/components/ProjectFormDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,7 +44,7 @@ export function AlertsTab() {
 			{settings.data ? (
 				<RulesForm initial={settings.data.alert_rules} />
 			) : (
-				<p className="text-neutral-500">Loading…</p>
+				<p className="text-muted-foreground">Loading…</p>
 			)}
 			<Channels />
 		</div>
@@ -68,31 +70,51 @@ function RulesForm({ initial }: { initial: AlertRules }) {
 	});
 	const e = form.formState.errors;
 	return (
-		<form onSubmit={submit} className="max-w-xl space-y-4">
-			<h2 className="font-medium">Rules</h2>
-			<div className="grid grid-cols-2 gap-3">
-				{RULE_FIELDS.map(([key, label]) => (
-					<div key={key}>
-						<Label htmlFor={`ar-${key}`}>{label}</Label>
-						<Input
-							id={`ar-${key}`}
-							type="number"
-							{...form.register(key, { valueAsNumber: true })}
-						/>
-						<FieldError message={e[key]?.message} />
-					</div>
-				))}
-			</div>
-			<FieldError message={e.root?.message} />
-			<Button type="submit" disabled={form.formState.isSubmitting}>
-				Save rules
-			</Button>
-			{saved && (
-				<p className="text-sm text-green-800">
-					Saved. Applies within about a minute.
-				</p>
+		<DirtyFormGuard dirty={form.formState.isDirty}>
+			{() => (
+				<form onSubmit={submit} className="max-w-xl space-y-4">
+					<FormSection
+						title="Rules"
+						description="When delivery, storage, and backup signals raise alerts."
+					>
+						<div className="grid grid-cols-2 gap-3">
+							{RULE_FIELDS.map(([key, label]) => (
+								<div key={key}>
+									<Label htmlFor={`ar-${key}`}>{label}</Label>
+									<Input
+										id={`ar-${key}`}
+										type="number"
+										{...form.register(key, { valueAsNumber: true })}
+									/>
+									<FieldError message={e[key]?.message} />
+								</div>
+							))}
+						</div>
+						<FieldError message={e.root?.message} />
+						<div className="flex gap-2">
+							<Button type="submit" disabled={form.formState.isSubmitting}>
+								Save rules
+							</Button>
+							<Button
+								type="button"
+								variant="outline"
+								onClick={() => {
+									form.reset(initial);
+									setSaved(false);
+								}}
+							>
+								Revert
+							</Button>
+						</div>
+						{saved && (
+							<p className="text-sm text-success">
+								Saved. Applies within about a minute.
+							</p>
+						)}
+					</FormSection>
+				</form>
 			)}
-		</form>
+		</DirtyFormGuard>
 	);
 }
 
@@ -118,9 +140,14 @@ function Channels() {
 		onSuccess: invalidate,
 	});
 	return (
-		<section className="space-y-3">
+		<FormSection
+			title="Channels"
+			description="Where alerts are delivered. Config values are write-only and never shown back."
+		>
 			<div className="flex items-center justify-between">
-				<h2 className="font-medium">Channels</h2>
+				<span className="text-sm text-muted-foreground">
+					{(list.data?.data ?? []).length} channel(s)
+				</span>
 				<Button onClick={() => setEditing("new")}>Add channel</Button>
 			</div>
 			<Table>
@@ -186,7 +213,7 @@ function Channels() {
 								{results[c.id] && (
 									<span
 										className={
-											results[c.id].ok ? "text-green-800" : "text-red-700"
+											results[c.id].ok ? "text-success" : "text-failure"
 										}
 									>
 										{results[c.id].ok
@@ -223,6 +250,6 @@ function Channels() {
 					}}
 				/>
 			)}
-		</section>
+		</FormSection>
 	);
 }

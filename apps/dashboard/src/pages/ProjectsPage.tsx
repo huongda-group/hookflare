@@ -1,8 +1,9 @@
 import type { Project } from "@hookflare/shared";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { CursorTable } from "@/components/CursorTable";
 import { IdText } from "@/components/IdText";
+import { PageHeader } from "@/components/PageHeader";
 import { ProjectFormDialog } from "@/components/ProjectFormDialog";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TimeText } from "@/components/TimeText";
@@ -16,16 +17,24 @@ export function ProjectsPage() {
 	const [creating, setCreating] = useState(false);
 	return (
 		<div className="space-y-4">
-			<div className="flex items-center justify-between">
-				<h1 className="text-xl font-semibold">Projects</h1>
-				<Can permission="config.write">
-					<Button onClick={() => setCreating(true)}>New project</Button>
-				</Can>
-			</div>
+			<PageHeader
+				title="Projects"
+				description="Group sources and destinations into isolated workspaces."
+				actions={
+					<Can permission="config.write">
+						<Button onClick={() => setCreating(true)}>New project</Button>
+					</Can>
+				}
+			/>
 			<CursorTable<Project>
 				query={query}
 				rowKey={(p) => p.id}
 				empty="No projects yet."
+				emptyAction={
+					<Can permission="config.write">
+						<Button onClick={() => setCreating(true)}>New project</Button>
+					</Can>
+				}
 				onRowClick={(p) =>
 					void navigate({
 						to: "/projects/$projectId",
@@ -33,7 +42,19 @@ export function ProjectsPage() {
 					})
 				}
 				columns={[
-					{ header: "Name", cell: (p) => p.name },
+					{
+						header: "Name",
+						cell: (p) => (
+							<Link
+								to="/projects/$projectId"
+								params={{ projectId: p.id }}
+								className="font-medium hover:underline"
+								onClick={(e) => e.stopPropagation()}
+							>
+								{p.name}
+							</Link>
+						),
+					},
 					{
 						header: "Slug",
 						cell: (p) => <span className="font-mono text-xs">{p.slug}</span>,

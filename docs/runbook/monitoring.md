@@ -16,7 +16,7 @@ dashboard page; this page covers the external uptime checks (spec §8.2).
 |---|---|---|---|
 | Health | `GET /healthz` | `200` and `"status":"ok"` | 1 min, from ≥ 2 regions |
 | Ingress | `POST /in/<canary source id>` with a wrong signature | `401` | 5 min |
-| Dashboard | `GET /` without a session | `302` to the Access login | 15 min |
+| Dashboard | `GET /login` | `200` | 15 min |
 
 Why these three: Health proves the Worker, D1 (`SELECT 1`), and the job
 heartbeat are all alive — `/healthz` returns `503` with
@@ -26,12 +26,14 @@ heartbeat are all alive — `/healthz` returns `503` with
 a fresh database with no heartbeat yet reports `"reason":"jobs_unknown"`
 with `200` and counts as healthy; a failed D1 probe is `503`
 `"reason":"d1_unavailable"`). The public body is only `status`, `reason`,
-and `version` — heartbeat timestamps are read from D1, not `/healthz`.
+`version`, and `turnstile` (`"on"`/`"off"`) — heartbeat timestamps are
+read from D1, not `/healthz`.
 A failed heartbeat write is logged as `heartbeat.failed` and never fails
 the job. Ingress proves webhook intake still verifies
-signatures. Dashboard proves the Access application in front of `/` and
-`/api/admin/*` is still attached. **Two consecutive failures page the
-alert channel** (the same Discord/Slack channel as the M5 alerts).
+signatures. Dashboard proves the Worker still serves the login page
+(a fresh deploy shows onboarding at `/setup` instead; either proves the
+Worker and its static assets are attached). **Two consecutive failures
+page the alert channel** (the same Discord/Slack channel as the M5 alerts).
 
 ## 1. Create the canary source (verify on staging in drill)
 
@@ -44,10 +46,8 @@ signature check.
 2. Create an `hmac` source on any project (dashboard Endpoints page, or
    `POST /api/admin/v1/sources`). Note its `id` and the `ingress_url`
    (`https://<host>/in/<id>`) from the response.
-3. Add Access **bypass** policies for `/in/*` and `/healthz` so the
-   monitor reaches them without logging in (see [setup.md](setup.md)).
-   Without the bypass, the probes get Access responses instead of
-   gateway responses.
+3. `/in/*` and `/healthz` are public, so the monitor reaches them
+   directly — no login or bypass is needed.
 
 ## 2. Worked example: UptimeRobot (verify on staging in drill)
 
@@ -62,8 +62,8 @@ example uses UptimeRobot's free plan; alternatives are listed below.
    `https://<host>/in/<canary source id>` (any body with a wrong
    `X-Hub-Signature-256` header), 5-minute interval, alert unless the
    status is `401`.
-3. **Dashboard** — HTTP monitor, `https://<host>/`, 15-minute interval,
-   alert unless the status is `302` to `<team>.cloudflareaccess.com`.
+3. **Dashboard** — HTTP monitor, `https://<host>/login`, 15-minute interval,
+   alert unless the status is `200`.
 4. Point UptimeRobot notifications at the same Discord/Slack channel as
    the M5 alerts. **Two consecutive failures page the channel** — set the
    monitor to alert after 2 consecutive failures, not 1, to avoid paging

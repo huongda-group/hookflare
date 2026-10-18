@@ -1,7 +1,6 @@
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
-import { clearAccessKeyCache } from "../src/admin/auth/access";
 import { projects } from "../src/core/db/schema";
 import { adminApp } from "./helpers/admin";
 import { recordingQueue, testDeps } from "./helpers/deps";
@@ -57,7 +56,6 @@ describe("fault injection", () => {
 	it("writes neither the mutation nor the audit row when the batch fails", async () => {
 		const base = testDeps();
 		await (await adminApp(base)).request("GET", "/me"); // bootstrap outside the fault
-		clearAccessKeyCache(); // each adminApp mints fresh keys under the same kid
 		const deps = faultyDeps(base, {
 			d1: [{ match: /insert into "audit_logs"/i }],
 		});

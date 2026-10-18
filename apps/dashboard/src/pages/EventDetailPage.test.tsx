@@ -48,6 +48,8 @@ describe("Event Detail", () => {
 		const { user } = renderApp("/events/evt_1", { role: "operator" });
 		await screen.findByText("dlv_1");
 		expect(loads).toBe(0);
+		await user.click(screen.getByRole("tab", { name: /payload/i }));
+		expect(loads).toBe(0);
 		await user.click(screen.getByRole("button", { name: "Show payload" }));
 		const payloadSection = screen.getByText("Payload").closest("section");
 		expect(payloadSection).not.toBeNull();
@@ -71,6 +73,8 @@ describe("Event Detail", () => {
 			),
 		);
 		const { user } = renderApp("/events/evt_1", { role: "operator" });
+		await screen.findByText("dlv_1");
+		await user.click(screen.getByRole("tab", { name: /payload/i }));
 		await user.click(
 			await screen.findByRole("button", { name: "Show payload" }),
 		);
@@ -102,6 +106,8 @@ describe("Event Detail", () => {
 			),
 		);
 		const { user } = renderApp("/events/evt_1", { role: "operator" });
+		await screen.findByText("dlv_1");
+		await user.click(screen.getByRole("tab", { name: /payload/i }));
 		await user.click(
 			await screen.findByRole("button", { name: "Show payload" }),
 		);
@@ -135,9 +141,9 @@ describe("Event Detail", () => {
 			),
 		);
 		const { user } = renderApp("/events/evt_1", { role: "operator" });
-		await user.click(
-			await screen.findByRole("button", { name: "Show payload" }),
-		);
+		await screen.findByText("dlv_1");
+		await user.click(screen.getByRole("tab", { name: /payload/i }));
+		await user.click(screen.getByRole("button", { name: "Show payload" }));
 		expect(
 			await screen.findByText(/payload no longer available/i),
 		).toBeInTheDocument();
@@ -171,5 +177,142 @@ describe("Event Detail", () => {
 		expect(
 			await screen.findByRole("heading", { name: "evt_1" }),
 		).toBeInTheDocument();
+	});
+
+	it("places deliveries before the inspector in the DOM", async () => {
+		server.use(detail());
+		renderApp("/events/evt_1", { role: "operator" });
+		const deliveries = await screen.findByRole("heading", {
+			name: /deliveries/i,
+		});
+		const inspector = await screen.findByRole("heading", {
+			name: /request inspector|inspector/i,
+		});
+		expect(
+			deliveries.compareDocumentPosition(inspector) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+	});
+
+	it("expands the newest delivery and collapses older ones", async () => {
+		server.use(
+			detail({
+				deliveries: [
+					delivery(),
+					delivery({
+						id: "dlv_2",
+						created_at: delivery().created_at + 60_000,
+					}),
+				],
+			}),
+		);
+		const { user } = renderApp("/events/evt_1", { role: "operator" });
+		await screen.findByText("dlv_2");
+		// Newest delivery's attempts are visible; older delivery keeps its
+		// header in the DOM but hides its attempts until expanded.
+		expect(screen.getByText("Attempt #1")).toBeInTheDocument();
+		const older = screen.getByRole("region", { name: /dlv_1/i });
+		expect(within(older).queryByText("Attempt #1")).not.toBeInTheDocument();
+		await user.click(
+			within(older).getByRole("button", { name: /dlv_1|expand|show/i }),
+		);
+		expect(within(older).getByText("Attempt #1")).toBeInTheDocument();
+	});
+
+	it("labels replay creation time instead of a second receipt", async () => {
+		server.use(
+			detail({
+				deliveries: [
+					delivery({
+						id: "dlv_2",
+						kind: "replay",
+						created_at: delivery().created_at + 60_000,
+						created_by: "ops@example.com",
+						status: "delivered",
+					}),
+				],
+			}),
+		);
+		renderApp("/events/evt_1", { role: "operator" });
+		const replay = await screen.findByRole("region", { name: /dlv_2/i });
+		expect(within(replay).getByText(/created/i)).toBeInTheDocument();
+		expect(within(replay).queryByText(/^Received$/)).not.toBeInTheDocument();
+	});
+
+	it("fetches the payload once per explicit open, never on tab switch", async () => {
+		let loads = 0;
+		server.use(
+			detail(),
+			http.get(apiUrl("/events/evt_1/payload"), () => {
+				loads++;
+				return HttpResponse.text('{"a":1}', {
+					headers: { "content-type": "application/json" },
+				});
+			}),
+		);
+		const { user } = renderApp("/events/evt_1", { role: "operator" });
+		await screen.findByText("dlv_1");
+		await user.click(screen.getByRole("tab", { name: /payload/i }));
+		expect(loads).toBe(0);
+		await user.click(screen.getByRole("tab", { name: /headers/i }));
+		expect(loads).toBe(0);
+		await user.click(screen.getByRole("tab", { name: /payload/i }));
+		expect(loads).toBe(0);
+		await user.click(screen.getByRole("button", { name: "Show payload" }));
+		const payloadSection = screen.getByRole("tabpanel");
+		expect(
+			await within(payloadSection).findByRole("list", { name: "JSON" }),
+		).toBeInTheDocument();
+		expect(loads).toBe(1);
+		await user.click(
+			within(payloadSection).getByRole("button", { name: "Raw" }),
+		);
+		await user.click(
+			within(payloadSection).getByRole("button", { name: "Tree" }),
+		);
+		expect(loads).toBe(1);
+	});
+
+	it("disables Replay after a confirmed missing payload", async () => {
+		server.use(
+			detail(),
+			http.get(apiUrl("/events/evt_1/payload"), () =>
+				HttpResponse.json({ error: "payload_missing" }, { status: 404 }),
+			),
+		);
+		const { user } = renderApp("/events/evt_1", { role: "operator" });
+		await screen.findByText("dlv_1");
+		await user.click(screen.getByRole("tab", { name: /payload/i }));
+		await user.click(screen.getByRole("button", { name: "Show payload" }));
+		expect(
+			await screen.findByText(/payload no longer available/i),
+		).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /replay/i })).toBeDisabled();
+		expect(screen.getByText(/replay needs the payload/i)).toBeInTheDocument();
+	});
+
+	it("offers an explicit Retry for a transient payload failure", async () => {
+		let loads = 0;
+		server.use(
+			detail(),
+			http.get(apiUrl("/events/evt_1/payload"), () => {
+				loads++;
+				return loads === 1
+					? HttpResponse.json({ error: "internal" }, { status: 503 })
+					: HttpResponse.text('{"a":1}', {
+							headers: { "content-type": "application/json" },
+						});
+			}),
+		);
+		const { user } = renderApp("/events/evt_1", { role: "operator" });
+		await screen.findByText("dlv_1");
+		await user.click(screen.getByRole("tab", { name: /payload/i }));
+		await user.click(screen.getByRole("button", { name: "Show payload" }));
+		await user.click(await screen.findByRole("button", { name: "Retry" }));
+		const payloadSection = screen.getByRole("tabpanel");
+		expect(
+			await within(payloadSection).findByRole("list", { name: "JSON" }),
+		).toBeInTheDocument();
+		expect(loads).toBe(2);
 	});
 });

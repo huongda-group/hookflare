@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { clearAccessKeyCache } from "../../src/admin/auth/access";
 import { adminApp, auditRows } from "../helpers/admin";
 import { testDeps } from "../helpers/deps";
 
@@ -7,7 +6,6 @@ const slug = () => `p-${crypto.randomUUID().slice(0, 8)}`;
 
 describe("admin projects", () => {
 	beforeEach(() => {
-		clearAccessKeyCache();
 		for (const m of ["log", "warn", "error"] as const)
 			vi.spyOn(console, m).mockImplementation(() => {});
 	});
@@ -135,7 +133,7 @@ describe("admin projects", () => {
 		const rows = await auditRows(deps, id);
 		expect(rows).toHaveLength(1);
 		expect(rows[0]).toMatchObject({
-			actorEmail: "admin@example.com",
+			actor: "admin@example.com",
 			action: "project.created",
 			resourceType: "project",
 			reason: "new team",

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PageHeader } from "@/components/PageHeader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useCan } from "@/lib/permissions";
 import { AlertsTab } from "./settings/AlertsTab";
@@ -32,7 +33,10 @@ export function SettingsPage({
 	const tab = allowed[search.tab] ? search.tab : "retry";
 	return (
 		<div className="space-y-4">
-			<h1 className="text-xl font-semibold">Settings</h1>
+			<PageHeader
+				title="Settings"
+				description="Retry defaults, storage and backups, alerting, and user administration."
+			/>
 			<Tabs
 				value={tab}
 				onValueChange={(v) => setSearch({ tab: v as SettingsSearch["tab"] })}

@@ -110,7 +110,7 @@ describe("checkMigrations", () => {
 		]);
 	});
 
-	it("repository guard: only files already on main may be destructive", () => {
+	it("repository guard: only files on main or in contract.json may be destructive", () => {
 		const onBase = baseFiles("origin/main") ?? baseFiles("main");
 		assert.ok(onBase !== null, "expected a base ref for the guard test");
 		const files = readdirSync(migrationsDir)
@@ -119,7 +119,11 @@ describe("checkMigrations", () => {
 				name,
 				sql: readFileSync(join(migrationsDir, name), "utf8"),
 			}));
-		const result = checkMigrations({ files, contract: [] });
+		// A file listed in contract.json is an accepted removal of an old shape.
+		const contract = JSON.parse(
+			readFileSync(join(migrationsDir, "contract.json"), "utf8"),
+		);
+		const result = checkMigrations({ files, contract });
 		for (const problem of result.problems) {
 			assert.ok(
 				onBase.has(basename(problem.file)),

@@ -13,7 +13,6 @@ describe("storableHeaders", () => {
 				"x-sig": "abc",
 				"proxy-authorization": "p",
 				"cf-connecting-ip": "1.2.3.4",
-				"cf-access-jwt-assertion": "jwt",
 				connection: "keep-alive",
 				host: "gw.example.com",
 			}),

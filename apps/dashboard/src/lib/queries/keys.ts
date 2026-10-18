@@ -1,8 +1,14 @@
+import type { ResourceKind } from "./resource-options";
+
 /** One key factory for every resource; mutations invalidate by prefix (spec §9.2). */
 export const qk = {
 	me: ["me"] as const,
+	authState: ["auth-state"] as const,
 	settings: ["settings"] as const,
 	overview: (q: object) => ["overview", q] as const,
+	/** Named option pages (Task 4): separate from the plain/infinite list keys. */
+	resourceOptions: (kind: ResourceKind, projectId?: string) =>
+		["resource-options", kind, projectId ?? null] as const,
 	projects: {
 		all: ["projects"] as const,
 		list: (q: object) => ["projects", "list", q] as const,
