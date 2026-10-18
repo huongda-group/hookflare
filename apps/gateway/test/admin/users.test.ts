@@ -114,6 +114,26 @@ describe("/users", () => {
 		expect(await auditRows(deps, username)).toEqual([]);
 	});
 
+	it("does not count a password-less legacy admin as an active admin", async () => {
+		const deps = testDeps();
+		const api = await soleAdmin(deps);
+		// A migrated Access identity: an admin row nobody can log in as.
+		await deps.db.insert(users).values({
+			username: uniqueUsername("legacy"),
+			role: "admin",
+			passwordHash: null,
+			passwordChangedAt: null,
+			createdAt: 1,
+			updatedAt: 1,
+			disabledAt: null,
+		});
+		const res = await api.request("PATCH", `/users/${api.username}`, {
+			role: "viewer",
+		});
+		expect(res.status).toBe(409);
+		expect(await res.json()).toEqual({ error: "last_admin" });
+	});
+
 	it("refuses to demote or disable the last active admin", async () => {
 		const deps = testDeps();
 		const api = await soleAdmin(deps);
@@ -288,11 +308,17 @@ describe("/users", () => {
 		expect((await res.json<User>()).role).toBe("operator");
 	});
 
-	it("resets a password, drops the target's sessions, and audits no secret", async () => {
+	it("resets a password, drops the target's sessions and API tokens, and audits no secret", async () => {
 		const deps = testDeps();
 		const api = await adminApp(deps, { role: "admin" });
 		const target = await adminApp(deps, { role: "viewer" });
+		const targetToken = await adminApp(deps, {
+			role: "viewer",
+			username: target.username,
+			via: "token",
+		});
 		expect((await target.request("GET", "/me")).status).toBe(200);
+		expect((await targetToken.request("GET", "/me")).status).toBe(200);
 
 		const res = await api.request(
 			"POST",
@@ -305,6 +331,8 @@ describe("/users", () => {
 		expect(res.status).toBe(204);
 		// The only reason this 401s is that the session row was deleted.
 		expect((await target.request("GET", "/me")).status).toBe(401);
+		// A reset assumes compromise, so tokens minted with the old password go too.
+		expect((await targetToken.request("GET", "/me")).status).toBe(401);
 
 		const [audit] = (await auditRows(deps, target.username)).filter(
 			(a) => a.action === "user.password_reset",

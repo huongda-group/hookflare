@@ -86,3 +86,11 @@ export function revokeApiTokenStmt(
 		)
 		.returning();
 }
+
+/** Unexecuted; revokes every live token of a user, for an admin password reset. */
+export function revokeUserApiTokensStmt(db: Db, username: string, now: number) {
+	return db
+		.update(apiTokens)
+		.set({ revokedAt: now })
+		.where(and(eq(apiTokens.username, username), isNull(apiTokens.revokedAt)));
+}

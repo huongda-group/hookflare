@@ -1,7 +1,7 @@
 [
 	{
 		"file": "0001_square_outlaw_kid.sql",
-		"release": "v2.0.0",
+		"release": "2.0.0",
 		"reason": "users.email/audit actor columns renamed for built-in auth (Access removed)"
 	}
 ]

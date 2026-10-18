@@ -24,7 +24,8 @@ export async function listUsers(
 
 /**
  * Spec M3-9: the UPDATE matches no row if, afterwards, no active admin
- * would remain. One statement, so two concurrent demotions cannot both pass.
+ * would remain. Only an admin who can log in (has a password) counts, so a
+ * migrated password-less admin row cannot mask a lockout. One statement, so two concurrent demotions cannot both pass.
  */
 export function updateUserStmt(
 	db: Db,
@@ -41,7 +42,7 @@ export function updateUserStmt(
 				eq(users.username, username),
 				stillAdmin
 					? undefined
-					: sql`(SELECT count(*) FROM users WHERE role = 'admin' AND disabled_at IS NULL AND username <> ${username}) > 0`,
+					: sql`(SELECT count(*) FROM users WHERE role = 'admin' AND disabled_at IS NULL AND password_hash IS NOT NULL AND username <> ${username}) > 0`,
 			),
 		)
 		.returning();

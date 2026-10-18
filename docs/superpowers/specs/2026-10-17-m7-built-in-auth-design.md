@@ -98,10 +98,10 @@ Success: `pnpm run deploy -- --skip-smoke` on an empty database, open the Worker
 ### 6.6 Account management
 
 - `POST /users` takes `{ username, role, password, reason? }` (admin sets the initial password and hands it over out of band).
-- `POST /users/:username/password` `{ password, reason? }` (admin, `users.manage`) resets another user's password and deletes all their sessions; audited as `user.password_reset` (no hash in the diff).
-- `POST /me/password` `{ current_password, new_password }` (any logged-in user) changes their own password, deletes their other sessions; audited as `user.password_changed`.
+- `POST /users/:username/password` `{ password, reason? }` (admin, `users.manage`) resets another user's password, deletes all their sessions, and revokes all their API tokens (a reset assumes compromise); audited as `user.password_reset` (no hash in the diff).
+- `POST /me/password` `{ current_password, new_password }` (any logged-in user) changes their own password, deletes their other sessions; audited as `user.password_changed`. API tokens survive a self-change (automation keeps working); revoke them explicitly if the account was compromised.
 - Disabling a user deletes their sessions in the same batch.
-- Existing `PATCH /users/:username` (role, disabled) and the last-admin guard are unchanged apart from the key.
+- Existing `PATCH /users/:username` (role, disabled) keeps the last-admin guard, keyed by username; only an admin with a password counts, so a migrated password-less admin cannot mask a lockout.
 
 ### 6.9 API tokens (machine access)
 
@@ -148,7 +148,7 @@ README (Installation option A/B, "Receive your first webhook" — log in with `c
 - Middleware: no cookie, unknown token, idle-expired, absolute-expired, disabled user, demoted user takes effect immediately, `Origin` check on non-GET.
 - Turnstile: enforced when both keys set, disabled when neither, `500` when only one; wrong action, wrong hostname, reused/expired token → `403`; siteverify timeout/5xx → `503`; Turnstile is checked before the password hash runs.
 - API tokens: Bearer auth works and carries the user's role; revoked, expired, or disabled-user tokens → `401`; cookie + Bearer together → `400`; the secret is never returned after creation.
-- Password reset/change revoke sessions; disable revokes sessions; audit rows written in the same batch and never contain hashes.
+- Password reset/change revoke sessions; an admin reset also revokes API tokens; disable revokes sessions; audit rows written in the same batch and never contain hashes.
 - Migration: an existing 1.0.0 database with users and audit logs migrates losslessly.
 - Dashboard: setup/login/redirect flows, change-password dialog, users tab.
 

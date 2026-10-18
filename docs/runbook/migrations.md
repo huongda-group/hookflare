@@ -59,7 +59,7 @@ an old shape, with the release that stopped using it:
 
 ```json
 [
-  { "file": "0012_drop_url.sql", "release": "v0.9.0", "reason": "destinations.url replaced by url_v2 in v0.9.0" }
+  { "file": "0012_drop_url.sql", "release": "0.9.0", "reason": "destinations.url replaced by url_v2 in 0.9.0" }
 ]
 ```
 

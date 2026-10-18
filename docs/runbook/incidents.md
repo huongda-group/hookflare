@@ -229,7 +229,8 @@ No verified full-DB backup in the last 36 h.
   through the dashboard (Settings › Users → Reset password) or
   `POST /api/admin/v1/users/:username/password`; re-enable or re-promote
   the user if that is what broke. A password reset revokes that user's
-  sessions, so they log in again.
+  sessions and API tokens, so they log in again and re-issue any tokens
+  their automation needs.
 - **Act (nothing works — reopen onboarding):** Clear every password hash
   so setup opens again, then claim the first admin with `SETUP_TOKEN`:
   `UPDATE users SET password_hash = NULL` via

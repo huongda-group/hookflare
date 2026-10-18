@@ -13,7 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reads Access JWTs, and `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`,
   `ACCESS_DEV_EMAIL`, `BOOTSTRAP_ADMIN_EMAILS`, and the `jose` dependency
   are gone. Dashboard login is username/password with server-side
-  sessions; automation uses API tokens.
+  sessions; automation uses API tokens. An admin password reset revokes
+  the user's sessions and API tokens; a self-service change keeps tokens.
 - Identity is now the username: `users` is keyed by `username` (existing
   emails stay valid as usernames), and `email` → `username` everywhere,
   including `actor_email` → `actor` in audit logs and the API.
@@ -43,6 +44,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 5. The Zero Trust Access application in front of the Worker is no longer
    needed — remove it, or keep it as a network gate (Hookflare ignores
    its JWT).
+6. The migration renames columns in place (`email` → `username`,
+   `actor_email` → `actor`), so it is a contract migration: once it has
+   run, a 1.x Worker cannot use the database. Rolling back below 2.0.0
+   means a D1 Time Travel restore to the bookmark the deploy printed,
+   then `wrangler rollback` (see `docs/runbook/rollback.md`).
 
 ### Changed
 

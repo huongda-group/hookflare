@@ -10,6 +10,7 @@ import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppBindings } from "../../app";
 import { type AuditAction, auditInsertIfChanged } from "../../core/audit";
+import { revokeUserApiTokensStmt } from "../../core/db/api-tokens";
 import { isUniqueViolation } from "../../core/db/errors";
 import type { UserRow } from "../../core/db/schema";
 import { users } from "../../core/db/schema";
@@ -154,8 +155,9 @@ export function userRoutes() {
 		}
 		const ts = now();
 		const passwordHash = await hashPassword(password);
-		// Reset and session revocation are one atomic batch (spec §6.6); the audit
-		// diff carries no password or hash.
+		// Reset, session and API-token revocation are one atomic batch (spec §6.6):
+		// a reset assumes the account was compromised. The audit diff carries no
+		// password or hash.
 		await db.batch([
 			db
 				.update(users)
@@ -171,6 +173,7 @@ export function userRoutes() {
 				at: ts,
 			}),
 			deleteUserSessionsStmt(db, username),
+			revokeUserApiTokensStmt(db, username, ts),
 		]);
 		return c.body(null, 204);
 	});
