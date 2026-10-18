@@ -19,7 +19,8 @@ export function TimeRangeFilter({
 	now = Date.now,
 }: Range & { onChange: (r: Range) => void; now?: () => number }) {
 	return (
-		<div className="flex flex-wrap items-end gap-2">
+		<fieldset className="flex flex-wrap items-end gap-2">
+			<legend className="sr-only">Time range</legend>
 			<div>
 				<Label htmlFor="range-from">From</Label>
 				<Input
@@ -62,6 +63,6 @@ export function TimeRangeFilter({
 					Clear time range
 				</Button>
 			)}
-		</div>
+		</fieldset>
 	);
 }

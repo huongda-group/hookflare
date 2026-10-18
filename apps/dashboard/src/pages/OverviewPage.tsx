@@ -6,10 +6,12 @@ import {
 } from "@hookflare/shared";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import type { ReactNode } from "react";
 import { z } from "zod";
 import { TrendChart } from "@/components/charts/TrendChart";
-import { IdText } from "@/components/IdText";
+import { DataState } from "@/components/DataState";
 import { ProjectSelect } from "@/components/ProjectSelect";
+import { ResourceLabel } from "@/components/ResourceLabel";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TimeText } from "@/components/TimeText";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -26,26 +28,32 @@ export const overviewSearch = z.object({
 function Tile({
 	label,
 	value,
+	sub,
 	tone,
 }: {
 	label: string;
 	value: string;
+	sub?: ReactNode;
 	tone?: "bad" | "warn";
 }) {
 	return (
-		<div data-tile className="rounded border p-4">
-			<div className="text-xs uppercase text-neutral-500">{label}</div>
+		<div
+			data-tile
+			className="rounded-lg border border-border bg-card p-4"
+		>
+			<div className="text-xs uppercase text-muted-foreground">{label}</div>
 			<div
 				className={
 					tone === "bad"
-						? "text-2xl font-semibold text-red-700"
+						? "text-2xl font-semibold tabular-nums text-failure"
 						: tone === "warn"
-							? "text-2xl font-semibold text-amber-700"
-							: "text-2xl font-semibold"
+							? "text-2xl font-semibold tabular-nums text-warning"
+							: "text-2xl font-semibold tabular-nums"
 				}
 			>
 				{value}
 			</div>
+			{sub}
 		</div>
 	);
 }
@@ -74,6 +82,13 @@ export function OverviewContent({
 		refetchInterval: 15_000,
 		refetchIntervalInBackground: false,
 	});
+	const totals = o.data?.totals;
+	const hasActivity =
+		o.data !== undefined &&
+		totals !== undefined &&
+		(totals.received > 0 ||
+			totals.delivered > 0 ||
+			o.data.trend.some((p) => p.received > 0 || p.delivered > 0));
 	return (
 		<div className="space-y-6">
 			{o.data && o.data.open_alerts.count > 0 && (
@@ -102,94 +117,213 @@ export function OverviewContent({
 					))}
 				</TabsList>
 			</Tabs>
-			{o.data && (
-				<>
-					<div className="grid grid-cols-4 gap-3">
-						<Tile label="Received" value={String(o.data.totals.received)} />
-						<Tile label="Delivered" value={String(o.data.totals.delivered)} />
-						<Tile
-							label="Success rate"
-							value={pct(o.data.totals.success_rate)}
-						/>
-						<Tile
-							label="Failed final"
-							value={String(o.data.totals.failed_final)}
-							tone={o.data.totals.failed_final ? "bad" : undefined}
-						/>
-						<Tile
-							label="Dead"
-							value={String(o.data.totals.dead)}
-							tone={o.data.totals.dead ? "bad" : undefined}
-						/>
-						<Tile
-							label="Pending"
-							value={String(
-								o.data.live.pending +
-									o.data.live.queued +
-									o.data.live.in_flight,
+			<DataState
+				pending={o.isPending}
+				error={o.isError && !o.data ? o.error : null}
+				hasData={o.data !== undefined}
+				retrying={o.isRefetching}
+				onRetry={() => void o.refetch()}
+			>
+				{o.data && (
+					<div className="space-y-6">
+						<section aria-labelledby="overview-reporting">
+							<h2 id="overview-reporting" className="mb-2 font-semibold">
+								Reporting
+							</h2>
+							<div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+								<Tile
+									label="Events received"
+									value={String(o.data.totals.received)}
+								/>
+								<Tile
+									label="Deliveries completed"
+									value={String(o.data.totals.delivered)}
+								/>
+								<Tile
+									label="Delivery success rate"
+									value={pct(o.data.totals.success_rate)}
+								/>
+								<Tile
+									label="Terminal failures"
+									value={String(
+										o.data.totals.failed_final + o.data.totals.dead,
+									)}
+									tone={
+										o.data.totals.failed_final + o.data.totals.dead
+											? "bad"
+											: undefined
+									}
+									sub={
+										<div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+											<span>
+												Failed final{" "}
+												<span className="font-medium tabular-nums text-foreground">
+													{o.data.totals.failed_final}
+												</span>
+											</span>
+											<span>
+												Dead letter{" "}
+												<span className="font-medium tabular-nums text-foreground">
+													{o.data.totals.dead}
+												</span>
+											</span>
+										</div>
+									}
+								/>
+							</div>
+							<p className="mt-2 text-xs text-muted-foreground">
+								Totals refresh on a five-minute rollup. Queried at{" "}
+								<TimeText ms={o.data.generated_at} /> (API response
+								generation time, not the last rollup execution).
+							</p>
+						</section>
+						<section aria-labelledby="overview-traffic">
+							<h2 id="overview-traffic" className="mb-2 font-semibold">
+								Traffic
+							</h2>
+							{hasActivity ? (
+								<TrendChart points={o.data.trend} range={range} />
+							) : (
+								<p className="rounded-lg border border-border bg-card px-4 py-6 text-sm text-muted-foreground">
+									No events received in this reporting range. Once sources
+									start delivering, received, completed, and failed traffic
+									appears here.
+								</p>
 							)}
-						/>
-						<Tile
-							label="Retrying"
-							value={String(o.data.live.retrying)}
-							tone={o.data.live.retrying ? "warn" : undefined}
-						/>
-						<Tile label="Paused" value={String(o.data.live.paused)} />
+						</section>
+						<section aria-labelledby="overview-live">
+							<h2 id="overview-live" className="mb-2 font-semibold">
+								Current delivery states
+							</h2>
+							<p className="mb-2 text-xs text-muted-foreground">
+								Current delivery counts are queried separately and are
+								independent of the selected reporting period.
+							</p>
+							<div className="grid grid-cols-3 gap-3">
+								<Tile
+									label="Pending"
+									value={String(
+										o.data.live.pending +
+											o.data.live.queued +
+											o.data.live.in_flight,
+									)}
+								/>
+								<Tile
+									label="Retrying"
+									value={String(o.data.live.retrying)}
+									tone={o.data.live.retrying ? "warn" : undefined}
+								/>
+								<Tile label="Paused" value={String(o.data.live.paused)} />
+							</div>
+							<p className="mt-2 text-xs text-muted-foreground">
+								Pending groups pending, queued, and in flight deliveries
+								waiting to send. Retrying and paused deliveries are listed
+								separately.
+							</p>
+						</section>
+						<section aria-labelledby="overview-failing">
+							<h2 id="overview-failing" className="mb-2 font-semibold">
+								Failing destinations
+							</h2>
+							{o.data.failing_destinations.length === 0 ? (
+								<p className="text-sm text-muted-foreground">
+									No failures in this range.
+								</p>
+							) : (
+								<ul className="space-y-1 text-sm">
+									{o.data.failing_destinations.map((f) => (
+										<li key={f.destination_id} className="flex gap-3">
+											<Link
+												to="/failures"
+												search={{
+													destination_id: f.destination_id,
+													...(projectId ? { project_id: projectId } : {}),
+													from: o.data.from,
+													to: o.data.to,
+												}}
+												className="underline"
+											>
+												{f.name ?? f.destination_id}
+											</Link>
+											<span className="text-failure">{f.failed} failed</span>
+											<span className="text-muted-foreground">
+												{f.delivered} delivered
+											</span>
+										</li>
+									))}
+								</ul>
+							)}
+						</section>
 					</div>
-					<p className="text-xs text-neutral-500">
-						Totals are updated every 5 minutes (as of{" "}
-						<TimeText ms={o.data.generated_at} />
-						). Pending, Retrying, and Paused are live.
-					</p>
-					<TrendChart points={o.data.trend} range={range} />
-					<section>
-						<h2 className="mb-2 font-semibold">Failing destinations</h2>
-						{o.data.failing_destinations.length === 0 ? (
-							<p className="text-sm text-neutral-500">
-								No failures in this range.
+				)}
+			</DataState>
+			<section aria-labelledby="overview-recent">
+				<h2 id="overview-recent" className="mb-2 font-semibold">
+					Recent events
+				</h2>
+				<DataState
+					pending={recent.isPending}
+					error={recent.isError && !recent.data ? recent.error : null}
+					hasData={recent.data !== undefined}
+					retrying={recent.isRefetching}
+					onRetry={() => void recent.refetch()}
+				>
+					{recent.data &&
+						(recent.data.data.length === 0 ? (
+							<p className="text-sm text-muted-foreground">
+								No events received yet.
 							</p>
 						) : (
 							<ul className="space-y-1 text-sm">
-								{o.data.failing_destinations.map((f) => (
-									<li key={f.destination_id} className="flex gap-3">
+								{recent.data.data.map((e) => (
+									<li key={e.id} className="flex flex-wrap items-center gap-3">
 										<Link
-											to="/failures"
-											search={{ destination_id: f.destination_id }}
-											className="underline"
+											to="/events/$eventId"
+											params={{ eventId: e.id }}
+											className="font-mono text-xs underline"
 										>
-											{f.name ?? f.destination_id}
+											{e.id}
 										</Link>
-										<span className="text-red-700">{f.failed} failed</span>
-										<span className="text-neutral-500">
-											{f.delivered} delivered
-										</span>
+										{e.provider_event_id && (
+											<span className="font-mono text-xs text-muted-foreground">
+												{e.provider_event_id}
+											</span>
+										)}
+										<ResourceLabel
+											kind="source"
+											id={e.source_id}
+											projectId={e.project_id}
+										/>
+										{e.latest_delivery && (
+											<>
+												<ResourceLabel
+													kind="destination"
+													id={e.latest_delivery.destination_id}
+													projectId={e.project_id}
+												/>
+												<StatusBadge status={e.latest_delivery.status} />
+												{e.latest_delivery.last_http_status && (
+													<span className="text-xs text-muted-foreground">
+														HTTP {e.latest_delivery.last_http_status}
+													</span>
+												)}
+											</>
+										)}
+										<TimeText ms={e.received_at} />
 									</li>
 								))}
 							</ul>
-						)}
-					</section>
-				</>
-			)}
-			<section>
-				<h2 className="mb-2 font-semibold">Recent events</h2>
-				<ul className="space-y-1 text-sm">
-					{recent.data?.data.map((e) => (
-						<li key={e.id} className="flex items-center gap-3">
-							<Link
-								to="/events/$eventId"
-								params={{ eventId: e.id }}
-								className="font-mono text-xs underline"
-							>
-								{e.id}
-							</Link>
-							<IdText id={e.source_id} />
-							{e.latest_delivery && (
-								<StatusBadge status={e.latest_delivery.status} />
-							)}
-							<TimeText ms={e.received_at} />
-						</li>
-					))}
-				</ul>
+						))}
+				</DataState>
+				<p className="mt-2 text-sm">
+					<Link
+						to="/events"
+						search={projectId ? { project_id: projectId } : {}}
+						className="underline"
+					>
+						View all events
+					</Link>
+				</p>
 			</section>
 		</div>
 	);
