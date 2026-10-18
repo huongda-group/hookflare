@@ -122,7 +122,7 @@ export function FailuresPage({
 				onChange={(r) => set(r)}
 			/>
 			{canReplay && (
-				<p className="text-xs text-neutral-500">
+				<p className="text-xs text-muted-foreground">
 					Select up to {MAX_BULK} rows per bulk replay.
 				</p>
 			)}

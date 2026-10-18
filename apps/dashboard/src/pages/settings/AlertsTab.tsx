@@ -44,7 +44,7 @@ export function AlertsTab() {
 			{settings.data ? (
 				<RulesForm initial={settings.data.alert_rules} />
 			) : (
-				<p className="text-neutral-500">Loading…</p>
+				<p className="text-muted-foreground">Loading…</p>
 			)}
 			<Channels />
 		</div>
@@ -213,7 +213,7 @@ function Channels() {
 								{results[c.id] && (
 									<span
 										className={
-											results[c.id].ok ? "text-green-800" : "text-red-700"
+											results[c.id].ok ? "text-success" : "text-failure"
 										}
 									>
 										{results[c.id].ok

@@ -269,10 +269,10 @@ export function ReplayDialog({
 							aria-invalid={invalid !== null}
 						/>
 						{invalid && (
-							<p className="text-sm text-red-700">{invalid}</p>
+							<p className="text-sm text-failure">{invalid}</p>
 						)}
 						{m.error && (
-							<p className="text-sm text-red-700">{errorText(m.error)}</p>
+							<p className="text-sm text-failure">{errorText(m.error)}</p>
 						)}
 						<DialogFooter>
 							<Button variant="outline" onClick={() => close(false)}>

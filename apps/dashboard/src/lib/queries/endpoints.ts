@@ -25,17 +25,6 @@ export function useDestinationsPage(q: { project_id?: string }) {
 	});
 }
 
-export function useDestinationsList(projectId?: string) {
-	return useQuery({
-		queryKey: qk.destinations.list({ project_id: projectId, all: true }),
-		queryFn: () =>
-			api.get<Page<Destination>>("/destinations", {
-				project_id: projectId,
-				limit: 200,
-			}),
-	});
-}
-
 export function useDestinationStats(projectId?: string) {
 	return useQuery({
 		queryKey: qk.destinations.stats({ project_id: projectId }),

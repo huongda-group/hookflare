@@ -83,7 +83,7 @@ export function TestDeliveryDialog({
 					<p className="text-sm text-failure">{errorText(m.error)}</p>
 				)}
 				{m.data && (
-					<div className="rounded bg-neutral-50 p-3 text-sm">
+					<div className="rounded bg-muted p-3 text-sm">
 						<div>
 							{m.data.http_status !== null
 								? `HTTP ${m.data.http_status}`
