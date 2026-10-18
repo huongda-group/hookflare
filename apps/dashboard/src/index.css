@@ -175,3 +175,29 @@
 		scroll-behavior: auto !important;
 	}
 }
+
+/*
+ * Touch targets (spec §5): desktop controls stay 40–44px high, but on a coarse
+ * (touch) pointer every interactive control must offer at least a 44px target.
+ * `min-height`/`min-width` clamp the utility height/width, so the desktop
+ * sizing utilities are untouched and only touch devices grow. Checkboxes and
+ * radios keep their small visible box and instead grow their invisible hit
+ * area (20px box + 2×12px inset = 44px).
+ */
+@media (pointer: coarse) {
+	[data-slot="button"],
+	[data-slot="input"],
+	[data-slot="select-trigger"],
+	button:not([data-slot="checkbox"]):not([data-slot="radio"]),
+	input:not([type="checkbox"]):not([type="radio"]),
+	select,
+	textarea {
+		min-height: 44px;
+		min-width: 44px;
+	}
+
+	[data-slot="checkbox"]::after,
+	[data-slot="radio"]::after {
+		inset: -0.75rem;
+	}
+}

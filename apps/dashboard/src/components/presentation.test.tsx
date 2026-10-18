@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
 	createMemoryHistory,
 	createRootRoute,
@@ -338,17 +341,48 @@ describe("DirtyFormGuard", () => {
 
 		expect(unloadBlocked()).toBe(false);
 	});
+
+	it("settles a parked navigation when dirty clears without a prompt", async () => {
+		const user = userEvent.setup();
+		const { control } = renderNavHarness({ initialDirty: true });
+		await screen.findByText("Editor");
+
+		await user.click(screen.getByRole("button", { name: "Go other" }));
+		expect(
+			await screen.findByText("Discard unsaved changes?"),
+		).toBeInTheDocument();
+
+		// The save completes while the router blocker is parked. A modal prompt
+		// blocks interaction, so clear `dirty` through the harness control.
+		await act(async () => {
+			control.clearDirty();
+		});
+
+		// The navigation the user asked for proceeds and the prompt is gone, so
+		// the parked resolver promise is settled rather than dropped.
+		expect(await screen.findByText("Other page")).toBeInTheDocument();
+		expect(
+			screen.queryByText("Discard unsaved changes?"),
+		).not.toBeInTheDocument();
+	});
 });
 
 /** Two routes with a guarded editor, so a real blocker can be exercised. */
 function renderNavHarness({ initialDirty }: { initialDirty: boolean }) {
 	const rootRoute = createRootRoute({ component: () => <Outlet /> });
 	const goOther = () => void router.navigate({ to: "/audit" });
+	// Lets a test clear `dirty` while the router blocker is parked, which a
+	// modal prompt would otherwise make impossible to trigger by interaction.
+	const control: { clearDirty: () => void } = { clearDirty: () => {} };
 	const indexRoute = createRoute({
 		getParentRoute: () => rootRoute,
 		path: "/",
 		component: () => (
-			<EditorRoute initialDirty={initialDirty} onGoOther={goOther} />
+			<EditorRoute
+				initialDirty={initialDirty}
+				onGoOther={goOther}
+				control={control}
+			/>
 		),
 	});
 	const otherRoute = createRoute({
@@ -361,18 +395,21 @@ function renderNavHarness({ initialDirty }: { initialDirty: boolean }) {
 		history: createMemoryHistory({ initialEntries: ["/"] }),
 	});
 	const view = render(<RouterProvider router={router} />);
-	return { router, unmount: view.unmount };
+	return { router, unmount: view.unmount, control };
 }
 
 function EditorRoute({
 	initialDirty,
 	onGoOther,
+	control,
 }: {
 	initialDirty: boolean;
 	onGoOther: () => void;
+	control: { clearDirty: () => void };
 }) {
 	const [dirty, setDirty] = React.useState(initialDirty);
 	const [closed, setClosed] = React.useState(false);
+	control.clearDirty = () => setDirty(false);
 	return (
 		<div>
 			<p>Editor</p>
@@ -431,5 +468,30 @@ describe("sonner Toaster", () => {
 				document.querySelector('[data-sonner-theme="light"]'),
 			).not.toBeNull();
 		});
+	});
+});
+
+describe("touch targets", () => {
+	// jsdom cannot apply a `pointer: coarse` media query, so assert the shipped
+	// stylesheet carries the coarse-pointer contract instead of faking one.
+	const css = readFileSync(
+		join(dirname(fileURLToPath(import.meta.url)), "..", "index.css"),
+		"utf8",
+	);
+
+	it("guarantees a 44px minimum target for controls on a coarse pointer", () => {
+		const start = css.search(/@media\s*\(\s*pointer:\s*coarse\s*\)/);
+		expect(start).toBeGreaterThanOrEqual(0);
+		const block = css.slice(start);
+
+		// A ≥44px minimum on the interactive control selectors, so touch grows
+		// past the 40–44px desktop sizing without changing the desktop classes.
+		expect(block).toMatch(/min-height:\s*44px/);
+		expect(block).toMatch(/min-width:\s*44px/);
+		expect(block).toMatch(/\[data-slot=["']?button["']?\]/);
+		expect(block).toMatch(/\[data-slot=["']?input["']?\]/);
+		expect(block).toMatch(/\[data-slot=["']?select-trigger["']?\]/);
+		// Checkboxes/radios grow their invisible hit area, not their visible box.
+		expect(block).toMatch(/\[data-slot=["']?checkbox["']?\]\s*::after/);
 	});
 });

@@ -19,7 +19,8 @@ import {
  * - A native `beforeunload` listener is attached only while dirty and removed
  *   on cleanup, so a clean form never blocks a reload.
  * - A successful save clears `dirty` before closing: the deferred request is
- *   flushed without a prompt.
+ *   flushed without a prompt. The same clear-while-parked rule settles a blocked
+ *   navigation by letting it proceed, so no resolver promise is left dangling.
  */
 export function DirtyFormGuard({
 	dirty,
@@ -59,6 +60,19 @@ export function DirtyFormGuard({
 		setPendingClose(null);
 		pendingClose();
 	}, [pendingClose, dirty]);
+
+	// `dirty` flipped back to false while the router blocker is parked: the
+	// unsaved condition is gone (the save the user initiated completed), so the
+	// navigation they already asked for is allowed through — the same "let the
+	// pending action proceed" semantics as the `pendingClose` flush above. The
+	// alternative, `reset()`, would strand the user on the current route with
+	// nothing left to protect. Without this effect the parked resolver promise
+	// never settles: `@tanstack/history` awaits it inline, so the navigation is
+	// silently dropped and the promise leaks.
+	useEffect(() => {
+		if (dirty || blocker.status !== "blocked") return;
+		blocker.proceed();
+	}, [dirty, blocker]);
 
 	const requestClose = useCallback((close: () => void) => {
 		if (!dirtyRef.current) {
