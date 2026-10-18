@@ -1,5 +1,11 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+	createMemoryHistory,
+	createRootRoute,
+	createRouter,
+	RouterProvider,
+} from "@tanstack/react-router";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { type ReactNode, useState } from "react";
@@ -19,6 +25,21 @@ const wrap = (ui: ReactNode) =>
 			{ui}
 		</QueryClientProvider>,
 	);
+
+/** Outcome rows link to their event, so link-rendering tests mount inside a router. */
+const wrapWithRouter = (ui: ReactNode) => {
+	const qc = createQueryClient();
+	const rootRoute = createRootRoute({
+		component: () => (
+			<QueryClientProvider client={qc}>{ui}</QueryClientProvider>
+		),
+	});
+	const router = createRouter({
+		routeTree: rootRoute,
+		history: createMemoryHistory({ initialEntries: ["/"] }),
+	});
+	return render(<RouterProvider router={router} />);
+};
 
 describe("ReplayDialog", () => {
 	it("requires a reason before sending", async () => {
@@ -70,8 +91,7 @@ describe("ReplayDialog", () => {
 });
 
 describe("ReplayDialog result", () => {
-	it("keeps the sent count after the caller clears its selection", async () => {
-		server.use(
+	it("keeps the sent count after the caller clears its selection", async () => {		server.use(
 			http.post(apiUrl("/failures/replay"), () =>
 				HttpResponse.json({
 					replayed: [
@@ -374,5 +394,129 @@ describe("DestinationFormDialog limits", () => {
 		await user.click(screen.getByRole("button", { name: /save/i }));
 		await waitFor(() => expect(bodies).toHaveLength(1));
 		expect(bodies[0]).toMatchObject({ rate_limit_per_s: null });
+	});
+});
+
+describe("ReplayDialog validation and outcomes (spec §8.8)", () => {
+	it("rejects a reason longer than 500 characters", async () => {
+		const sent = vi.fn();
+		server.use(
+			http.post(apiUrl("/failures/replay"), async ({ request }) => {
+				sent(await request.json());
+				return HttpResponse.json({ replayed: [], skipped: [] });
+			}),
+		);
+		wrap(
+			<ReplayDialog
+				open
+				onOpenChange={() => {}}
+				target={{ kind: "bulk", deliveryIds: ["dlv_1"] }}
+			/>,
+		);
+		fireEvent.change(screen.getByLabelText("Reason"), {
+			target: { value: "x".repeat(501) },
+		});
+		await userEvent.click(screen.getByRole("button", { name: "Replay 1" }));
+		expect(await screen.findByText(/1–500 characters/i)).toBeInTheDocument();
+		expect(sent).not.toHaveBeenCalled();
+	});
+
+	it("issues one POST for a duplicate submit while pending", async () => {
+		const sent = vi.fn();
+		server.use(
+			http.post(apiUrl("/failures/replay"), async ({ request }) => {
+				sent(await request.json());
+				await new Promise((r) => setTimeout(r, 100));
+				return HttpResponse.json({ replayed: [], skipped: [] });
+			}),
+		);
+		wrap(
+			<ReplayDialog
+				open
+				onOpenChange={() => {}}
+				target={{ kind: "bulk", deliveryIds: ["dlv_1"] }}
+			/>,
+		);
+		await userEvent.type(screen.getByLabelText("Reason"), "backend fixed");
+		const submit = screen.getByRole("button", { name: "Replay 1" });
+		await userEvent.click(submit);
+		await userEvent.click(submit);
+		expect(
+			await screen.findByText(/no new deliveries were created/i),
+		).toBeInTheDocument();
+		expect(sent).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps the returned status for a single-event replay", async () => {
+		server.use(
+			http.post(apiUrl("/events/evt_1/replay"), () =>
+				HttpResponse.json({
+					delivery_id: "dlv_9",
+					status: "paused",
+					enqueued: false,
+				}),
+			),
+		);
+		wrapWithRouter(
+			<ReplayDialog
+				open
+				onOpenChange={() => {}}
+				target={{ kind: "event", eventId: "evt_1" }}
+			/>,
+		);
+		await userEvent.type(
+			await screen.findByLabelText("Reason"),
+			"backend fixed",
+		);
+		await userEvent.click(screen.getByRole("button", { name: "Replay 1" }));
+		expect(await screen.findByText("dlv_9")).toBeInTheDocument();
+		expect(screen.getByText("Paused")).toBeInTheDocument();
+		expect(screen.getByText(/destination is paused/i)).toBeInTheDocument();
+		expect(screen.queryByText(/delivered/i)).not.toBeInTheDocument();
+	});
+
+	it("reports the submitted IDs when the target changes mid-flight", async () => {
+		let release!: () => void;
+		const gate = new Promise<void>((r) => {
+			release = r;
+		});
+		server.use(
+			http.post(apiUrl("/failures/replay"), async () => {
+				await gate;
+				return HttpResponse.json({
+					replayed: [
+						{ delivery_id: "dlv_1", new_delivery_id: "dlv_9", enqueued: true },
+					],
+					skipped: [],
+				});
+			}),
+		);
+		const qc = createQueryClient();
+		const { rerender } = render(
+			<QueryClientProvider client={qc}>
+				<ReplayDialog
+					open
+					onOpenChange={() => {}}
+					target={{ kind: "bulk", deliveryIds: ["dlv_1"] }}
+				/>
+			</QueryClientProvider>,
+		);
+		await userEvent.type(screen.getByLabelText("Reason"), "backend fixed");
+		await userEvent.click(screen.getByRole("button", { name: "Replay 1" }));
+		rerender(
+			<QueryClientProvider client={qc}>
+				<ReplayDialog
+					open
+					onOpenChange={() => {}}
+					target={{ kind: "bulk", deliveryIds: ["dlv_2"] }}
+				/>
+			</QueryClientProvider>,
+		);
+		release();
+		expect(await screen.findByText("dlv_9")).toBeInTheDocument();
+		expect(
+			screen.getByRole("heading", { name: "Replay delivery" }),
+		).toBeInTheDocument();
+		expect(screen.queryByText("dlv_2")).not.toBeInTheDocument();
 	});
 });

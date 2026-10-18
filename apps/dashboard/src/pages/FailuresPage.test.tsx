@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it, vi } from "vitest";
 import { toLocalInput } from "@/lib/time";
@@ -186,6 +186,174 @@ describe("Failures", () => {
 			);
 			await waitFor(() => expect(calls.at(-1)?.has("from")).toBe(false));
 			expect(screen.getByLabelText("From")).toHaveValue("");
+		});
+	});
+
+	describe("selection bounds and scope (spec §8.8)", () => {
+		it("allows 100 IDs and rejects the 101st", async () => {
+			const rows = Array.from({ length: 101 }, (_, i) =>
+				failure({ id: `dlv_${i + 1}`, event_id: `evt_${i + 1}` }),
+			);
+			server.use(
+				http.get(apiUrl("/failures"), () =>
+					HttpResponse.json({ data: rows, next_cursor: null }),
+				),
+			);
+			const { user } = renderApp("/failures", { role: "operator" });
+			await user.click(await screen.findByRole("button", { name: "Select loaded" }));
+			expect(
+				screen.getByRole("button", { name: "Replay selected (100)" }),
+			).toBeInTheDocument();
+			await user.click(screen.getByLabelText("Select dlv_101"));
+			expect(
+				screen.getByRole("button", { name: "Replay selected (100)" }),
+			).toBeInTheDocument();
+			expect(screen.getByLabelText("Select dlv_101")).not.toBeChecked();
+		});
+
+		it("Select loaded covers only loaded rows, never unseen pages", async () => {
+			server.use(
+				http.get(apiUrl("/failures"), ({ request }) => {
+					const url = new URL(request.url);
+					return url.searchParams.get("cursor") === "c1"
+						? HttpResponse.json({
+								data: [failure({ id: "dlv_2", event_id: "evt_2" })],
+								next_cursor: null,
+							})
+						: HttpResponse.json({ data: [failure()], next_cursor: "c1" });
+				}),
+			);
+			const { user } = renderApp("/failures", { role: "operator" });
+			await user.click(await screen.findByRole("button", { name: "Select loaded" }));
+			expect(
+				screen.getByRole("button", { name: "Replay selected (1)" }),
+			).toBeInTheDocument();
+			await user.click(screen.getByRole("button", { name: "Load more" }));
+			expect(await screen.findByText("dlv_2")).toBeInTheDocument();
+			expect(screen.getByLabelText("Select dlv_2")).not.toBeChecked();
+		});
+
+		it("clears the selection when the tab changes", async () => {
+			server.use(
+				http.get(apiUrl("/failures"), () =>
+					HttpResponse.json({ data: [failure()], next_cursor: null }),
+				),
+			);
+			const { user } = renderApp("/failures", { role: "operator" });
+			await user.click(await screen.findByLabelText("Select dlv_1"));
+			expect(
+				screen.getByRole("button", { name: "Replay selected (1)" }),
+			).toBeInTheDocument();
+			await user.click(screen.getByRole("tab", { name: "Failed Final" }));
+			expect(
+				screen.getByRole("button", { name: "Replay selected (0)" }),
+			).toBeInTheDocument();
+		});
+
+		it("a deferred response after a scope change cannot restore the old selection", async () => {
+			let release!: () => void;
+			const gate = new Promise<void>((r) => {
+				release = r;
+			});
+			let calls = 0;
+			server.use(
+				http.get(apiUrl("/failures"), async () => {
+					calls += 1;
+					if (calls === 2) await gate;
+					return HttpResponse.json({ data: [failure()], next_cursor: null });
+				}),
+			);
+			const { user } = renderApp("/failures", { role: "operator" });
+			await user.click(await screen.findByLabelText("Select dlv_1"));
+			await user.click(screen.getByRole("tab", { name: "Failed Final" }));
+			expect(
+				screen.getByRole("button", { name: "Replay selected (0)" }),
+			).toBeInTheDocument();
+			release();
+			await waitFor(() => expect(calls).toBe(2));
+			await screen.findByText("dlv_1");
+			expect(screen.getByLabelText("Select dlv_1")).not.toBeChecked();
+		});
+
+		it("keeps loaded selections when the next page fails", async () => {
+			server.use(
+				http.get(apiUrl("/failures"), ({ request }) => {
+					const url = new URL(request.url);
+					if (url.searchParams.get("cursor") === "c1")
+						return new HttpResponse("boom", { status: 500 });
+					return HttpResponse.json({ data: [failure()], next_cursor: "c1" });
+				}),
+			);
+			const { user } = renderApp("/failures", { role: "operator" });
+			await user.click(await screen.findByLabelText("Select dlv_1"));
+			await user.click(screen.getByRole("button", { name: "Load more" }));
+			expect(
+				await screen.findByText(/could not load more rows/i),
+			).toBeInTheDocument();
+			expect(screen.getByLabelText("Select dlv_1")).toBeChecked();
+			expect(
+				screen.getByRole("button", { name: "Replay selected (1)" }),
+			).toBeInTheDocument();
+		});
+	});
+
+	describe("replay outcomes (spec §8.8)", () => {
+		it("links new deliveries, never claims Delivered, and keeps history", async () => {
+			server.use(
+				http.get(apiUrl("/failures"), () =>
+					HttpResponse.json({
+						data: [
+							failure({ id: "dlv_1" }),
+							failure({ id: "dlv_2", event_id: "evt_2" }),
+						],
+						next_cursor: null,
+					}),
+				),
+				http.post(apiUrl("/failures/replay"), () =>
+					HttpResponse.json({
+						replayed: [
+							{ delivery_id: "dlv_1", new_delivery_id: "dlv_9", enqueued: true },
+							{ delivery_id: "dlv_2", new_delivery_id: "dlv_8", enqueued: false },
+						],
+						skipped: [{ delivery_id: "dlv_3", reason: "not_found" }],
+					}),
+				),
+			);
+			const { user } = renderApp("/failures", { role: "operator" });
+			await user.click(await screen.findByLabelText("Select dlv_1"));
+			await user.click(screen.getByLabelText("Select dlv_2"));
+			await user.click(
+				screen.getByRole("button", { name: "Replay selected (2)" }),
+			);
+			expect(
+				screen.getByText(
+					/creates new deliveries and can trigger your backend again/i,
+				),
+			).toBeInTheDocument();
+			await user.type(screen.getByLabelText("Reason"), "backend fixed");
+			await user.click(screen.getByRole("button", { name: "Replay 2" }));
+			const dialog = within(await screen.findByRole("dialog"));
+			expect(dialog.getByRole("link", { name: "dlv_9" })).toHaveAttribute(
+				"href",
+				"/events/evt_1",
+			);
+			expect(dialog.getByRole("link", { name: "dlv_8" })).toHaveAttribute(
+				"href",
+				"/events/evt_2",
+			);
+			expect(dialog.getByText("dlv_1")).toBeInTheDocument();
+			expect(dialog.getByText(/not_found/)).toBeInTheDocument();
+			expect(
+				dialog.getByText(/reconciler enqueues it within a minute/i),
+			).toBeInTheDocument();
+			expect(dialog.queryByText(/delivered/i)).not.toBeInTheDocument();
+			// Original rows stay listed; the completed replay cleared the selection.
+			await user.keyboard("{Escape}");
+			expect(await screen.findByLabelText("Select dlv_1")).toBeInTheDocument();
+			expect(screen.getByLabelText("Select dlv_2")).toBeInTheDocument();
+			expect(
+				screen.getByRole("button", { name: "Replay selected (0)" }),
+			).toBeInTheDocument();
 		});
 	});
 });
