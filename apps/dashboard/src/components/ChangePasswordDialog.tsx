@@ -91,7 +91,7 @@ function ChangePasswordForm({
 			<DialogHeader>
 				<DialogTitle>Change password</DialogTitle>
 			</DialogHeader>
-			<div>
+			<div className="space-y-2">
 				<Label htmlFor="pw-current">Current password</Label>
 				<Input
 					id="pw-current"
@@ -101,7 +101,7 @@ function ChangePasswordForm({
 					onChange={(e) => setCurrent(e.target.value)}
 				/>
 			</div>
-			<div>
+			<div className="space-y-2">
 				<Label htmlFor="pw-new">New password</Label>
 				<Input
 					id="pw-new"
@@ -111,7 +111,7 @@ function ChangePasswordForm({
 					onChange={(e) => setNext(e.target.value)}
 				/>
 			</div>
-			<div>
+			<div className="space-y-2">
 				<Label htmlFor="pw-confirm">Confirm new password</Label>
 				<Input
 					id="pw-confirm"
@@ -122,7 +122,12 @@ function ChangePasswordForm({
 				/>
 			</div>
 			{(clientError ?? error) && (
-				<p className="text-sm text-red-700">{clientError ?? error}</p>
+				<p
+					data-field-error
+					className="rounded-md border border-failure/40 bg-failure-surface px-3 py-2 text-sm text-failure"
+				>
+					{clientError ?? error}
+				</p>
 			)}
 			<DialogFooter>
 				<Button variant="outline" onClick={() => onOpenChange(false)}>
