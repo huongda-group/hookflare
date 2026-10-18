@@ -37,7 +37,9 @@ test("exit criteria: configure everything from the UI, then see the DLQ", async 
 		.getByLabel("Confirm password", { exact: true })
 		.fill("e2e-password-1234");
 	await page.getByLabel("Setup token", { exact: true }).fill("e2e-setup-token");
-	const createAdmin = page.getByRole("button", { name: "Create admin" });
+	const createAdmin = page.getByRole("button", {
+		name: "Create admin account",
+	});
 	await passTurnstile(page, createAdmin);
 	await createAdmin.click();
 	await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
@@ -46,14 +48,18 @@ test("exit criteria: configure everything from the UI, then see the DLQ", async 
 
 	// Exit criterion 2: project → destination → source, UI only.
 	await page.goto("/projects");
-	await page.getByRole("button", { name: "New project" }).click();
+	await page
+		.locator("header", { has: page.getByRole("heading", { name: "Projects" }) })
+		.getByRole("button", { name: "New project" })
+		.click();
 	await page.getByLabel("Name").fill(`E2E ${slug}`);
 	await page.getByLabel("Slug").fill(slug);
 	await page.getByRole("button", { name: "Create" }).click();
 	await expect(page.getByText(`E2E ${slug}`)).toBeVisible();
 
 	await page.goto("/endpoints?tab=destinations");
-	await page.getByRole("button", { name: "New destination" }).click();
+	// Header and empty-state buttons both open the same dialog.
+	await page.getByRole("button", { name: "New destination" }).first().click();
 	await page.getByRole("combobox", { name: "Project", exact: true }).click();
 	await page.getByRole("option", { name: `E2E ${slug}` }).click();
 	await page.getByLabel("Name").fill(`Dest ${slug}`);
@@ -65,7 +71,7 @@ test("exit criteria: configure everything from the UI, then see the DLQ", async 
 	await page.getByRole("button", { name: "Done" }).click();
 
 	await page.goto("/endpoints?tab=sources");
-	await page.getByRole("button", { name: "New source" }).click();
+	await page.getByRole("button", { name: "New source" }).first().click();
 	await page.getByRole("combobox", { name: "Project", exact: true }).click();
 	await page.getByRole("option", { name: `E2E ${slug}` }).click();
 	await page

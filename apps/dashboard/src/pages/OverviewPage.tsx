@@ -37,10 +37,7 @@ function Tile({
 	tone?: "bad" | "warn";
 }) {
 	return (
-		<div
-			data-tile
-			className="rounded-lg border border-border bg-card p-4"
-		>
+		<div data-tile className="rounded-lg border border-border bg-card p-4">
 			<div className="text-xs uppercase text-muted-foreground">{label}</div>
 			<div
 				className={
@@ -173,8 +170,8 @@ export function OverviewContent({
 							</div>
 							<p className="mt-2 text-xs text-muted-foreground">
 								Totals refresh on a five-minute rollup. Queried at{" "}
-								<TimeText ms={o.data.generated_at} /> (API response
-								generation time, not the last rollup execution).
+								<TimeText ms={o.data.generated_at} /> (API response generation
+								time, not the last rollup execution).
 							</p>
 						</section>
 						<section aria-labelledby="overview-traffic">
@@ -185,9 +182,9 @@ export function OverviewContent({
 								<TrendChart points={o.data.trend} range={range} />
 							) : (
 								<p className="rounded-lg border border-border bg-card px-4 py-6 text-sm text-muted-foreground">
-									No events received in this reporting range. Once sources
-									start delivering, received, completed, and failed traffic
-									appears here.
+									No events received in this reporting range. Once sources start
+									delivering, received, completed, and failed traffic appears
+									here.
 								</p>
 							)}
 						</section>
@@ -216,9 +213,8 @@ export function OverviewContent({
 								<Tile label="Paused" value={String(o.data.live.paused)} />
 							</div>
 							<p className="mt-2 text-xs text-muted-foreground">
-								Pending groups pending, queued, and in flight deliveries
-								waiting to send. Retrying and paused deliveries are listed
-								separately.
+								Pending groups pending, queued, and in flight deliveries waiting
+								to send. Retrying and paused deliveries are listed separately.
 							</p>
 						</section>
 						<section aria-labelledby="overview-failing">
@@ -338,7 +334,7 @@ export function OverviewPage({
 }) {
 	return (
 		<div className="space-y-4">
-			<div className="flex items-center justify-between">
+			<div className="flex flex-wrap items-center justify-between gap-2">
 				<h1 className="text-xl font-semibold">Overview</h1>
 				<ProjectSelect
 					value={search.project_id}

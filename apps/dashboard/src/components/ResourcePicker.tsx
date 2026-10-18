@@ -185,7 +185,7 @@ export function ResourcePicker({
 				aria-controls={open ? listId : undefined}
 				onClick={() => setOpen((current) => !current)}
 				className={cn(
-					"flex h-10 w-56 items-center justify-between gap-2 rounded-md border border-input bg-surface px-3 py-2 text-sm shadow-xs outline-none",
+					"flex h-10 w-56 max-w-full items-center justify-between gap-2 rounded-md border border-input bg-surface px-3 py-2 text-sm shadow-xs outline-none",
 					"focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
 				)}
 			>

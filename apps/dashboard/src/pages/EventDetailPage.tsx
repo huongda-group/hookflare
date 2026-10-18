@@ -55,7 +55,7 @@ export function EventDetailPage({ eventId }: { eventId: string }) {
 	return (
 		<div className="space-y-6">
 			<div className="flex flex-wrap items-center gap-3">
-				<h1 className="font-mono text-lg">{e.id}</h1>
+				<h1 className="min-w-0 font-mono text-lg break-all">{e.id}</h1>
 				<div className="ml-auto">
 					<Can permission="deliveries.replay">
 						<Button
@@ -69,8 +69,8 @@ export function EventDetailPage({ eventId }: { eventId: string }) {
 			</div>
 			{payloadMissing && (
 				<p role="status" className="text-sm text-muted-foreground">
-					Replay needs the payload, which is no longer available, so replay
-					is disabled for this event.
+					Replay needs the payload, which is no longer available, so replay is
+					disabled for this event.
 				</p>
 			)}
 			<div className="grid items-start gap-6 lg:grid-cols-[3fr_2fr]">
@@ -120,8 +120,7 @@ export function EventDetailPage({ eventId }: { eventId: string }) {
 							<p className="text-sm text-muted-foreground">
 								Payload inspection requires the{" "}
 								<span className="font-mono">payload.read</span> permission,
-								which this account does not have. Headers above remain
-								visible.
+								which this account does not have. Headers above remain visible.
 							</p>
 						)}
 					</div>

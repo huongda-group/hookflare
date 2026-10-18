@@ -189,7 +189,11 @@ export function AppShell() {
 						</Dialog>
 						<Breadcrumbs pathname={location.pathname} />
 					</header>
-					<main id="main-content" className="min-w-0 flex-1 p-4 lg:p-6">
+					<main
+						id="main-content"
+						tabIndex={-1}
+						className="min-w-0 flex-1 p-4 focus:outline-none lg:p-6"
+					>
 						<TooltipProvider>
 							<Outlet />
 						</TooltipProvider>

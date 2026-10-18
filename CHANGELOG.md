@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Light dashboard redesign: single light theme with documented WCAG 2.2 AA
+  tokens (`apps/dashboard/DESIGN.md`), responsive sidebar/drawer cutover at
+  1024px, skip link, keyboard-operable recovery flows, role-matrix UI
+  gating, explicit payload reveal, and one-time secret acknowledgement.
+  Browser coverage is split: `e2e/redesign.spec.ts` (route-intercepted
+  fixtures, no real D1) and `e2e/smoke.spec.ts` (real Worker + fresh D1,
+  sequential).
+
 ### Breaking
 
 - Cloudflare Access is removed as the auth layer: the Worker no longer
