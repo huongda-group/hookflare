@@ -11,6 +11,8 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
+import { DirtyFormGuard } from "@/components/DirtyFormGuard";
+import { FormSection } from "@/components/FormSection";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
@@ -25,7 +27,7 @@ export function FieldError({
 	id?: string;
 }) {
 	return message ? (
-		<p id={id} data-field-error className="text-sm text-red-700">
+		<p id={id} data-field-error className="text-sm text-failure">
 			{message}
 		</p>
 	) : null;
@@ -46,13 +48,10 @@ export function ProjectFormDialog({
 	onOpenChange: (o: boolean) => void;
 	project?: Project;
 }) {
+	// Unmount on close so every open starts from the current project.
+	if (!open) return null;
 	return (
-		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent>
-				{/* DialogContent unmounts on close: every open starts from the current project. */}
-				<ProjectForm project={project} onDone={() => onOpenChange(false)} />
-			</DialogContent>
-		</Dialog>
+		<ProjectForm project={project} onDone={() => onOpenChange(false)} />
 	);
 }
 
@@ -86,32 +85,49 @@ function ProjectForm({
 	});
 	const errors = form.formState.errors;
 	return (
-		<>
-			<DialogHeader>
-				<DialogTitle>{editing ? "Edit project" : "New project"}</DialogTitle>
-			</DialogHeader>
-			<form onSubmit={submit} className="space-y-3">
-				<div>
-					<Label htmlFor="project-name">Name</Label>
-					<Input id="project-name" {...form.register("name")} />
-					<FieldError message={errors.name?.message} />
-				</div>
-				{!editing && (
-					<div>
-						<Label htmlFor="project-slug">Slug</Label>
-						<Input id="project-slug" {...form.register("slug")} />
-						<FieldError
-							message={errors.slug?.message && `slug: ${errors.slug.message}`}
-						/>
-					</div>
-				)}
-				<FieldError message={errors.root?.message} />
-				<DialogFooter>
-					<Button type="submit" disabled={form.formState.isSubmitting}>
-						{editing ? "Save" : "Create"}
-					</Button>
-				</DialogFooter>
-			</form>
-		</>
+		<DirtyFormGuard dirty={form.formState.isDirty}>
+			{(requestClose) => (
+				<Dialog open onOpenChange={(o) => !o && requestClose(onDone)}>
+					<DialogContent>
+						<DialogHeader>
+							<DialogTitle>{editing ? "Edit project" : "New project"}</DialogTitle>
+						</DialogHeader>
+						<form onSubmit={submit} className="space-y-3">
+							<FormSection title="Project">
+								<div>
+									<Label htmlFor="project-name">Name</Label>
+									<Input id="project-name" {...form.register("name")} />
+									<FieldError message={errors.name?.message} />
+								</div>
+								{!editing && (
+									<div>
+										<Label htmlFor="project-slug">Slug</Label>
+										<Input id="project-slug" {...form.register("slug")} />
+										<FieldError
+											message={
+												errors.slug?.message && `slug: ${errors.slug.message}`
+											}
+										/>
+									</div>
+								)}
+							</FormSection>
+							<FieldError message={errors.root?.message} />
+							<DialogFooter>
+								<Button
+									type="button"
+									variant="outline"
+									onClick={() => requestClose(onDone)}
+								>
+									Cancel
+								</Button>
+								<Button type="submit" disabled={form.formState.isSubmitting}>
+									{editing ? "Save" : "Create"}
+								</Button>
+							</DialogFooter>
+						</form>
+					</DialogContent>
+				</Dialog>
+			)}
+		</DirtyFormGuard>
 	);
 }

@@ -14,12 +14,15 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { errorText } from "@/lib/forms";
+import { qk } from "@/lib/queries/keys";
 
 type Props = {
 	open: boolean;
 	onOpenChange: (o: boolean) => void;
 	resource: "source" | "destination";
 	id: string;
+	/** Shown in the title so rotation confirms what it revokes. */
+	name?: string;
 	/** The generated secret, or null when the caller supplied one (sources). */
 	onRotated: (secret: string | null) => void;
 };
@@ -39,6 +42,7 @@ function RotateSecretForm({
 	onOpenChange,
 	resource,
 	id,
+	name,
 	onRotated,
 }: Omit<Props, "open">) {
 	const qc = useQueryClient();
@@ -62,7 +66,7 @@ function RotateSecretForm({
 				},
 			),
 		onSuccess: (res) => {
-			void qc.invalidateQueries({ queryKey: [`${resource}s`] });
+			void qc.invalidateQueries({ queryKey: qk[`${resource}s`].all });
 			onOpenChange(false);
 			onRotated(res.signing_secret ?? res.secret ?? null);
 		},
@@ -70,7 +74,9 @@ function RotateSecretForm({
 	return (
 		<>
 			<DialogHeader>
-				<DialogTitle>Rotate secret</DialogTitle>
+				<DialogTitle>
+					Rotate secret{name ? ` for ${name}` : ""}
+				</DialogTitle>
 				<DialogDescription>
 					The previous secret keeps working for the grace period.
 				</DialogDescription>
@@ -85,12 +91,12 @@ function RotateSecretForm({
 				onChange={(e) => setGrace(e.target.value)}
 			/>
 			{grace === "0" && (
-				<p className="text-sm font-medium text-red-700">
+				<p className="text-sm font-medium text-failure">
 					Grace 0 revokes the current secret immediately.
 				</p>
 			)}
 			{!validGrace && (
-				<p className="text-sm text-red-700">
+				<p className="text-sm text-failure">
 					Enter a whole number from 0 to 168.
 				</p>
 			)}
@@ -115,7 +121,7 @@ function RotateSecretForm({
 				value={reason}
 				onChange={(e) => setReason(e.target.value)}
 			/>
-			{m.error && <p className="text-sm text-red-700">{errorText(m.error)}</p>}
+			{m.error && <p className="text-sm text-failure">{errorText(m.error)}</p>}
 			<DialogFooter>
 				<Button variant="outline" onClick={() => onOpenChange(false)}>
 					Cancel

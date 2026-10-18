@@ -6,6 +6,7 @@ import type {
 import { CursorTable } from "@/components/CursorTable";
 import { IdText } from "@/components/IdText";
 import { LoadError } from "@/components/LoadError";
+import { NamedResourceLink } from "@/components/ResourceLabel";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TimeText } from "@/components/TimeText";
 import { ApiError } from "@/lib/api";
@@ -48,7 +49,8 @@ export function DestinationDetailPage({
 				retrying={destination.isFetching}
 			/>
 		);
-	if (!destination.data) return <p className="text-neutral-500">Loading…</p>;
+	if (!destination.data)
+		return <p className="p-6 text-muted-foreground">Loading…</p>;
 	const d = destination.data;
 	return (
 		<div className="space-y-6">
@@ -67,7 +69,11 @@ export function DestinationDetailPage({
 						<span className="font-mono text-xs break-all">{d.url}</span>
 					</Field>
 					<Field label="Project">
-						<IdText id={d.project_id} />
+						<NamedResourceLink
+							kind="project"
+							id={d.project_id}
+							href={`/projects/${d.project_id}`}
+						/>
 					</Field>
 					<Field label="Created">
 						<TimeText ms={d.created_at} />
@@ -105,7 +111,7 @@ function PolicySection({ destination: d }: { destination: Destination }) {
 							{own !== null ? (
 								`${own}${unit}`
 							) : (
-								<span className="text-neutral-500">
+								<span className="text-muted-foreground">
 									{fallback === undefined
 										? "default"
 										: `default: ${fallback}${unit}`}

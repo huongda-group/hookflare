@@ -3,7 +3,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { CursorTable } from "@/components/CursorTable";
 import { DestinationFormDialog } from "@/components/DestinationFormDialog";
-import { IdText } from "@/components/IdText";
+import { NamedResourceLink } from "@/components/ResourceLabel";
 import { SecretRevealDialog } from "@/components/SecretRevealDialog";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TimeText } from "@/components/TimeText";
@@ -32,6 +32,11 @@ export function DestinationsTab({ projectId }: { projectId?: string }) {
 				query={query}
 				rowKey={(d) => d.id}
 				empty="No destinations yet."
+				emptyAction={
+					<Can permission="config.write">
+						<Button onClick={() => setCreating(true)}>New destination</Button>
+					</Can>
+				}
 				onRowClick={(d) =>
 					void navigate({
 						to: "/endpoints/destinations/$destinationId",
@@ -56,7 +61,16 @@ export function DestinationsTab({ projectId }: { projectId?: string }) {
 						header: "URL",
 						cell: (d) => <span className="font-mono text-xs">{d.url}</span>,
 					},
-					{ header: "ID", cell: (d) => <IdText id={d.id} /> },
+					{
+						header: "Project",
+						cell: (d) => (
+							<NamedResourceLink
+								kind="project"
+								id={d.project_id}
+								href={`/projects/${d.project_id}`}
+							/>
+						),
+					},
 					{ header: "Status", cell: (d) => <StatusBadge status={d.status} /> },
 					{
 						header: "Success (24h)",

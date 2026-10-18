@@ -101,4 +101,29 @@ describe("Sources tab", () => {
 			await screen.findByRole("heading", { name: "Stripe" }),
 		).toBeInTheDocument();
 	});
+
+	it("names the destination relationship instead of showing a bare ID", async () => {
+		server.use(
+			...base(),
+			http.get(apiUrl("/sources"), () =>
+				HttpResponse.json({ data: [source()], next_cursor: null }),
+			),
+		);
+		renderApp("/endpoints?tab=sources");
+		const row = (await screen.findByText("Stripe")).closest(
+			"tr",
+		) as HTMLElement;
+		expect(
+			await within(row).findByRole("link", { name: "Billing API" }),
+		).toHaveAttribute("href", "/endpoints/destinations/dst_1");
+	});
+
+	it("offers New source as the empty next step", async () => {
+		renderApp("/endpoints?tab=sources");
+		await screen.findByText("No sources yet.");
+		const table = screen.getByRole("table");
+		expect(
+			within(table).getByRole("button", { name: "New source" }),
+		).toBeInTheDocument();
+	});
 });

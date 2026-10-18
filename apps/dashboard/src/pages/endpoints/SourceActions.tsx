@@ -14,6 +14,7 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api";
+import { invalidateDeliveryViews } from "@/lib/queries/invalidate-delivery-views";
 import { useCan } from "@/lib/permissions";
 import { qk } from "@/lib/queries/keys";
 
@@ -60,6 +61,7 @@ export function SourceActions({ source: s }: { source: Source }) {
 				onOpenChange={close}
 				resource="source"
 				id={s.id}
+				name={s.name}
 				onRotated={setSecret}
 			/>
 			<SecretRevealDialog
@@ -81,6 +83,7 @@ export function SourceActions({ source: s }: { source: Source }) {
 				onConfirm={async (reason) => {
 					await api.patch(`/sources/${s.id}`, { status: next, reason });
 					await qc.invalidateQueries({ queryKey: qk.sources.all });
+					await invalidateDeliveryViews(qc);
 				}}
 			/>
 		</div>

@@ -15,6 +15,7 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api";
+import { invalidateDeliveryViews } from "@/lib/queries/invalidate-delivery-views";
 import { useCan } from "@/lib/permissions";
 import { qk } from "@/lib/queries/keys";
 
@@ -34,7 +35,11 @@ export function DestinationActions({
 	const close = (o: boolean) => {
 		if (!o) setOpen(null);
 	};
-	const refresh = () => qc.invalidateQueries({ queryKey: qk.destinations.all });
+	const refresh = () =>
+		Promise.all([
+			qc.invalidateQueries({ queryKey: qk.destinations.all }),
+			invalidateDeliveryViews(qc),
+		]);
 	return (
 		// biome-ignore lint/a11y/noStaticElementInteractions: only stops clicks and keys from bubbling to the clickable table row; the menu trigger inside is the interactive element.
 		<div
@@ -130,6 +135,7 @@ export function DestinationActions({
 				onOpenChange={close}
 				resource="destination"
 				id={d.id}
+				name={d.name}
 				onRotated={setSecret}
 			/>
 			<SecretRevealDialog

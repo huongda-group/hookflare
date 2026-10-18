@@ -19,17 +19,29 @@ import { DestinationFormDialog } from "./DestinationFormDialog";
 import { ReplayDialog } from "./ReplayDialog";
 import { RotateSecretDialog } from "./RotateSecretDialog";
 import { SecretRevealDialog } from "./SecretRevealDialog";
+import { TestDeliveryDialog } from "./TestDeliveryDialog";
 
 vi.mock("@/lib/queries/invalidate-delivery-views", () => ({
 	invalidateDeliveryViews: vi.fn(),
 }));
 
-const wrap = (ui: ReactNode) =>
-	render(
-		<QueryClientProvider client={createQueryClient()}>
-			{ui}
-		</QueryClientProvider>,
-	);
+const wrap = async (ui: ReactNode) => {
+	const qc = createQueryClient();
+	const rootRoute = createRootRoute({
+		component: () => (
+			<QueryClientProvider client={qc}>{ui}</QueryClientProvider>
+		),
+	});
+	const router = createRouter({
+		routeTree: rootRoute,
+		history: createMemoryHistory({ initialEntries: ["/"] }),
+	});
+	await router.load();
+	return {
+		user: userEvent.setup(),
+		...render(<RouterProvider router={router} />),
+	};
+};
 
 /** Outcome rows link to their event, so link-rendering tests mount inside a router. */
 const wrapWithRouter = (ui: ReactNode) => {
@@ -55,7 +67,7 @@ describe("ReplayDialog", () => {
 				return HttpResponse.json({ replayed: [], skipped: [] });
 			}),
 		);
-		wrap(
+		await wrap(
 			<ReplayDialog
 				open
 				onOpenChange={() => {}}
@@ -78,7 +90,7 @@ describe("ReplayDialog", () => {
 				}),
 			),
 		);
-		wrap(
+		await wrap(
 			<ReplayDialog
 				open
 				onOpenChange={() => {}}
@@ -118,7 +130,7 @@ describe("ReplayDialog result", () => {
 				/>
 			);
 		}
-		wrap(<Harness />);
+		await wrap(<Harness />);
 		await userEvent.type(screen.getByLabelText("Reason"), "backend fixed");
 		await userEvent.click(screen.getByRole("button", { name: "Replay 2" }));
 		expect(await screen.findByText("dlv_9")).toBeInTheDocument();
@@ -203,7 +215,7 @@ describe("SecretRevealDialog", () => {
 
 describe("RotateSecretDialog", () => {
 	it("warns when grace_hours is 0", async () => {
-		wrap(
+		await wrap(
 			<RotateSecretDialog
 				open
 				onOpenChange={() => {}}
@@ -230,7 +242,7 @@ describe("RotateSecretDialog", () => {
 			),
 		);
 		const onRotated = vi.fn();
-		wrap(
+		await wrap(
 			<RotateSecretDialog
 				open
 				onOpenChange={() => {}}
@@ -244,7 +256,7 @@ describe("RotateSecretDialog", () => {
 	});
 
 	it("masks the supplied secret and clears every field after cancel", async () => {
-		const { rerender } = wrap(
+		const { rerender } = await wrap(
 			<RotateSecretDialog
 				open
 				onOpenChange={() => {}}
@@ -306,7 +318,7 @@ describe("RotateSecretDialog", () => {
 				</>
 			);
 		}
-		wrap(<Harness />);
+		await wrap(<Harness />);
 		await userEvent.type(
 			screen.getByLabelText(/New secret/),
 			"a-very-long-secret-value",
@@ -354,7 +366,7 @@ describe("DestinationFormDialog limits", () => {
 			}),
 		);
 		const user = userEvent.setup();
-		wrap(
+		await wrap(
 			<DestinationFormDialog
 				open
 				onOpenChange={() => {}}
@@ -387,8 +399,7 @@ describe("DestinationFormDialog limits", () => {
 				return HttpResponse.json(destination({ id: "dst_1" }));
 			}),
 		);
-		const user = userEvent.setup();
-		wrap(
+		const { user } = await wrap(
 			<DestinationFormDialog
 				open
 				onOpenChange={() => {}}
@@ -399,6 +410,187 @@ describe("DestinationFormDialog limits", () => {
 		await user.click(screen.getByRole("button", { name: /save/i }));
 		await waitFor(() => expect(bodies).toHaveLength(1));
 		expect(bodies[0]).toMatchObject({ rate_limit_per_s: null });
+	});
+
+	it("treats a blank policy override as inherit and shows the default", async () => {
+		const bodies: unknown[] = [];
+		server.use(
+			http.patch(apiUrl("/destinations/dst_1"), async ({ request }) => {
+				bodies.push(await request.json());
+				return HttpResponse.json(destination({ id: "dst_1" }));
+			}),
+		);
+		const { user } = await wrap(
+			<DestinationFormDialog
+				open
+				onOpenChange={() => {}}
+				destination={destination({ id: "dst_1", max_attempts: 5 })}
+			/>,
+		);
+		expect(
+			await screen.findByPlaceholderText("default: 10000"),
+		).toBeInTheDocument();
+		await user.clear(screen.getByLabelText("Max attempts"));
+		await user.click(screen.getByRole("button", { name: /save/i }));
+		await waitFor(() => expect(bodies).toHaveLength(1));
+		expect(bodies[0]).toMatchObject({ max_attempts: null });
+		expect(bodies[0]).not.toMatchObject({ max_attempts: 0 });
+	});
+
+	it("never coerces an explicit zero into inherit", async () => {
+		const bodies: unknown[] = [];
+		server.use(
+			http.patch(apiUrl("/destinations/dst_1"), async ({ request }) => {
+				bodies.push(await request.json());
+				return HttpResponse.json(destination({ id: "dst_1" }));
+			}),
+		);
+		const { user } = await wrap(
+			<DestinationFormDialog
+				open
+				onOpenChange={() => {}}
+				destination={destination({ id: "dst_1" })}
+			/>,
+		);
+		await screen.findByPlaceholderText("default: 10000");
+		await user.type(screen.getByLabelText("Max attempts"), "0");
+		await user.click(screen.getByRole("button", { name: /save/i }));
+		// The shared contract rejects 0, but the rejection lands on the field —
+		// the zero was never coerced to inherit (null) or sent at all.
+		expect(
+			await screen.findByText("Too small: expected number to be >=1"),
+		).toBeInTheDocument();
+		expect(bodies).toHaveLength(0);
+		expect(screen.getByLabelText("Max attempts")).toHaveValue(0);
+		expect(
+			screen.getByRole("button", { name: /save/i }),
+		).toBeInTheDocument();
+	});
+
+	it("never leaks the project into the patch body", async () => {
+		const bodies: unknown[] = [];
+		server.use(
+			http.patch(apiUrl("/destinations/dst_1"), async ({ request }) => {
+				bodies.push(await request.json());
+				return HttpResponse.json(destination({ id: "dst_1" }));
+			}),
+		);
+		const { user } = await wrap(
+			<DestinationFormDialog
+				open
+				onOpenChange={() => {}}
+				destination={destination({ id: "dst_1" })}
+			/>,
+		);
+		expect(
+			screen.queryByRole("combobox", { name: "Project" }),
+		).not.toBeInTheDocument();
+		await user.type(screen.getByLabelText("Name"), " v2");
+		await user.click(screen.getByRole("button", { name: /save/i }));
+		await waitFor(() => expect(bodies).toHaveLength(1));
+		expect(bodies[0]).not.toHaveProperty("project_id");
+	});
+
+	it("reaches a project beyond the first option page", async () => {
+		const first = Array.from({ length: 50 }, (_, i) =>
+			project({ id: `prj_${i + 2}`, name: `Project ${i + 2}` }),
+		);
+		server.use(
+			http.get(apiUrl("/projects"), ({ request }) => {
+				const url = new URL(request.url);
+				if (url.searchParams.get("cursor") === "c1") {
+					return HttpResponse.json({
+						data: [project({ id: "prj_far", name: "Faraway Project" })],
+						next_cursor: null,
+					});
+				}
+				return HttpResponse.json({ data: first, next_cursor: "c1" });
+			}),
+		);
+		const { user } = await wrap(
+			<DestinationFormDialog
+				open
+				onOpenChange={() => {}}
+				onCreated={() => {}}
+			/>,
+		);
+		await user.click(screen.getByRole("combobox", { name: "Project" }));
+		expect(
+			screen.queryByRole("option", { name: "Faraway Project" }),
+		).not.toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Load more" }));
+		await user.click(
+			await screen.findByRole("option", { name: "Faraway Project" }),
+		);
+		expect(
+			screen.getByRole("combobox", { name: "Project" }),
+		).toHaveTextContent("Faraway Project");
+	});
+
+	it("keeps a server SSRF rejection inline on the URL field", async () => {
+		server.use(
+			http.get(apiUrl("/projects"), () =>
+				HttpResponse.json({ data: [project()], next_cursor: null }),
+			),
+			http.post(apiUrl("/destinations"), () =>
+				HttpResponse.json(
+					{
+						error: "url_private_blocked",
+						issues: [
+							{
+								path: "url",
+								code: "url_private_blocked",
+								message: "URL resolves to a private address.",
+							},
+						],
+					},
+					{ status: 422 },
+				),
+			),
+		);
+		const { user } = await wrap(
+			<DestinationFormDialog
+				open
+				onOpenChange={() => {}}
+				onCreated={() => {}}
+			/>,
+		);
+		await user.click(screen.getByRole("combobox", { name: "Project" }));
+		await user.click(await screen.findByRole("option", { name: "Payments" }));
+		await user.type(screen.getByLabelText("Name"), "Billing API");
+		await user.type(
+			screen.getByLabelText("URL"),
+			"https://10.0.0.1/hooks",
+		);
+		await user.click(screen.getByRole("button", { name: /create/i }));
+		expect(
+			await screen.findByText("URL resolves to a private address."),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: /create/i }),
+		).toBeInTheDocument();
+	});
+
+	it("blocks an accidental cancel and keeps the edits", async () => {
+		server.use(
+			http.get(apiUrl("/projects"), () =>
+				HttpResponse.json({ data: [project()], next_cursor: null }),
+			),
+		);
+		const { user } = await wrap(
+			<DestinationFormDialog
+				open
+				onOpenChange={() => {}}
+				onCreated={() => {}}
+			/>,
+		);
+		await user.type(await screen.findByLabelText("Name"), "Billing");
+		await user.click(screen.getByRole("button", { name: "Cancel" }));
+		expect(
+			await screen.findByRole("heading", { name: /discard/i }),
+		).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Keep editing" }));
+		expect(screen.getByLabelText("Name")).toHaveValue("Billing");
 	});
 });
 
@@ -411,7 +603,7 @@ describe("ReplayDialog validation and outcomes (spec §8.8)", () => {
 				return HttpResponse.json({ replayed: [], skipped: [] });
 			}),
 		);
-		wrap(
+		await wrap(
 			<ReplayDialog
 				open
 				onOpenChange={() => {}}
@@ -437,7 +629,7 @@ describe("ReplayDialog validation and outcomes (spec §8.8)", () => {
 				}),
 			),
 		);
-		wrap(
+		await wrap(
 			<ReplayDialog
 				open
 				onOpenChange={() => {}}
@@ -465,7 +657,7 @@ describe("ReplayDialog validation and outcomes (spec §8.8)", () => {
 				}),
 			),
 		);
-		wrap(
+		await wrap(
 			<ReplayDialog
 				open
 				onOpenChange={() => {}}
@@ -489,7 +681,7 @@ describe("ReplayDialog validation and outcomes (spec §8.8)", () => {
 				return HttpResponse.json({ replayed: [], skipped: [] });
 			}),
 		);
-		wrap(
+		await wrap(
 			<ReplayDialog
 				open
 				onOpenChange={() => {}}
@@ -577,5 +769,79 @@ describe("ReplayDialog validation and outcomes (spec §8.8)", () => {
 			screen.getByRole("heading", { name: "Replay delivery" }),
 		).toBeInTheDocument();
 		expect(screen.queryByText("dlv_2")).not.toBeInTheDocument();
+	});
+});
+
+describe("SecretRevealDialog unmount", () => {
+	it("forgets the secret after close", async () => {
+		const onClose = vi.fn();
+		const { rerender } = render(
+			<SecretRevealDialog
+				secret="whsec_gone"
+				label="Secret"
+				onClose={onClose}
+			/>,
+		);
+		expect(screen.getByText("whsec_gone")).toBeInTheDocument();
+		rerender(
+			<SecretRevealDialog secret={null} label="Secret" onClose={onClose} />,
+		);
+		expect(screen.queryByText("whsec_gone")).not.toBeInTheDocument();
+	});
+});
+
+describe("RotateSecretDialog naming", () => {
+	it("names the resource being rotated", async () => {
+		await wrap(
+			<RotateSecretDialog
+				open
+				onOpenChange={() => {}}
+				resource="destination"
+				id="dst_1"
+				name="Billing API"
+				onRotated={() => {}}
+			/>,
+		);
+		expect(await screen.findByText(/billing api/i)).toBeInTheDocument();
+	});
+});
+
+describe("TestDeliveryDialog", () => {
+	it("reports the synchronous test outcome without polling", async () => {
+		let posts = 0;
+		let polls = 0;
+		server.use(
+			http.post(apiUrl("/destinations/dst_1/test"), async () => {
+				posts += 1;
+				return HttpResponse.json({
+					id: "tst_1",
+					kind: "test",
+					http_status: 204,
+					error_kind: null,
+					error_message: null,
+					response_snippet: null,
+					duration_ms: 87,
+				});
+			}),
+			http.get(apiUrl("/destinations/dst_1/tests"), () => {
+				polls += 1;
+				return HttpResponse.json({ data: [], next_cursor: null });
+			}),
+		);
+		const { user } = await wrap(
+			<TestDeliveryDialog
+				open
+				onOpenChange={() => {}}
+				destinationId="dst_1"
+			/>,
+		);
+		await user.click(await screen.findByRole("button", { name: "Send" }));
+		expect(await screen.findByText(/test delivery/i)).toBeInTheDocument();
+		expect(screen.getByText(/HTTP 204/)).toBeInTheDocument();
+		expect(posts).toBe(1);
+		// One tests-list refresh from the invalidation is fine; polling is not.
+		expect(polls).toBeLessThanOrEqual(1);
+		await new Promise((r) => setTimeout(r, 100));
+		expect(polls).toBeLessThanOrEqual(1);
 	});
 });

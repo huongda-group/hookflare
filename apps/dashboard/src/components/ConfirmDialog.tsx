@@ -58,7 +58,7 @@ function ConfirmForm({
 				value={reason}
 				onChange={(e) => setReason(e.target.value)}
 			/>
-			{error && <p className="text-sm text-red-700">{error}</p>}
+			{error && <p className="text-sm text-failure">{error}</p>}
 			<DialogFooter>
 				<Button variant="outline" onClick={() => onOpenChange(false)}>
 					Cancel

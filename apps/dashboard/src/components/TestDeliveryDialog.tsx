@@ -78,9 +78,9 @@ export function TestDeliveryDialog({
 					value={text}
 					onChange={(e) => setText(e.target.value)}
 				/>
-				{invalid && <p className="text-sm text-red-700">{invalid}</p>}
+				{invalid && <p className="text-sm text-failure">{invalid}</p>}
 				{m.error && (
-					<p className="text-sm text-red-700">{errorText(m.error)}</p>
+					<p className="text-sm text-failure">{errorText(m.error)}</p>
 				)}
 				{m.data && (
 					<div className="rounded bg-neutral-50 p-3 text-sm">
@@ -91,7 +91,7 @@ export function TestDeliveryDialog({
 							· {m.data.duration_ms} ms
 						</div>
 						{m.data.error_message && (
-							<div className="text-red-700">{m.data.error_message}</div>
+							<div className="text-failure">{m.data.error_message}</div>
 						)}
 						{m.data.response_snippet && (
 							<pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap text-xs">

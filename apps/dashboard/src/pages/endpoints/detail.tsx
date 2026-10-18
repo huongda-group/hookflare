@@ -13,7 +13,7 @@ export function Field({
 }) {
 	return (
 		<div className="space-y-0.5">
-			<dt className="text-xs text-neutral-500">{label}</dt>
+			<dt className="text-xs text-muted-foreground">{label}</dt>
 			<dd className="text-sm">{children}</dd>
 		</div>
 	);
@@ -58,14 +58,14 @@ export function SecretFingerprints({
 				{fingerprint ? (
 					<span className="font-mono text-xs">{fingerprint}</span>
 				) : (
-					<span className="text-neutral-400">No secret</span>
+					<span className="text-muted-foreground">No secret</span>
 				)}
 			</Field>
 			{previous && (
 				<Field label="Previous secret fingerprint">
 					<span className="font-mono text-xs">{previous}</span>
 					{previousExpiresAt !== null && (
-						<p className="mt-1 text-xs text-amber-700">
+						<p className="mt-1 text-xs text-warning">
 							Previous secret valid until {formatAbsolute(previousExpiresAt)} (
 							<TimeText ms={previousExpiresAt} />)
 						</p>
@@ -87,7 +87,7 @@ export function BackToEndpoints({
 		<Link
 			to="/endpoints"
 			search={{ tab, project_id: projectId }}
-			className="text-sm text-neutral-500 underline"
+			className="text-sm text-muted-foreground underline"
 		>
 			← Endpoints
 		</Link>

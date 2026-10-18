@@ -3,6 +3,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { CursorTable } from "@/components/CursorTable";
 import { IdText } from "@/components/IdText";
+import { NamedResourceLink } from "@/components/ResourceLabel";
 import { SecretRevealDialog } from "@/components/SecretRevealDialog";
 import { SourceFormDialog } from "@/components/SourceFormDialog";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -27,6 +28,11 @@ export function SourcesTab({ projectId }: { projectId?: string }) {
 				query={query}
 				rowKey={(s) => s.id}
 				empty="No sources yet."
+				emptyAction={
+					<Can permission="config.write">
+						<Button onClick={() => setCreating(true)}>New source</Button>
+					</Can>
+				}
 				onRowClick={(s) =>
 					void navigate({
 						to: "/endpoints/sources/$sourceId",
@@ -51,7 +57,14 @@ export function SourcesTab({ projectId }: { projectId?: string }) {
 					{ header: "Auth", cell: (s) => s.auth_type },
 					{
 						header: "Destination",
-						cell: (s) => <IdText id={s.destination_id} />,
+						cell: (s) => (
+							<NamedResourceLink
+								kind="destination"
+								id={s.destination_id}
+								projectId={projectId}
+								href={`/endpoints/destinations/${s.destination_id}`}
+							/>
+						),
 					},
 					{ header: "Status", cell: (s) => <StatusBadge status={s.status} /> },
 					{ header: "", cell: (s) => <SourceActions source={s} /> },
