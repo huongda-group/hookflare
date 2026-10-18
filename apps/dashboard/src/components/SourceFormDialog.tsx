@@ -206,16 +206,16 @@ function SourceForm({
 											control={form.control}
 											name="project_id"
 											render={({ field }) => (
-												<ResourcePicker
-													kind="project"
-													label="Project"
-													value={field.value}
-													onChange={(v) => {
-														field.onChange(v);
-														form.setValue("destination_id", undefined);
-													}}
-												/>
-											)}
+											<ResourcePicker
+												kind="project"
+												label="Project"
+												value={field.value}
+												onChange={(v) => {
+													field.onChange(v);
+													form.setValue("destination_id", undefined);
+												}}
+											/>
+										)}
 										/>
 										<FieldError message={e.project_id?.message} />
 									</div>
@@ -226,14 +226,14 @@ function SourceForm({
 										control={form.control}
 										name="destination_id"
 										render={({ field }) => (
-											<ResourcePicker
-												kind="destination"
-												projectId={projectId}
-												label="Destination"
-												value={field.value}
-												onChange={field.onChange}
-											/>
-										)}
+										<ResourcePicker
+											kind="destination"
+											projectId={projectId}
+											label="Destination"
+											value={field.value}
+											onChange={field.onChange}
+										/>
+									)}
 									/>
 									<FieldError message={e.destination_id?.message} />
 								</div>
@@ -282,25 +282,17 @@ function SourceForm({
 												control={form.control}
 												name="auth_config.algorithm"
 												render={({ field }) => (
-													<div className={editing ? "text-sm" : undefined}>
-														{editing ? (
-															<span className="font-mono text-xs">
-																{String(field.value)}
-															</span>
-														) : (
-															<SimpleSelect
-																id="src-hmac-alg"
-																label="Algorithm"
-																value={field.value as string}
-																onChange={field.onChange}
-																options={[
-																	["sha256", "SHA-256"],
-																	["sha512", "SHA-512"],
-																	["sha1", "SHA-1"],
-																]}
-															/>
-														)}
-													</div>
+													<SimpleSelect
+														id="src-hmac-alg"
+														label="Algorithm"
+														value={field.value as string}
+														onChange={field.onChange}
+														options={[
+															["sha256", "SHA-256"],
+															["sha512", "SHA-512"],
+															["sha1", "SHA-1"],
+														]}
+													/>
 												)}
 											/>
 										</div>
@@ -310,24 +302,16 @@ function SourceForm({
 												control={form.control}
 												name="auth_config.encoding"
 												render={({ field }) => (
-													<div className={editing ? "text-sm" : undefined}>
-														{editing ? (
-															<span className="font-mono text-xs">
-																{String(field.value)}
-															</span>
-														) : (
-															<SimpleSelect
-																id="src-hmac-enc"
-																label="Encoding"
-																value={field.value as string}
-																onChange={field.onChange}
-																options={[
-																	["hex", "hex"],
-																	["base64", "base64"],
-																]}
-															/>
-														)}
-													</div>
+													<SimpleSelect
+														id="src-hmac-enc"
+														label="Encoding"
+														value={field.value as string}
+														onChange={field.onChange}
+														options={[
+															["hex", "hex"],
+															["base64", "base64"],
+														]}
+													/>
 												)}
 											/>
 										</div>
@@ -341,24 +325,16 @@ function SourceForm({
 												control={form.control}
 												name="auth_config.in"
 												render={({ field }) => (
-													<div className={editing ? "text-sm" : undefined}>
-														{editing ? (
-															<span className="font-mono text-xs">
-																{String(field.value)}
-															</span>
-														) : (
-															<SimpleSelect
-																id="src-token-in"
-																label="Token in"
-																value={field.value as string}
-																onChange={field.onChange}
-																options={[
-																	["header", "Header"],
-																	["query", "Query parameter"],
-																]}
-															/>
-														)}
-													</div>
+													<SimpleSelect
+														id="src-token-in"
+														label="Token in"
+														value={field.value as string}
+														onChange={field.onChange}
+														options={[
+															["header", "Header"],
+															["query", "Query parameter"],
+														]}
+													/>
 												)}
 											/>
 										</div>
@@ -396,17 +372,17 @@ function SourceForm({
 											control={form.control}
 											name="event_id_from"
 											render={({ field }) => (
-												<SimpleSelect
-													id="src-eid"
-													label="Event ID from"
-													value={field.value}
-													onChange={field.onChange}
-													options={EVENT_ID_FROM.map((v) => [
-														v,
-														EVENT_ID_LABEL[v],
-													])}
-												/>
-											)}
+											<SimpleSelect
+												id="src-eid"
+												label="Event ID from"
+												value={field.value}
+												onChange={field.onChange}
+												options={EVENT_ID_FROM.map((v) => [
+													v,
+													EVENT_ID_LABEL[v],
+												])}
+											/>
+										)}
 										/>
 									</div>
 									{eventFrom !== "none" && (

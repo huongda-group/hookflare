@@ -119,6 +119,35 @@ describe("SourceFormDialog", () => {
 		expect(body).not.toHaveProperty("secret");
 	});
 
+	it("sends an edited auth config in the patch body", async () => {
+		let body: Record<string, unknown> | undefined;
+		server.use(
+			http.patch(apiUrl("/sources/src_1"), async ({ request }) => {
+				body = (await request.json()) as Record<string, unknown>;
+				return HttpResponse.json(source());
+			}),
+		);
+		const { user } = await wrap(
+			<SourceFormDialog open onOpenChange={() => {}} source={source()} />,
+		);
+		await user.clear(screen.getByLabelText("Signature header"));
+		await user.type(screen.getByLabelText("Signature header"), "X-Sig");
+		await user.click(screen.getByRole("combobox", { name: "Algorithm" }));
+		await user.click(await screen.findByRole("option", { name: "SHA-512" }));
+		await user.click(screen.getByRole("combobox", { name: "Encoding" }));
+		await user.click(await screen.findByRole("option", { name: "base64" }));
+		await user.click(screen.getByRole("button", { name: "Save" }));
+		await waitFor(() => expect(body).toBeDefined());
+		expect(body).toMatchObject({
+			auth_config: {
+				header: "X-Sig",
+				algorithm: "sha512",
+				encoding: "base64",
+			},
+		});
+		expect(body).not.toHaveProperty("auth_type");
+	});
+
 	it("reaches a project beyond the first option page", async () => {
 		const first = Array.from({ length: 50 }, (_, i) =>
 			project({ id: `prj_${i + 2}`, name: `Project ${i + 2}` }),
