@@ -482,17 +482,26 @@ describe("ResourceLabel", () => {
 });
 
 describe("delegation from the existing selects", () => {
-	it("keeps ProjectSelect and DestinationSelect working through the route tree", async () => {
+	it("keeps ProjectSelect and DestinationSelect project-scoped through the route tree", async () => {
+		const destinationCalls: URLSearchParams[] = [];
 		server.use(
 			http.get(apiUrl("/projects"), () =>
 				HttpResponse.json({ data: [project()], next_cursor: null }),
 			),
-			http.get(apiUrl("/destinations"), () =>
-				HttpResponse.json({
-					data: [destination({ id: "dst_2", name: "Ledger" })],
+			http.get(apiUrl("/destinations"), ({ request }) => {
+				const params = new URL(request.url).searchParams;
+				destinationCalls.push(params);
+				return HttpResponse.json({
+					data: [
+						destination({
+							id: "dst_2",
+							name: "Ledger",
+							project_id: params.get("project_id") ?? "prj_1",
+						}),
+					],
 					next_cursor: null,
-				}),
-			),
+				});
+			}),
 		);
 		renderApp("/failures?project_id=prj_1&destination_id=dst_2");
 
@@ -500,5 +509,65 @@ describe("delegation from the existing selects", () => {
 			expect(screen.getByLabelText("Project")).toHaveTextContent("Payments"),
 		);
 		expect(screen.getByLabelText("Destination")).toHaveTextContent("Ledger");
+		// The page's project scope must reach the destination options request.
+		await waitFor(() =>
+			expect(destinationCalls.at(-1)?.get("project_id")).toBe("prj_1"),
+		);
+	});
+
+	it("changes DestinationSelect's options when the project changes", async () => {
+		const calls: URLSearchParams[] = [];
+		server.use(
+			http.get(apiUrl("/destinations"), ({ request }) => {
+				const params = new URL(request.url).searchParams;
+				calls.push(params);
+				const second = params.get("project_id") === "prj_2";
+				return HttpResponse.json({
+					data: [
+						destination({
+							id: second ? "dst_2" : "dst_1",
+							name: second ? "Beta" : "Alpha",
+							project_id: params.get("project_id") ?? "prj_1",
+						}),
+					],
+					next_cursor: null,
+				});
+			}),
+		);
+		function Harness() {
+			const [projectId, setProjectId] = useState("prj_1");
+			return (
+				<>
+					<button type="button" onClick={() => setProjectId("prj_2")}>
+						Switch project
+					</button>
+					<DestinationSelect projectId={projectId} onChange={() => {}} />
+				</>
+			);
+		}
+		const { user } = renderWith(<Harness />);
+
+		await user.click(screen.getByRole("combobox", { name: "Destination" }));
+		expect(
+			await screen.findByRole("option", { name: "Alpha" }),
+		).toBeInTheDocument();
+		expect(calls.at(-1)?.get("project_id")).toBe("prj_1");
+		expect(calls.at(-1)?.get("limit")).toBe("50");
+
+		await user.click(screen.getByRole("button", { name: "Switch project" }));
+		await waitFor(() =>
+			expect(
+				screen.queryByRole("option", { name: "Alpha" }),
+			).not.toBeInTheDocument(),
+		);
+
+		await user.click(screen.getByRole("combobox", { name: "Destination" }));
+		expect(
+			await screen.findByRole("option", { name: "Beta" }),
+		).toBeInTheDocument();
+		expect(calls.at(-1)?.get("project_id")).toBe("prj_2");
+		expect(
+			screen.queryByRole("option", { name: "Alpha" }),
+		).not.toBeInTheDocument();
 	});
 });
