@@ -19,7 +19,6 @@ export function testEnv(overrides: Partial<AppEnv> = {}): AppEnv {
 		PUBLIC_BASE_URL: "",
 		INGRESS_LIMITER: allowAllLimiter,
 		LOGIN_LIMITER: allowAllLimiter,
-		SETUP_TOKEN: "test-setup-token",
 		TURNSTILE_SITE_KEY: "",
 		...overrides,
 	};

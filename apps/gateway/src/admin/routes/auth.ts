@@ -17,7 +17,7 @@ import {
 import { getUser } from "../../core/db/users";
 import type { Db } from "../../deps";
 import { hashPassword, verifyPassword } from "../auth/password";
-import { randomToken, sha256Hex, timingSafeEqual } from "../auth/secrets";
+import { randomToken, sha256Hex } from "../auth/secrets";
 import {
 	clearSessionCookie,
 	isSameOrigin,
@@ -225,20 +225,6 @@ export function authRoutes() {
 			stringField(parsed.raw, "turnstile_token"),
 		);
 		if (turnstile) return turnstile;
-
-		// The setup claim token is compared before the schema so a missing or
-		// wrong token is `401 invalid_credentials` (spec §6.3).
-		const expected = c.env.SETUP_TOKEN;
-		if (!expected) return c.json({ error: "setup_token_missing" }, 503);
-		const provided = stringField(parsed.raw, "setup_token");
-		if (
-			provided === undefined ||
-			provided.length === 0 ||
-			// Both-empty would compare equal, so the length check above matters.
-			!timingSafeEqual(provided, expected)
-		) {
-			return c.json({ error: "invalid_credentials" }, 401);
-		}
 
 		const body = setupRequest.safeParse(parsed.raw);
 		if (!body.success) return invalidRequest(c, issuesOf(body.error));

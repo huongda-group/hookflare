@@ -27,7 +27,6 @@ const ORIGIN = "https://hookflare.example.com";
 const LOCALHOST = "http://localhost:8787";
 const ADMIN_API = (host: string) => `${host}/api/admin/v1`;
 const PASSWORD = "correct-horse-battery";
-const SETUP_TOKEN = "test-setup-token";
 
 /** Shared storage across the file, so each test starts from an empty DB. */
 const shared = testDeps();
@@ -148,35 +147,12 @@ describe("GET /auth/state", () => {
 });
 
 describe("POST /auth/setup", () => {
-	it("rejects a wrong setup token with 401", async () => {
+	it("rejects a stale setup_token with 400", async () => {
 		const deps = testDeps();
 		const res = await request(deps, "POST", "/auth/setup", {
-			body: { username: "admin", password: PASSWORD, setup_token: "wrong" },
+			body: { username: "admin", password: PASSWORD, setup_token: "stale" },
 		});
-		expect(res.status).toBe(401);
-		expect(await res.json()).toEqual({ error: "invalid_credentials" });
-	});
-
-	it("rejects a missing setup token with 401", async () => {
-		const deps = testDeps();
-		const res = await request(deps, "POST", "/auth/setup", {
-			body: { username: "admin", password: PASSWORD },
-		});
-		expect(res.status).toBe(401);
-		expect(await res.json()).toEqual({ error: "invalid_credentials" });
-	});
-
-	it("returns 503 when SETUP_TOKEN is unset", async () => {
-		const deps = testDeps({ env: testEnv({ SETUP_TOKEN: undefined }) });
-		const res = await request(deps, "POST", "/auth/setup", {
-			body: {
-				username: "admin",
-				password: PASSWORD,
-				setup_token: SETUP_TOKEN,
-			},
-		});
-		expect(res.status).toBe(503);
-		expect(await res.json()).toEqual({ error: "setup_token_missing" });
+		expect(res.status).toBe(400);
 	});
 
 	it("rejects a password equal to the username", async () => {
@@ -185,7 +161,6 @@ describe("POST /auth/setup", () => {
 			body: {
 				username: "admintwelve1",
 				password: "admintwelve1",
-				setup_token: SETUP_TOKEN,
 			},
 		});
 		expect(res.status).toBe(400);
@@ -199,7 +174,6 @@ describe("POST /auth/setup", () => {
 			body: {
 				username: "admin",
 				password: PASSWORD,
-				setup_token: SETUP_TOKEN,
 			},
 		});
 		expect(res.status).toBe(201);
@@ -220,7 +194,6 @@ describe("POST /auth/setup", () => {
 		const body = {
 			username: "admin",
 			password: PASSWORD,
-			setup_token: SETUP_TOKEN,
 		};
 		const [a, b] = await Promise.all([
 			request(deps, "POST", "/auth/setup", { body }),
@@ -253,7 +226,6 @@ describe("POST /auth/setup", () => {
 			body: {
 				username: "admin",
 				password: PASSWORD,
-				setup_token: SETUP_TOKEN,
 			},
 		});
 		expect(res.status).toBe(500);
