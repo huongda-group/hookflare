@@ -18,7 +18,6 @@ export const authStateQuery = queryOptions({
 export type SetupBody = {
 	username: string;
 	password: string;
-	setup_token: string;
 	turnstile_token?: string;
 };
 

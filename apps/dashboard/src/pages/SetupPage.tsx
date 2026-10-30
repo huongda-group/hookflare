@@ -3,13 +3,9 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { flushSync } from "react-dom";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import {
-	AuthLayout,
-	focusFirstInvalidField,
-} from "@/components/AuthLayout";
+import { AuthLayout, focusFirstInvalidField } from "@/components/AuthLayout";
 import { PasswordField } from "@/components/PasswordField";
 import { FieldError } from "@/components/ProjectFormDialog";
 import { TurnstileWidget } from "@/components/TurnstileWidget";
@@ -34,11 +30,7 @@ const FIELD_IDS: Record<string, string> = {
 	username: "setup-username",
 	password: "setup-password",
 	confirm: "setup-confirm",
-	setup_token: "setup-token",
 };
-
-const SETUP_GUIDE_URL =
-	"https://github.com/huongda-group/hookflare/blob/main/docs/runbook.md#setup";
 
 export function SetupPage() {
 	const navigate = useNavigate();
@@ -60,7 +52,7 @@ export function SetupPage() {
 		z.output<typeof setupForm>
 	>({
 		resolver: zodResolver(setupForm),
-		defaultValues: { username: "", password: "", confirm: "", setup_token: "" },
+		defaultValues: { username: "", password: "", confirm: "" },
 	});
 	const errors = form.formState.errors;
 	const submit = form.handleSubmit(
@@ -72,7 +64,6 @@ export function SetupPage() {
 				await setup({
 					username: values.username,
 					password: values.password,
-					setup_token: values.setup_token,
 					turnstile_token: token ?? undefined,
 				});
 				// Onboarding is closed now: let the root loader see the new state.
@@ -87,18 +78,6 @@ export function SetupPage() {
 					await navigate({ to: "/login" });
 				} else if (err instanceof ApiError && err.status === 429) {
 					setError("Too many attempts, try again in a minute");
-				} else if (
-					err instanceof ApiError &&
-					err.status === 503 &&
-					err.code === "setup_token_missing"
-				) {
-					// Spec §6.3: name the one command that sets the missing secret.
-					flushSync(() => {
-						form.setError("root", {
-							message:
-								"Set the SETUP_TOKEN secret first: wrangler secret put SETUP_TOKEN",
-						});
-					});
 				} else {
 					applyServerIssues(form, err);
 				}
@@ -130,8 +109,8 @@ export function SetupPage() {
 					</Button>
 				</div>
 			) : null}
-			<form onSubmit={submit} className="space-y-4">
-				<div>
+			<form onSubmit={submit} className="space-y-5">
+				<div className="space-y-2">
 					<Label htmlFor="setup-username">Username</Label>
 					<Input
 						id="setup-username"
@@ -154,7 +133,7 @@ export function SetupPage() {
 						message={errors.username?.message}
 					/>
 				</div>
-				<div>
+				<div className="space-y-2">
 					<PasswordField
 						id="setup-password"
 						label="Password"
@@ -177,7 +156,7 @@ export function SetupPage() {
 						message={errors.password?.message}
 					/>
 				</div>
-				<div>
+				<div className="space-y-2">
 					<PasswordField
 						id="setup-confirm"
 						label="Confirm password"
@@ -187,34 +166,9 @@ export function SetupPage() {
 						}
 						{...form.register("confirm")}
 					/>
-					<FieldError id="setup-confirm-error" message={errors.confirm?.message} />
-				</div>
-				<div>
-					<PasswordField
-						id="setup-token"
-						label="Setup token"
-						autoComplete="off"
-						aria-describedby={
-							errors.setup_token
-								? "setup-token-help setup-token-error"
-								: "setup-token-help"
-						}
-						{...form.register("setup_token")}
-					/>
-					<p id="setup-token-help" className="mt-1 text-sm text-muted-foreground">
-						The SETUP_TOKEN from Worker secrets or local .dev.vars.{" "}
-						<a
-							href={SETUP_GUIDE_URL}
-							target="_blank"
-							rel="noreferrer"
-							className="underline underline-offset-4"
-						>
-							Setup guide
-						</a>
-					</p>
 					<FieldError
-						id="setup-token-error"
-						message={errors.setup_token?.message}
+						id="setup-confirm-error"
+						message={errors.confirm?.message}
 					/>
 				</div>
 				{blocked ? null : (
@@ -233,7 +187,7 @@ export function SetupPage() {
 				<FieldError message={errors.root?.message} />
 				<Button
 					type="submit"
-					className="w-full"
+					className="mt-2 h-11 w-full"
 					disabled={
 						form.formState.isSubmitting ||
 						blocked ||
