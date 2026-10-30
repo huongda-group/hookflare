@@ -4,7 +4,7 @@
 
 ## Business rules and current behavior
 
-The public state endpoint determines whether setup is required: no user row has a non-null password hash. Setup requires `SETUP_TOKEN`, creates the first admin and session atomically, and closes when a password-bearing account exists. A concurrent losing setup request returns `409 setup_closed`; a missing configured setup token returns `503 setup_token_missing`.
+The public state endpoint determines whether setup is required: no user row has a non-null password hash. Setup needs no token; the first POST creates the admin, then setup is closed. A concurrent losing setup request returns `409 setup_closed`.
 
 Login uses username/password. Invalid credentials, disabled users, and password-less users all return `401 invalid_credentials`. New usernames are normalized to lowercase and follow `^[a-z0-9][a-z0-9._@+-]{2,63}$`. Passwords are 12–256 characters and cannot equal the username.
 

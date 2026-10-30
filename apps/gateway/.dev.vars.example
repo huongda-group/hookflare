@@ -2,9 +2,6 @@
 # Never commit real secrets.
 # Generate a key with: openssl rand -base64 32
 SECRETS_KEY="REPLACE_ME"
-# Claim token for the first-admin onboarding page at /setup. Any random
-# value works locally; the setup page asks for it on a fresh database.
-SETUP_TOKEN="dev-setup-token"
 # Cloudflare Turnstile test keys (always pass; see
 # https://developers.cloudflare.com/turnstile/troubleshooting/testing/).
 # Production keys come from a Turnstile widget created for the Worker

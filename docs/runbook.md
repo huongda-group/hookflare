@@ -30,12 +30,11 @@ In commands below, replace `<config>`, `<db-name>`, `<backup-prefix>`, and `<ver
 
    ```bash
    pnpm exec wrangler secret put SECRETS_KEY --config <config>
-   pnpm exec wrangler secret put SETUP_TOKEN --config <config>
    ```
 
    Set a Turnstile widget's public `TURNSTILE_SITE_KEY` in config and its `TURNSTILE_SECRET_KEY` through `wrangler secret put`. Both set means enforced; neither means off; one alone fails closed. Local development uses `apps/gateway/.dev.vars.example`, never committed real credentials.
 4. Deploy the sink: `pnpm --filter sink run deploy`. First gateway deploy: `node scripts/deploy.mjs --config <config> --skip-smoke`. If the restore-point step fails on an empty environment, stop and inspect it; do not claim deployment succeeded or bypass it silently.
-5. Open the Worker URL and claim the first admin with `SETUP_TOKEN`. Create an admin API token for smoke automation in Settings → Users. Store it securely, export it as `HOOKFLARE_API_TOKEN`, set `SINK_URL` and the environment's smoke URL variable, then run smoke. The setup token is unused after onboarding and can be removed.
+5. Open the Worker URL and create the first admin immediately, before the URL is public — setup is first-come and needs no token, and it closes once a password-bearing account exists. Create an admin API token for smoke automation in Settings → Users. Store it securely, export it as `HOOKFLARE_API_TOKEN`, set `SINK_URL` and the environment's smoke URL variable, then run smoke.
 
 See [login](login.md), [API tokens](api-tokens.md), and the [root quick start](../README.md) for account and first-webhook details.
 
@@ -170,7 +169,7 @@ Start with `/healthz`, the latest deploy record, and `pnpm exec wrangler tail --
 
 If any admin session/token works, reset the target password or correct role/disabled state in Settings → Users. Admin reset revokes that user's sessions and API tokens; reissue automation credentials deliberately.
 
-If all admin access is lost, inspect usernames, roles, disabled state, and whether a password exists without dumping hashes. Last-resort onboarding recovery clears all password hashes, so every user loses login access: secure and verify `SETUP_TOKEN`, record a recovery point, and explicitly choose this account-wide action before running `UPDATE users SET password_hash = NULL`. Claim the admin through `/setup`, restore user passwords, revoke old sessions/tokens, and verify real admin access. See [login](login.md) and [users](users.md).
+If all admin access is lost, inspect usernames, roles, disabled state, and whether a password exists without dumping hashes. Last-resort onboarding recovery clears all password hashes, so every user loses login access: record a recovery point, keep the Worker URL private until the new admin is created, and explicitly choose this account-wide action before running `UPDATE users SET password_hash = NULL`. Create the admin through `/setup`, restore user passwords, revoke old sessions/tokens, and verify real admin access. There is no token-based recovery — back up D1 or reset passwords directly in the database. See [login](login.md) and [users](users.md).
 
 ## Drills
 

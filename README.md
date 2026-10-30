@@ -78,12 +78,12 @@ cd hookflare
 pnpm install
 cp apps/gateway/.dev.vars.example apps/gateway/.dev.vars
 # Set SECRETS_KEY to the output of: openssl rand -base64 32
-# (SETUP_TOKEN and the Turnstile test keys already have usable defaults.)
+# (the Turnstile test keys already have usable defaults.)
 pnpm db:migrate:local   # applies migrations to local D1
 pnpm dev                # gateway on http://localhost:8787 (admin API + built dashboard)
 ```
 
-Open http://localhost:8787, create the first admin on the onboarding page (it asks for the `SETUP_TOKEN` from `.dev.vars`), and log in. Local D1, R2, Queues, Durable Objects, and Workflows are all simulated by `wrangler dev`.
+Open http://localhost:8787, create the first admin on the onboarding page (setup needs no token and closes after the first admin is created), and log in. Local D1, R2, Queues, Durable Objects, and Workflows are all simulated by `wrangler dev`.
 
 For dashboard development with hot reload, also run `pnpm dev:dashboard` and open http://localhost:5173 (Vite proxies `/api` to the Worker).
 
@@ -120,14 +120,9 @@ pnpm exec wrangler secret put SECRETS_KEY --config apps/gateway/wrangler.jsonc
 
 `SECRETS_KEY` encrypts source secrets, signing secrets, and alert channel configs. A backup cannot replace it: without it a restored database is unreadable.
 
-**3. Set the setup token**
+**3. Create the first admin right after the first deploy**
 
-```bash
-openssl rand -base64 32   # keep this value in your password manager
-pnpm exec wrangler secret put SETUP_TOKEN --config apps/gateway/wrangler.jsonc
-```
-
-The first visit to the Worker URL shows an onboarding page that creates the first admin; it asks for this token so nobody else can claim the admin first. After onboarding succeeds the token is no longer used (it can be deleted). If `SETUP_TOKEN` is unset, setup fails with `setup_token_missing`.
+Open the Worker URL and create the first admin immediately, before the URL is public — setup is first-come, needs no token, and closes once a password-bearing account exists.
 
 **4. (Optional) Turnstile**
 
@@ -155,7 +150,7 @@ curl https://<your-worker-domain>/healthz   # {"status":"ok","version":"<worker 
 
 `pnpm run deploy` runs [`scripts/deploy.mjs`](scripts/deploy.mjs): it records a restore point (D1 Time Travel bookmark and the live Worker version), builds the dashboard, applies remote D1 migrations, deploys the Worker, smoke-tests, and prints the exact rollback commands. Later deploys should run the smoke test; see [`docs/runbook.md#deploy-and-smoke`](docs/runbook.md#deploy-and-smoke). (`pnpm deploy` is a built-in pnpm command, so always use `pnpm run deploy`.)
 
-Open `https://<your-worker-domain>/`, create the first admin on the onboarding page (it asks for `SETUP_TOKEN`), and continue in the dashboard: create a project, a destination, and a source, then add alert channels and review Settings › Storage (retention and backups).
+Open `https://<your-worker-domain>/`, create the first admin on the onboarding page (no token; first-come, so create it before the URL is public), and continue in the dashboard: create a project, a destination, and a source, then add alert channels and review Settings › Storage (retention and backups).
 
 ### Receive your first webhook
 
@@ -202,13 +197,13 @@ gateway for Cloudflare Workers, and verify it runs locally.
 2. Clone the repo (latest release: `git checkout 1.0.0`) and run `pnpm install`
    at the repository root.
 3. Copy `apps/gateway/.dev.vars.example` to `apps/gateway/.dev.vars`. Set
-   SECRETS_KEY to a fresh `openssl rand -base64 32` (SETUP_TOKEN and the
+   SECRETS_KEY to a fresh `openssl rand -base64 32` (the
    Turnstile test keys already have usable defaults). Never commit
    `.dev.vars` or print the key back to me.
 4. Run `pnpm db:migrate:local`, then start `pnpm dev` in the background and
    wait until `curl http://localhost:8787/healthz` returns "status":"ok".
-5. Open http://localhost:8787/setup, create the first admin with the
-   SETUP_TOKEN from `.dev.vars`, then follow the README section "Receive
+5. Open http://localhost:8787/setup, create the first admin (no token
+   needed), then follow the README section "Receive
    your first webhook" against http://localhost:8787 (log in with
    `curl -c jar -b jar -H "origin: http://localhost:8787"`) and confirm
    ingress returns 202 with an event_id.
@@ -253,7 +248,7 @@ The Git-connected Workers Builds trigger runs `pnpm install --frozen-lockfile` a
 
 Pages: Overview, Projects, Endpoints (sources and destinations), Events, Failures, Alerts, Archives, Audit log, and Settings (retry defaults, storage and backups, users). What a user can do depends on their role: **viewer** reads events and deliveries, **operator** also sees payloads, replays, and pauses/resumes destinations, **admin** also changes configuration (projects, endpoints, alert channels), manages users and settings, and reads the audit log.
 
-For local development, run `pnpm dev` (create the first admin via the onboarding page with the `SETUP_TOKEN` from `apps/gateway/.dev.vars`), plus `pnpm dev:dashboard` (Vite on port 5173, proxying `/api` to the Worker).
+For local development, run `pnpm dev` (create the first admin via the onboarding page — no token needed), plus `pnpm dev:dashboard` (Vite on port 5173, proxying `/api` to the Worker).
 
 Production serves the dashboard from the same Worker. The first visit shows the onboarding page (`/setup`); afterwards login is username/password at `/login`, and automation uses API tokens (Settings › Users). `/in/*` and `/healthz` stay public.
 

@@ -70,6 +70,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recreated (see `docs/runbook.md#migrations`).
 - Workers Builds deploys run `pnpm run deploy -- --skip-smoke`
   (`docs/runbook.md#deploy-and-smoke`).
+- First-admin onboarding no longer uses a setup token: the first
+  `POST /api/admin/v1/auth/setup` on a database with no password
+  hashes creates the admin, then setup closes. Create the admin
+  immediately after deploy, before the Worker URL is public. There
+  is no `SETUP_TOKEN` secret to set and no token-based recovery —
+  back up D1 and reset passwords directly in the database instead.
 
 ## [1.0.0] - 2026-10-17
 
