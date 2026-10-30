@@ -335,6 +335,7 @@ describe("built-in auth contracts", () => {
 				username: "ops.bot",
 				password: "pässwörd 12345",
 				extra: "stale",
+				setup_token: "stale",
 			}).success,
 		).toBe(false);
 	});

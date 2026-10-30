@@ -150,9 +150,10 @@ describe("POST /auth/setup", () => {
 	it("rejects an unknown field with 400", async () => {
 		const deps = testDeps();
 		const res = await request(deps, "POST", "/auth/setup", {
-			body: { username: "admin", password: PASSWORD, extra: "stale" },
+			body: { username: "admin", password: PASSWORD, setup_token: "stale" },
 		});
 		expect(res.status).toBe(400);
+		expect(await res.json()).toMatchObject({ error: "invalid_request" });
 	});
 
 	it("rejects a password equal to the username", async () => {

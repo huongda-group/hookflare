@@ -177,7 +177,7 @@ describe("SetupPage", () => {
 		expect(posted).not.toHaveBeenCalled();
 	});
 
-	it("shows the server's inline error for a wrong setup token (401)", async () => {
+	it("shows the server's inline invalid_credentials error (401)", async () => {
 		setupOpen();
 		server.use(
 			http.post(apiUrl("/auth/setup"), () =>
@@ -288,7 +288,7 @@ describe("SetupPage", () => {
 		expect(submit).toBeDisabled();
 	});
 
-	it("shows a neutral off notice that still requires the setup token", async () => {
+	it("shows a neutral off notice when Turnstile is off", async () => {
 		setupOpen();
 		renderApp("/setup");
 		expect(
