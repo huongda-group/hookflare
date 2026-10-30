@@ -24,8 +24,8 @@ function onApiError(
 	queryKey?: readonly unknown[],
 ) {
 	if (!(err instanceof ApiError) || err.status !== 403) return;
-	// A 403 from /me itself means "not a Hookflare user" (NoAccess), not a role
-	// change; invalidating ["me"] here would refetch it in a tight loop.
+	// A 403 from /me itself would mean the session lost its user; invalidating
+	// ["me"] here would refetch it in a tight loop.
 	if (queryKey?.[0] === "me") return;
 	toast.error("You do not have permission for that action.");
 	void client.invalidateQueries({ queryKey: ["me"] });

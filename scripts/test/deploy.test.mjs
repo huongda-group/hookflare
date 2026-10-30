@@ -9,6 +9,7 @@ import {
 	parseCurrentVersion,
 	rollbackCommands,
 } from "../lib/deploy.mjs";
+import { smokeEnv } from "../lib/smoke.mjs";
 
 const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 
@@ -69,8 +70,7 @@ describe("parseCurrentVersion", () => {
 
 const smoke = {
 	url: "https://hooks.example.com",
-	clientId: "id",
-	clientSecret: "secret",
+	token: "hf_test_token",
 	sinkUrl: "https://sink.example.com",
 };
 
@@ -89,6 +89,21 @@ describe("deployPlan", () => {
 	it("fails when the smoke env is missing and --skip-smoke is not set", () => {
 		assert.throws(
 			() => deployPlan({ smoke: null, skipSmoke: false }),
+			/deploy: smoke env missing/,
+		);
+	});
+
+	it("fails without --skip-smoke when HOOKFLARE_API_TOKEN is missing", () => {
+		const env = smokeEnv(
+			{
+				HOOKFLARE_URL: "https://hooks.example.com",
+				SINK_URL: "https://sink.example.com",
+			},
+			{ urlVar: "HOOKFLARE_URL" },
+		);
+		assert.equal(env, null);
+		assert.throws(
+			() => deployPlan({ smoke: env, skipSmoke: false }),
 			/deploy: smoke env missing/,
 		);
 	});

@@ -148,4 +148,148 @@ describe("Settings › Storage", () => {
 			).toBeDisabled();
 		});
 	});
+
+	it("shows a preview 503 inline and never PATCHes", async () => {
+		const bodies: unknown[] = [];
+		server.use(
+			http.get(apiUrl("/archives/preview"), () =>
+				HttpResponse.json({ error: "preview_unavailable" }, { status: 503 }),
+			),
+			http.patch(apiUrl("/settings"), async ({ request }) => {
+				bodies.push(await request.json());
+				return HttpResponse.json({});
+			}),
+		);
+		const user = userEvent.setup();
+		renderApp("/settings?tab=storage");
+		const hot = await screen.findByLabelText("Hot retention (days)");
+		await user.clear(hot);
+		await user.type(hot, "7");
+		await user.click(screen.getByRole("button", { name: "Save storage" }));
+		expect(
+			await screen.findByText(/could not load the archive preview/i),
+		).toBeInTheDocument();
+		expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+		expect(bodies).toHaveLength(0);
+	});
+
+	it("invalidates the stale confirmation after further edits", async () => {
+		server.use(
+			http.get(apiUrl("/archives/preview"), () =>
+				HttpResponse.json({ eligible: 5000, currently_eligible: 1200 }),
+			),
+		);
+		const user = userEvent.setup();
+		renderApp("/settings?tab=storage");
+		const hot = await screen.findByLabelText("Hot retention (days)");
+		await user.clear(hot);
+		await user.type(hot, "7");
+		await user.click(screen.getByRole("button", { name: "Save storage" }));
+		expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
+		await user.type(hot, "1");
+		await waitFor(() =>
+			expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument(),
+		);
+	});
+
+	it("requires an explicit delete-without-files confirmation to switch archival off", async () => {
+		const bodies: unknown[] = [];
+		server.use(
+			http.patch(apiUrl("/settings"), async ({ request }) => {
+				bodies.push(await request.json());
+				return HttpResponse.json({});
+			}),
+		);
+		const user = userEvent.setup();
+		renderApp("/settings?tab=storage");
+		await screen.findByLabelText("Hot retention (days)");
+		await user.click(screen.getByLabelText(/Archive to R2 before deleting/));
+		await user.click(screen.getByRole("button", { name: "Save storage" }));
+		const dialog = await screen.findByRole("alertdialog");
+		expect(dialog).toHaveTextContent(/without archive files/i);
+		await user.click(screen.getByRole("button", { name: "Cancel" }));
+		expect(bodies).toHaveLength(0);
+		expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+	});
+
+	it("summarizes both consequences when lowering retention and switching archival off", async () => {
+		const bodies: unknown[] = [];
+		server.use(
+			http.get(apiUrl("/archives/preview"), () =>
+				HttpResponse.json({ eligible: 5000, currently_eligible: 1200 }),
+			),
+			http.patch(apiUrl("/settings"), async ({ request }) => {
+				bodies.push(await request.json());
+				return HttpResponse.json({});
+			}),
+		);
+		const user = userEvent.setup();
+		renderApp("/settings?tab=storage");
+		const hot = await screen.findByLabelText("Hot retention (days)");
+		await user.clear(hot);
+		await user.type(hot, "7");
+		await user.click(screen.getByLabelText(/Archive to R2 before deleting/));
+		await user.click(screen.getByRole("button", { name: "Save storage" }));
+		const dialog = await screen.findByRole("alertdialog");
+		expect(dialog).toHaveTextContent(/more events/);
+		expect(dialog).toHaveTextContent(/without archive files/);
+		await user.click(screen.getByRole("button", { name: "Save anyway" }));
+		await waitFor(() => expect(bodies).toHaveLength(1));
+		expect(bodies[0]).toMatchObject({
+			storage: { hot_retention_days: 7, archive_enabled: false },
+		});
+	});
+
+	it("says backups are disabled instead of never verified", async () => {
+		useSummary({
+			...SUMMARY,
+			enabled: false,
+			last_verified: null,
+			last_failed: null,
+			running: null,
+		});
+		renderApp("/settings?tab=storage");
+		expect(await screen.findByText(/backups are disabled/i)).toBeInTheDocument();
+		expect(screen.queryByText("No verified backup yet.")).not.toBeInTheDocument();
+	});
+
+	it("distinguishes never verified from disabled", async () => {
+		useSummary({
+			...SUMMARY,
+			enabled: true,
+			last_verified: null,
+			last_failed: null,
+			running: null,
+		});
+		renderApp("/settings?tab=storage");
+		expect(
+			await screen.findByText("No verified backup yet."),
+		).toBeInTheDocument();
+	});
+
+	it("links the restore runbook without a restore action", async () => {
+		useSummary();
+		renderApp("/settings?tab=storage");
+		const link = await screen.findByRole("link", {
+			name: /backup and restore runbook/i,
+		});
+		expect(link).toHaveAttribute(
+			"href",
+			"https://github.com/huongda-group/hookflare/blob/main/docs/runbook.md#backup-and-restore",
+		);
+		expect(
+			screen.queryByRole("button", { name: /restore/i }),
+		).not.toBeInTheDocument();
+	});
+
+	it("preserves typed edits across a background settings refetch", async () => {
+		useSummary();
+		const { queryClient } = renderApp("/settings?tab=storage");
+		const user = userEvent.setup();
+		const hot = await screen.findByLabelText("Hot retention (days)");
+		await user.clear(hot);
+		await user.type(hot, "7");
+		await queryClient.refetchQueries({ queryKey: ["settings"] });
+		expect(await screen.findByLabelText("Hot retention (days)")).toHaveValue(7);
+	});
 });

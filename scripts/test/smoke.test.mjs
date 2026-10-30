@@ -114,8 +114,7 @@ describe("runSmoke", () => {
 
 const smokeTestEnv = {
 	url: "https://api.example.com",
-	clientId: "id",
-	clientSecret: "secret",
+	token: "hf_test_token",
 	sinkUrl: "https://sink.example.com",
 };
 
@@ -134,6 +133,8 @@ function fakeAdmin(seed = {}) {
 	/** @type {{ method: string, path: string, body: any }[]} */
 	const mutations = [];
 	const ingress = {};
+	/** Authorization headers seen on admin API calls. */
+	const headers = [];
 	let n = 0;
 	const json = (body, status = 200) =>
 		new Response(JSON.stringify(body), { status });
@@ -141,6 +142,9 @@ function fakeAdmin(seed = {}) {
 		const method = init.method ?? "GET";
 		const url = new URL(rawUrl);
 		const body = init.body === undefined ? undefined : JSON.parse(init.body);
+		if (url.origin === "https://api.example.com") {
+			headers.push({ ...init.headers });
+		}
 		if (url.origin === "https://hooks.example.com") {
 			ingress.headers = init.headers;
 			ingress.body = init.body;
@@ -187,7 +191,7 @@ function fakeAdmin(seed = {}) {
 		}
 		throw new Error(`unexpected ${method} ${path}`);
 	};
-	return { store, mutations, ingress, fetchFn };
+	return { store, mutations, ingress, headers, fetchFn };
 }
 
 const hmacConfig = {
@@ -314,6 +318,19 @@ describe("httpSmokeApi", () => {
 		assert.deepEqual(admin.mutations, []);
 	});
 
+	it("sends the API token as a Bearer authorization header", async () => {
+		const admin = fakeAdmin();
+		const api = httpSmokeApi(smokeTestEnv, admin.fetchFn);
+		await api.ensureProject("smoke");
+		await api.ensureDestination("https://sink.example.com/r/run/hook");
+		assert.ok(admin.headers.length > 0);
+		for (const seen of admin.headers) {
+			assert.equal(seen.authorization, "Bearer hf_test_token");
+			assert.ok(!("CF-Access-Client-Id" in seen));
+			assert.ok(!("CF-Access-Client-Secret" in seen));
+		}
+	});
+
 	it("asks the sink for the run's webhook IDs", async () => {
 		const admin = fakeAdmin();
 		const api = httpSmokeApi(smokeTestEnv, admin.fetchFn);
@@ -347,8 +364,17 @@ describe("smokeEnv", () => {
 		assert.equal(
 			smokeEnv({
 				HOOKFLARE_URL: "https://hooks.example.com",
-				CF_ACCESS_CLIENT_ID: "id",
-				CF_ACCESS_CLIENT_SECRET: "secret",
+				HOOKFLARE_API_TOKEN: "hf_test_token",
+			}),
+			null,
+		);
+	});
+
+	it("returns null when HOOKFLARE_API_TOKEN is missing", () => {
+		assert.equal(
+			smokeEnv({
+				HOOKFLARE_URL: "https://hooks.example.com",
+				SINK_URL: "https://sink.example.com",
 			}),
 			null,
 		);
@@ -358,14 +384,12 @@ describe("smokeEnv", () => {
 		assert.deepEqual(
 			smokeEnv({
 				HOOKFLARE_URL: "https://hooks.example.com",
-				CF_ACCESS_CLIENT_ID: "id",
-				CF_ACCESS_CLIENT_SECRET: "secret",
+				HOOKFLARE_API_TOKEN: "hf_test_token",
 				SINK_URL: "https://sink.example.com",
 			}),
 			{
 				url: "https://hooks.example.com",
-				clientId: "id",
-				clientSecret: "secret",
+				token: "hf_test_token",
 				sinkUrl: "https://sink.example.com",
 			},
 		);
@@ -375,8 +399,7 @@ describe("smokeEnv", () => {
 		const env = {
 			HOOKFLARE_URL: "https://prod.example.com",
 			HOOKFLARE_STAGING_URL: "https://staging.example.com",
-			CF_ACCESS_CLIENT_ID: "id",
-			CF_ACCESS_CLIENT_SECRET: "secret",
+			HOOKFLARE_API_TOKEN: "hf_test_token",
 			SINK_URL: "https://sink.example.com",
 		};
 		assert.equal(

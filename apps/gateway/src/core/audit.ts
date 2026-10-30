@@ -17,11 +17,15 @@ export type AuditAction =
 	| "destination.secret_rotated"
 	| "delivery.replayed"
 	| "event.payload_viewed"
-	| "user.bootstrapped"
 	| "user.created"
+	| "user.onboarded"
 	| "user.role_changed"
 	| "user.disabled"
 	| "user.enabled"
+	| "user.password_reset"
+	| "user.password_changed"
+	| "api_token.created"
+	| "api_token.revoked"
 	| "settings.updated"
 	| "alert_channel.created"
 	| "alert_channel.updated"
@@ -69,7 +73,7 @@ export type AuditEntry = {
 export function auditInsert(db: Db, e: AuditEntry) {
 	return db.insert(auditLogs).values({
 		id: newId("aud", e.at),
-		actorEmail: e.actor,
+		actor: e.actor,
 		action: e.action,
 		resourceType: e.resourceType,
 		resourceId: e.resourceId,
@@ -93,7 +97,7 @@ export function auditInsertIfChanged(db: Db, e: AuditEntry) {
 		db
 			.select({
 				id: sql<string>`${newId("aud", e.at)}`.as("id"),
-				actorEmail: sql<string>`${e.actor}`.as("actor_email"),
+				actor: sql<string>`${e.actor}`.as("actor"),
 				action: sql<string>`${e.action}`.as("action"),
 				resourceType: sql<string>`${e.resourceType}`.as("resource_type"),
 				resourceId: sql<string | null>`${e.resourceId}`.as("resource_id"),

@@ -26,8 +26,13 @@ const BY_ROLE: Record<Role, Permission[]> = {
 };
 
 export function meFor(role: Role): Me {
-	return { email: `${role}@example.com`, role, permissions: BY_ROLE[role] };
+	return { username: `${role}@example.com`, role, permissions: BY_ROLE[role] };
 }
+
+export const DEFAULT_AUTH_STATE = {
+	setup_required: false,
+	turnstile_site_key: null,
+};
 
 export const DEFAULT_SETTINGS: Settings = {
 	retry_defaults: {
@@ -63,6 +68,22 @@ const empty = { data: [], next_cursor: null };
 /** Every list answers empty unless a test overrides it with server.use(...). */
 export const server = setupServer(
 	http.get(apiUrl("/me"), () => HttpResponse.json(meFor("admin"))),
+	http.get(apiUrl("/auth/state"), () => HttpResponse.json(DEFAULT_AUTH_STATE)),
+	http.post(
+		apiUrl("/auth/login"),
+		() => new HttpResponse(null, { status: 204 }),
+	),
+	http.post(apiUrl("/auth/setup"), () =>
+		HttpResponse.json({ username: "admin", role: "admin" }, { status: 201 }),
+	),
+	http.post(
+		apiUrl("/auth/logout"),
+		() => new HttpResponse(null, { status: 204 }),
+	),
+	http.post(
+		apiUrl("/me/password"),
+		() => new HttpResponse(null, { status: 204 }),
+	),
 	http.get(apiUrl("/settings"), () => HttpResponse.json(DEFAULT_SETTINGS)),
 	...[
 		"/projects",

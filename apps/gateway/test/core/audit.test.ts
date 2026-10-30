@@ -6,7 +6,7 @@ import {
 	redactDiff,
 } from "../../src/core/audit";
 import { auditLogs, users } from "../../src/core/db/schema";
-import { auditRows, uniqueEmail } from "../helpers/admin";
+import { auditRows, uniqueUsername } from "../helpers/admin";
 import { testDeps } from "../helpers/deps";
 
 describe("redactDiff", () => {
@@ -58,7 +58,7 @@ describe("auditInsert", () => {
 
 	it("auditInsertIfChanged writes only after a changing statement", async () => {
 		const deps = testDeps();
-		const email = uniqueEmail("chg");
+		const username = uniqueUsername("chg");
 		const now = deps.now();
 		const entry = (resourceId: string) => ({
 			actor: "t@example.com",
@@ -71,20 +71,20 @@ describe("auditInsert", () => {
 			deps.db
 				.update(users)
 				.set({ updatedAt: now })
-				.where(eq(users.email, email)),
-			auditInsertIfChanged(deps.db, entry(email)),
+				.where(eq(users.username, username)),
+			auditInsertIfChanged(deps.db, entry(username)),
 		]);
-		expect(await auditRows(deps, email)).toEqual([]);
+		expect(await auditRows(deps, username)).toEqual([]);
 		await deps.db
 			.insert(users)
-			.values({ email, role: "viewer", createdAt: now, updatedAt: now });
+			.values({ username, role: "viewer", createdAt: now, updatedAt: now });
 		await deps.db.batch([
 			deps.db
 				.update(users)
 				.set({ updatedAt: now + 1 })
-				.where(eq(users.email, email)),
-			auditInsertIfChanged(deps.db, entry(email)),
+				.where(eq(users.username, username)),
+			auditInsertIfChanged(deps.db, entry(username)),
 		]);
-		expect(await auditRows(deps, email)).toHaveLength(1);
+		expect(await auditRows(deps, username)).toHaveLength(1);
 	});
 });

@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { clearAccessKeyCache } from "../../src/admin/auth/access";
 import { adminApp } from "../helpers/admin";
 import { testDeps } from "../helpers/deps";
 import { testEnv } from "../helpers/env";
@@ -20,7 +19,6 @@ const hmac = { header: "x-signature", algorithm: "sha256", encoding: "hex" };
 
 describe("admin sources", () => {
 	beforeEach(() => {
-		clearAccessKeyCache();
 		for (const m of ["log", "warn", "error"] as const)
 			vi.spyOn(console, m).mockImplementation(() => {});
 	});

@@ -33,7 +33,7 @@ export function toTestDelivery(r: TestDeliveryRow): TestDelivery {
 	return {
 		id: r.id,
 		destination_id: r.destinationId,
-		actor_email: r.actorEmail,
+		actor: r.actor,
 		started_at: r.startedAt,
 		duration_ms: r.durationMs,
 		http_status: r.httpStatus,

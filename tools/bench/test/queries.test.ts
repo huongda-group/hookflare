@@ -67,7 +67,7 @@ describe("timeQuery", () => {
 			{ name: "q", path: "/api/admin/v1/overview" },
 			{
 				base: "https://h.example",
-				headers: { "CF-Access-Client-Id": "id" },
+				headers: { authorization: "Bearer hf_test_token" },
 				reps: 10,
 				fetch: fetchFn,
 				now: () => t,
@@ -75,7 +75,7 @@ describe("timeQuery", () => {
 		);
 		expect(seen).toHaveLength(10);
 		expect(seen[0].url).toBe("https://h.example/api/admin/v1/overview");
-		expect(seen[0].headers["CF-Access-Client-Id"]).toBe("id");
+		expect(seen[0].headers.authorization).toBe("Bearer hf_test_token");
 		expect(r.p50).toBe(50);
 		expect(r.p95).toBe(100);
 		expect(r.max).toBe(100);
@@ -127,15 +127,16 @@ describe("main", () => {
 	function harness(url: string) {
 		const lines: string[] = [];
 		const fetched: string[] = [];
+		const headers: Record<string, string>[] = [];
 		const deps: QueryDeps = {
 			env: {
 				HOOKFLARE_URL: url,
-				CF_ACCESS_CLIENT_ID: "id",
-				CF_ACCESS_CLIENT_SECRET: "secret",
+				HOOKFLARE_API_TOKEN: "hf_test_token",
 			},
 			production: productionTarget(PROD),
-			fetch: (async (input: string) => {
+			fetch: (async (input: string, init?: RequestInit) => {
 				fetched.push(input);
+				headers.push({ ...(init?.headers as Record<string, string>) });
 				return new Response("{}", { status: 200 });
 			}) as unknown as typeof fetch,
 			now: () => 0,
@@ -146,7 +147,7 @@ describe("main", () => {
 				throw new Error(`exit ${code}`);
 			},
 		};
-		return { lines, fetched, deps };
+		return { lines, fetched, headers, deps };
 	}
 
 	it("runs every query --reps times against a staging URL", async () => {
@@ -157,6 +158,26 @@ describe("main", () => {
 			/^https:\/\/hookflare-staging\.acme\.workers\.dev\/api\/admin\/v1\//,
 		);
 		expect(h.lines.join("\n")).toMatch(/p95/);
+	});
+
+	it("sends the API token as a Bearer authorization header", async () => {
+		const h = harness("https://hookflare-staging.acme.workers.dev/");
+		await main(["--reps", "1"], h.deps);
+		expect(h.headers.length).toBeGreaterThan(0);
+		for (const seen of h.headers) {
+			expect(seen.authorization).toBe("Bearer hf_test_token");
+			expect(seen).not.toHaveProperty("CF-Access-Client-Id");
+			expect(seen).not.toHaveProperty("CF-Access-Client-Secret");
+		}
+	});
+
+	it("fails without HOOKFLARE_API_TOKEN", async () => {
+		const h = harness("https://hookflare-staging.acme.workers.dev/");
+		h.deps.env = {
+			HOOKFLARE_URL: "https://hookflare-staging.acme.workers.dev/",
+		};
+		await expect(main([], h.deps)).rejects.toThrow("exit 2");
+		expect(h.fetched).toEqual([]);
 	});
 
 	it("refuses a production URL", async () => {

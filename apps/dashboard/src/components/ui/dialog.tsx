@@ -7,6 +7,35 @@ import { Dialog as DialogPrimitive } from "radix-ui"
 
 import { Button } from "@/components/ui/button"
 
+// The element that had focus before a dialog took over. Tracked globally
+// (not per-dialog) because `DialogContent` only mounts on open — after the
+// opening click's `focusin` has already fired. Focus inside a dialog is
+// ignored so the opener survives the dialog's own focus trap. Radix
+// restores trigger-associated dialogs itself; this only matters for
+// state-driven dialogs with no `DialogTrigger`.
+let lastDialogOpener: HTMLElement | null = null
+let dialogOpenerTrackingInstalled = false
+
+function installDialogOpenerTracking() {
+  if (dialogOpenerTrackingInstalled || typeof document === "undefined") return
+  dialogOpenerTrackingInstalled = true
+  document.addEventListener(
+    "focusin",
+    (event) => {
+      const target = event.target
+      if (
+        target instanceof HTMLElement &&
+        !target.closest('[data-slot="dialog-content"]')
+      ) {
+        lastDialogOpener = target
+      }
+    },
+    true,
+  )
+}
+
+installDialogOpenerTracking()
+
 function Dialog({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Root>) {
@@ -39,7 +68,7 @@ function DialogOverlay({
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 z-50 bg-black/50 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
+        "fixed inset-0 z-50 bg-foreground/40 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
         className
       )}
       {...props}
@@ -51,6 +80,7 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
@@ -61,16 +91,29 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
+          "fixed top-[50%] left-[50%] z-50 grid max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto rounded-lg border bg-card p-6 shadow-lg duration-150 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
           className
         )}
+        onCloseAutoFocus={(event) => {
+          onCloseAutoFocus?.(event)
+          // State-driven dialogs (`open`/`onOpenChange` with no
+          // `DialogTrigger`) have no Radix trigger association, so the
+          // default `onCloseAutoFocus` falls back to `document.body`.
+          // Return focus to whatever opened the dialog instead.
+          if (event.defaultPrevented) return
+          const opener = lastDialogOpener
+          if (opener && document.contains(opener)) {
+            event.preventDefault()
+            opener.focus({ preventScroll: true })
+          }
+        }}
         {...props}
       >
         {children}
         {showCloseButton && (
           <DialogPrimitive.Close
             data-slot="dialog-close"
-            className="absolute top-4 right-4 rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
+            className="absolute top-4 right-4 rounded-sm text-muted-foreground transition-colors duration-150 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
           >
             <XIcon />
             <span className="sr-only">Close</span>

@@ -1,14 +1,9 @@
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
-import { useProjectsList } from "@/lib/queries/projects";
+import { ResourcePicker } from "./ResourcePicker";
 
-const ALL = "__all";
-
+/**
+ * Project filter. Public props are unchanged; the paginated named picker
+ * behind it reaches beyond the old single `limit: 200` page (spec §7).
+ */
 export function ProjectSelect({
 	value,
 	onChange,
@@ -18,23 +13,13 @@ export function ProjectSelect({
 	onChange: (id: string | undefined) => void;
 	label?: string;
 }) {
-	const projects = useProjectsList();
 	return (
-		<Select
-			value={value ?? ALL}
-			onValueChange={(v) => onChange(v === ALL ? undefined : v)}
-		>
-			<SelectTrigger className="w-56" aria-label={label}>
-				<SelectValue />
-			</SelectTrigger>
-			<SelectContent>
-				<SelectItem value={ALL}>All projects</SelectItem>
-				{projects.data?.data.map((p) => (
-					<SelectItem key={p.id} value={p.id}>
-						{p.name}
-					</SelectItem>
-				))}
-			</SelectContent>
-		</Select>
+		<ResourcePicker
+			kind="project"
+			value={value}
+			onChange={onChange}
+			label={label}
+			allowAll
+		/>
 	);
 }

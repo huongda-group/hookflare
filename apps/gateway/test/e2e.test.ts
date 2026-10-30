@@ -1,6 +1,5 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { clearAccessKeyCache } from "../src/admin/auth/access";
 import { createApp } from "../src/app";
 import { acquireLease } from "../src/core/db/deliveries";
 import { deliveries } from "../src/core/db/schema";
@@ -87,7 +86,6 @@ async function send(
 
 describe("end to end", () => {
 	beforeEach(() => {
-		clearAccessKeyCache();
 		clearSourceCache();
 		clearSsrfCache();
 		for (const m of ["log", "warn", "error"] as const)
@@ -202,7 +200,6 @@ describe("end to end", () => {
 describe("reliability (M2 exit criteria)", () => {
 	const T0 = 1_800_000_000_000;
 	beforeEach(() => {
-		clearAccessKeyCache();
 		clearSourceCache();
 		clearSsrfCache();
 		for (const m of ["log", "warn", "error"] as const)

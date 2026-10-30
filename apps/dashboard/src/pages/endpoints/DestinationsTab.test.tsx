@@ -174,3 +174,14 @@ describe("Destinations tab", () => {
 		).toBeInTheDocument();
 	});
 });
+
+describe("Destinations tab empty state", () => {
+	it("offers New destination as the empty next step", async () => {
+		renderApp("/endpoints?tab=destinations");
+		await screen.findByText("No destinations yet.");
+		const table = screen.getByRole("table");
+		expect(
+			within(table).getByRole("button", { name: "New destination" }),
+		).toBeInTheDocument();
+	});
+});

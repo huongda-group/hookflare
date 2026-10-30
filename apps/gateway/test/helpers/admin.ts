@@ -1,49 +1,31 @@
 import { asc, eq } from "drizzle-orm";
-import { exportJWK, generateKeyPair, SignJWT } from "jose";
+import { randomToken, sha256Hex } from "../../src/admin/auth/secrets";
+import { SESSION_COOKIE } from "../../src/admin/auth/session";
 import { createApp } from "../../src/app";
-import { auditLogs, type Role, users } from "../../src/core/db/schema";
+import {
+	apiTokens,
+	auditLogs,
+	type Role,
+	users,
+} from "../../src/core/db/schema";
+import { insertSessionStmt } from "../../src/core/db/sessions";
+import { newId } from "../../src/core/ids";
 import type { Deps } from "../../src/deps";
-import { ACCESS_TEST } from "./env";
 
-export async function accessKeys() {
-	const { publicKey, privateKey } = await generateKeyPair("RS256");
-	const jwk = {
-		...(await exportJWK(publicKey)),
-		kid: "test-kid",
-		alg: "RS256",
-		use: "sig",
-	};
-	const jwksFetch = Object.assign(
-		async (input: RequestInfo | URL) => {
-			jwksFetch.calls++;
-			if (String(input) !== `${ACCESS_TEST.teamDomain}/cdn-cgi/access/certs`) {
-				return new Response("not found", { status: 404 });
-			}
-			return Response.json({ keys: [jwk] });
-		},
-		{ calls: 0 },
-	) as typeof fetch & { calls: number };
+/**
+ * Only "IS NOT NULL" matters to the auth queries; the value is never parsed
+ * by the middleware (same convention as the sessions/api-tokens unit tests).
+ */
+const PASSWORD_HASH = "pbkdf2-sha256$100000$c2FsdA==$aGFzaA==";
 
-	async function sign(
-		claims: Record<string, unknown> = {},
-		opts: { kid?: string; expiresIn?: string } = {},
-	) {
-		// aud/iss are registered claims: SignJWT's setters overwrite same-named
-		// payload fields, so route them through the setters (jose 6 behavior).
-		const { iss, aud, ...rest } = claims;
-		return new SignJWT({ email: ACCESS_TEST.admin, ...rest })
-			.setProtectedHeader({ alg: "RS256", kid: opts.kid ?? "test-kid" })
-			.setIssuer(typeof iss === "string" ? iss : ACCESS_TEST.teamDomain)
-			.setAudience(typeof aud === "string" ? aud : ACCESS_TEST.aud)
-			.setIssuedAt()
-			.setExpirationTime(opts.expiresIn ?? "5m")
-			.sign(privateKey);
-	}
-	return { jwksFetch, sign };
-}
+const ORIGIN = "https://hookflare.example.com";
+const ADMIN_API = `${ORIGIN}/api/admin/v1`;
 
-export function uniqueEmail(prefix = "user"): string {
-	return `${prefix}-${crypto.randomUUID().slice(0, 8)}@example.com`;
+/** The default identity used when `adminApp` is called with no role. */
+export const DEFAULT_ADMIN = "admin@example.com";
+
+export function uniqueUsername(prefix = "user"): string {
+	return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
 /** Audit rows for one resource, oldest first. */
@@ -66,53 +48,86 @@ export async function auditRows(deps: Deps, resourceId: string) {
 }
 
 /**
- * Admin API client. With no options it signs as the bootstrap admin; with a
- * role it first stores an active user with that role.
+ * Admin API client (M7). Upserts an enabled user that has a password, then
+ * inserts a session (or an API token) directly and sends the matching
+ * credential. With no options it authenticates as the default admin; with a
+ * role it creates a fresh user under that role.
  */
 export async function adminApp(
 	deps: Deps,
-	opts: { role?: Role; email?: string } = {},
+	opts: { role?: Role; username?: string; via?: "cookie" | "token" } = {},
 ) {
-	const keys = await accessKeys();
-	const app = createApp({
-		createDeps: () => deps,
-		accessFetch: keys.jwksFetch,
-	});
-	const email =
-		opts.email ?? (opts.role ? uniqueEmail(opts.role) : ACCESS_TEST.admin);
-	if (opts.role) {
-		const now = deps.now();
-		await deps.db
-			.insert(users)
-			.values({ email, role: opts.role, createdAt: now, updatedAt: now })
-			.onConflictDoUpdate({
-				target: users.email,
-				set: { role: opts.role, disabledAt: null, updatedAt: now },
-			});
+	const username =
+		opts.username ?? (opts.role ? uniqueUsername(opts.role) : DEFAULT_ADMIN);
+	const now = deps.now();
+	await deps.db
+		.insert(users)
+		.values({
+			username,
+			role: opts.role ?? "admin",
+			passwordHash: PASSWORD_HASH,
+			passwordChangedAt: null,
+			createdAt: now,
+			updatedAt: now,
+			disabledAt: null,
+		})
+		.onConflictDoUpdate({
+			target: users.username,
+			// An existing user keeps its role (the caller passed no role to change
+			// it); the row must stay enabled and password-bearing to authenticate.
+			set: {
+				...(opts.role ? { role: opts.role } : {}),
+				passwordHash: PASSWORD_HASH,
+				disabledAt: null,
+				updatedAt: now,
+			},
+		});
+
+	const app = createApp({ createDeps: () => deps });
+	const via = opts.via ?? "cookie";
+	let credential: string;
+	if (via === "cookie") {
+		credential = randomToken();
+		await insertSessionStmt(deps.db, {
+			idHash: await sha256Hex(credential),
+			username,
+			now,
+		});
+	} else {
+		credential = randomToken("hf_");
+		await deps.db.insert(apiTokens).values({
+			id: newId("tok", now),
+			tokenHash: await sha256Hex(credential),
+			username,
+			name: "test",
+			createdAt: now,
+			expiresAt: null,
+			lastUsedAt: null,
+			revokedAt: null,
+		});
 	}
-	const token = await keys.sign({ email });
+
 	return {
-		email,
+		username,
 		request(
 			method: string,
 			path: string,
 			body?: unknown,
 			headers: Record<string, string> = {},
 		) {
-			const init: RequestInit = {
-				method,
-				headers: { "cf-access-jwt-assertion": token, ...headers },
-			};
+			const init: RequestInit = { method, headers: { ...headers } };
+			const sent = init.headers as Record<string, string>;
+			if (via === "cookie") {
+				sent.cookie = `${SESSION_COOKIE}=${credential}`;
+				sent.origin = ORIGIN;
+			} else {
+				sent.authorization = `Bearer ${credential}`;
+			}
 			if (body !== undefined) {
 				init.body = typeof body === "string" ? body : JSON.stringify(body);
-				(init.headers as Record<string, string>)["content-type"] =
-					"application/json";
+				sent["content-type"] = "application/json";
 			}
-			return app.request(
-				`https://hookflare.example.com/api/admin/v1${path}`,
-				init,
-				deps.env,
-			);
+			return app.request(`${ADMIN_API}${path}`, init, deps.env);
 		},
 	};
 }

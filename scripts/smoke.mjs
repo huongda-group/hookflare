@@ -4,8 +4,7 @@
  * gateway URL comes from that Worker's variable (`smokeUrlVar`:
  * `HOOKFLARE_URL` for `hookflare`, `HOOKFLARE_STAGING_URL` for
  * `hookflare-staging`), and it must match the config (`checkSmokeTarget`).
- * CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET, and SINK_URL come from the
- * env as well.
+ * HOOKFLARE_API_TOKEN and SINK_URL come from the env as well.
  */
 import {
 	checkSmokeTarget,
@@ -37,9 +36,7 @@ const { name: worker, publicBaseUrl } = readConfig(config);
 const urlVar = smokeUrlVar(worker);
 const env = smokeEnv(process.env, { urlVar });
 if (env === null) {
-	console.error(
-		`smoke: set ${urlVar}, CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET, SINK_URL`,
-	);
+	console.error(`smoke: set ${urlVar}, HOOKFLARE_API_TOKEN, SINK_URL`);
 	process.exit(1);
 }
 try {

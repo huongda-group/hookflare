@@ -8,5 +8,12 @@ allowBuilds:
 # wrangler 4.151.0 is newer than the minimum release age and depends on a
 # miniflare beta. Remove these exclusions on the next wrangler upgrade.
 minimumReleaseAgeExclude:
-  - miniflare@5.20261012.0-beta
-  - wrangler@4.151.0
+  - miniflare@5.20261012.0-beta || 5.20261012.1-beta
+  - wrangler@4.151.0 || 4.151.1
+  - '@cloudflare/vitest-plugin@1.4.4'
+  - '@tanstack/react-router@1.170.45'
+  - '@tanstack/router-core@1.171.38'
+  - '@tanstack/router-generator@1.167.45'
+  - '@tanstack/router-plugin@1.168.47'
+  - cn@0.5.0
+  - lucide-react@1.58.0

@@ -311,8 +311,11 @@ export const users = sqliteTable(
 	"users",
 	{
 		/** Always lowercased. */
-		email: text("email").primaryKey(),
+		username: text("username").primaryKey(),
 		role: text("role", { enum: ROLES }).notNull(),
+		/** NULL until onboarding/password reset; a row without one cannot log in. */
+		passwordHash: text("password_hash"),
+		passwordChangedAt: integer("password_changed_at"),
 		createdAt: integer("created_at").notNull(),
 		updatedAt: integer("updated_at").notNull(),
 		disabledAt: integer("disabled_at"),
@@ -320,11 +323,47 @@ export const users = sqliteTable(
 	() => [check("users_role_check", inList("role", ROLES))],
 );
 
+/** M7: server-side login sessions. `expires_at` folds idle + absolute expiry. */
+export const sessions = sqliteTable(
+	"sessions",
+	{
+		idHash: text("id_hash").primaryKey(),
+		username: text("username")
+			.notNull()
+			.references(() => users.username, { onDelete: "cascade" }),
+		createdAt: integer("created_at").notNull(),
+		lastSeenAt: integer("last_seen_at").notNull(),
+		expiresAt: integer("expires_at").notNull(),
+	},
+	(t) => [
+		index("sessions_username_idx").on(t.username),
+		index("sessions_expires_idx").on(t.expiresAt),
+	],
+);
+
+/** M7: API tokens for non-interactive admin callers. */
+export const apiTokens = sqliteTable(
+	"api_tokens",
+	{
+		id: text("id").primaryKey(),
+		tokenHash: text("token_hash").notNull().unique(),
+		username: text("username")
+			.notNull()
+			.references(() => users.username, { onDelete: "cascade" }),
+		name: text("name").notNull(),
+		createdAt: integer("created_at").notNull(),
+		expiresAt: integer("expires_at"),
+		lastUsedAt: integer("last_used_at"),
+		revokedAt: integer("revoked_at"),
+	},
+	(t) => [index("api_tokens_username_idx").on(t.username)],
+);
+
 export const auditLogs = sqliteTable(
 	"audit_logs",
 	{
 		id: text("id").primaryKey(),
-		actorEmail: text("actor_email").notNull(),
+		actor: text("actor").notNull(),
 		action: text("action").notNull(),
 		resourceType: text("resource_type").notNull(),
 		/** NULL for actions over many resources (bulk replay). */
@@ -338,7 +377,7 @@ export const auditLogs = sqliteTable(
 	(t) => [
 		index("audit_logs_at_idx").on(t.at),
 		index("audit_logs_resource_idx").on(t.resourceType, t.resourceId, t.at),
-		index("audit_logs_actor_idx").on(t.actorEmail, t.at),
+		index("audit_logs_actor_idx").on(t.actor, t.at),
 	],
 );
 
@@ -350,7 +389,7 @@ export const testDeliveries = sqliteTable(
 			.notNull()
 			.references(() => destinations.id),
 		projectId: text("project_id").notNull(),
-		actorEmail: text("actor_email").notNull(),
+		actor: text("actor").notNull(),
 		startedAt: integer("started_at").notNull(),
 		durationMs: integer("duration_ms").notNull(),
 		httpStatus: integer("http_status"),
@@ -379,6 +418,8 @@ export type WebhookEventRow = typeof webhookEvents.$inferSelect;
 export type DeliveryRow = typeof deliveries.$inferSelect;
 export type DeliveryAttemptRow = typeof deliveryAttempts.$inferSelect;
 export type UserRow = typeof users.$inferSelect;
+export type SessionRow = typeof sessions.$inferSelect;
+export type ApiTokenRow = typeof apiTokens.$inferSelect;
 export type AuditLogRow = typeof auditLogs.$inferSelect;
 export type TestDeliveryRow = typeof testDeliveries.$inferSelect;
 

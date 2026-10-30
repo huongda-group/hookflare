@@ -1,6 +1,5 @@
 import type { Failure } from "@hookflare/shared";
-import { beforeEach, describe, expect, it } from "vitest";
-import { clearAccessKeyCache } from "../../src/admin/auth/access";
+import { describe, expect, it } from "vitest";
 import { deliveries } from "../../src/core/db/schema";
 import { newId } from "../../src/core/ids";
 import { adminApp } from "../helpers/admin";
@@ -8,11 +7,6 @@ import { testDeps } from "../helpers/deps";
 import { seedDelivery, seedPipeline } from "../helpers/seed";
 
 type Page = { data: Failure[]; next_cursor: string | null };
-
-// Each adminApp mints fresh keys under the same kid.
-beforeEach(() => {
-	clearAccessKeyCache();
-});
 
 async function fixture() {
 	const deps = testDeps();

@@ -1,7 +1,6 @@
 import type { BulkReplayResult, ReplayResult } from "@hookflare/shared";
 import { asc, eq } from "drizzle-orm";
-import { beforeEach, describe, expect, it } from "vitest";
-import { clearAccessKeyCache } from "../../src/admin/auth/access";
+import { describe, expect, it } from "vitest";
 import {
 	deliveries,
 	destinations,
@@ -14,11 +13,6 @@ import { faultyDeps } from "../helpers/faults";
 import { seedDelivery, seedPipeline } from "../helpers/seed";
 
 const reason = "backend fixed";
-
-beforeEach(() => {
-	// Each adminApp mints fresh keys under the same kid.
-	clearAccessKeyCache();
-});
 
 async function eventDeliveries(
 	deps: ReturnType<typeof testDeps>,
@@ -53,7 +47,7 @@ describe("POST /events/:id/replay", () => {
 			[deliveryId, "initial", "delivered"],
 			[body.delivery_id, "replay", "queued"],
 		]);
-		expect(rows[1]).toMatchObject({ createdBy: api.email, attemptCount: 0 });
+		expect(rows[1]).toMatchObject({ createdBy: api.username, attemptCount: 0 });
 		const audits = await auditRows(deps, eventId);
 		expect(audits).toHaveLength(1);
 		expect(audits[0]).toMatchObject({
@@ -144,11 +138,10 @@ describe("POST /events/:id/replay", () => {
 		expect(missing.status).toBe(409);
 		expect(await missing.json()).toEqual({ error: "payload_missing" });
 
-		clearAccessKeyCache(); // second app minted fresh keys under the same kid
 		const broken = await adminApp(
 			faultyDeps(base, { r2: [{ match: /^head / }] }),
 			{
-				email: op.email,
+				username: op.username,
 			},
 		);
 		expect(
@@ -232,7 +225,7 @@ describe("POST /failures/replay", () => {
 		]);
 		expect((deps.queue as RecordingQueue).sent).toHaveLength(2);
 		const audits = (await deps.db.query.auditLogs.findMany()).filter(
-			(a) => a.action === "delivery.replayed" && a.actorEmail === api.email,
+			(a) => a.action === "delivery.replayed" && a.actor === api.username,
 		);
 		expect(audits).toHaveLength(1);
 		expect(audits[0]).toMatchObject({
@@ -308,7 +301,7 @@ describe("POST /failures/replay", () => {
 			skipped: [{ delivery_id: missing, reason: "not_found" }],
 		});
 		const audits = (await deps.db.query.auditLogs.findMany()).filter(
-			(a) => a.actorEmail === api.email && a.action === "delivery.replayed",
+			(a) => a.actor === api.username && a.action === "delivery.replayed",
 		);
 		expect(audits).toEqual([]);
 	});
@@ -323,11 +316,10 @@ describe("POST /failures/replay", () => {
 			event: { r2Key: `payloads/${crypto.randomUUID()}` },
 		});
 		const op = await adminApp(base, { role: "operator" });
-		clearAccessKeyCache(); // second app minted fresh keys under the same kid
 		const api = await adminApp(
 			faultyDeps(base, { r2: [{ match: /^head / }] }),
 			{
-				email: op.email,
+				username: op.username,
 			},
 		);
 		const res = await api.request("POST", "/failures/replay", {

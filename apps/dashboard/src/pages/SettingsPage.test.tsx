@@ -78,11 +78,12 @@ describe("Settings", () => {
 				HttpResponse.json({
 					data: [
 						{
-							email: "op@example.com",
+							username: "op",
 							role: "operator",
 							created_at: 0,
 							updated_at: 0,
 							disabled_at: null,
+							has_password: true,
 						},
 					],
 					next_cursor: null,
@@ -92,24 +93,27 @@ describe("Settings", () => {
 				created(await request.json());
 				return HttpResponse.json({}, { status: 201 });
 			}),
-			http.patch(apiUrl("/users/op%40example.com"), async ({ request }) => {
+			http.patch(apiUrl("/users/op"), async ({ request }) => {
 				patched(await request.json());
 				return HttpResponse.json({});
 			}),
 		);
 		const { user } = renderApp("/settings?tab=users");
-		expect(await screen.findByText("op@example.com")).toBeInTheDocument();
-		await user.type(screen.getByLabelText("Email"), "new@example.com");
+		expect(await screen.findByText("op")).toBeInTheDocument();
+		await user.type(screen.getByLabelText("Username"), "newop");
+		await user.type(
+			screen.getByLabelText("Password"),
+			"a-long-initial-password",
+		);
 		await user.click(screen.getByRole("button", { name: "Add user" }));
 		await vi.waitFor(() =>
 			expect(created).toHaveBeenCalledWith({
-				email: "new@example.com",
+				username: "newop",
 				role: "viewer",
+				password: "a-long-initial-password",
 			}),
 		);
-		await user.click(
-			screen.getByRole("button", { name: "Disable op@example.com" }),
-		);
+		await user.click(screen.getByRole("button", { name: "Disable op" }));
 		await user.click(screen.getByRole("button", { name: "Disable" }));
 		await vi.waitFor(() =>
 			expect(patched).toHaveBeenCalledWith({ disabled: true }),

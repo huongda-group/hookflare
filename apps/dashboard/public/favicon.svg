@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="448" height="408" viewBox="126 292 448 408" fill="none">
+    <defs>
+        <linearGradient id="hf-rear" x1="160" y1="452" x2="343" y2="412" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#DC2C3D"/>
+            <stop offset=".42" stop-color="#EF4437"/>
+            <stop offset="1" stop-color="#FF8B35"/>
+        </linearGradient>
+        <linearGradient id="hf-left" x1="174" y1="414" x2="302" y2="636" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#FF9257"/>
+            <stop offset=".29" stop-color="#FF5938"/>
+            <stop offset=".56" stop-color="#FC294B"/>
+            <stop offset=".8" stop-color="#D71E60"/>
+            <stop offset="1" stop-color="#AA196B"/>
+        </linearGradient>
+        <linearGradient id="hf-lower" x1="361" y1="499" x2="364" y2="689" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#9F175E"/>
+            <stop offset=".34" stop-color="#C02081"/>
+            <stop offset=".68" stop-color="#E22DAB"/>
+            <stop offset="1" stop-color="#FA43CD"/>
+        </linearGradient>
+        <linearGradient id="hf-upper" x1="476" y1="306" x2="371" y2="536" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#FFAA3C"/>
+            <stop offset=".3" stop-color="#FF7932"/>
+            <stop offset=".55" stop-color="#FD4D34"/>
+            <stop offset=".77" stop-color="#F72E43"/>
+            <stop offset="1" stop-color="#EB245E"/>
+        </linearGradient>
+    </defs>
+    <path fill="url(#hf-upper)" fill-rule="evenodd" d="M138 414 C200 452 266 459 328 392 C346 373 371 355 400 347 C454 333 509 316 561 304 L455 425 C446 436 438 445 432 455 C417 480 414 510 424 538 C437 565 429 590 409 610 C386 633 350 664 322 688 L323 653 C323 626 317 601 296 579 C279 561 258 552 225 543 C194 534 176 522 164 487 Z M323 439 C327 464 348 485 371 499 C348 513 332 534 323 558 C314 536 298 515 276 500 C300 486 317 464 323 439 Z"/>
+    <path fill="url(#hf-rear)" d="M138 414 C200 452 266 459 328 392 C346 373 371 355 400 347 L390 450 L323 439 C317 464 300 486 276 500 Z"/>
+    <path fill="url(#hf-left)" d="M138 414 L164 487 C176 522 194 534 225 543 C258 552 279 561 296 579 C317 601 323 626 323 653 L323 558 C314 536 298 515 276 500 Z"/>
+    <path fill="url(#hf-lower)" d="M371 499 C388 510 415 520 424 538 C437 565 429 590 409 610 C386 633 350 664 322 688 L323 558 C332 534 348 513 371 499 Z"/>
+    <path fill="url(#hf-upper)" d="M561 304 C509 316 454 333 400 347 C354 359 324 389 323 439 C327 464 348 485 371 499 C389 511 415 521 424 538 C414 510 417 480 432 455 C438 445 446 436 455 425 Z"/>
+</svg>

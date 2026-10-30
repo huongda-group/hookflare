@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { attempt, delivery, T } from "@/test/fixtures";
@@ -17,6 +18,26 @@ const renderTimeline = (props: Parameters<typeof DeliveryTimeline>[0]) =>
 	);
 
 describe("DeliveryTimeline", () => {
+	it("does not imply a scheduled retry time when the retry timestamp is absent", () => {
+		renderTimeline({
+			receivedAt: T,
+			delivery: delivery({ status: "retrying", next_attempt_at: null }),
+		});
+		expect(
+			screen.getByText(/next attempt time unavailable/i),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByText(/Retrying — next attempt/),
+		).not.toBeInTheDocument();
+	});
+	it("announces terminal and waiting state without claiming an unrecorded retry policy", () => {
+		renderTimeline({
+			receivedAt: T,
+			delivery: delivery({ status: "failed_final", attempts: [] }),
+		});
+		expect(screen.getByText(/no further automatic retry/i)).toBeInTheDocument();
+		expect(screen.queryByText(/max attempts|backoff/i)).not.toBeInTheDocument();
+	});
 	it("orders received → attempts → dead", () => {
 		renderTimeline({
 			receivedAt: T,
@@ -89,5 +110,75 @@ describe("DeliveryTimeline", () => {
 		expect(
 			screen.getByText(/In flight — attempt in progress/),
 		).toBeInTheDocument();
+	});
+
+	it("sorts attempts chronologically", () => {
+		renderTimeline({
+			receivedAt: T,
+			delivery: delivery({
+				status: "dead",
+				attempt_count: 2,
+				attempts: [
+					attempt({ id: "att_2", attempt_no: 2, started_at: T + 3000 }),
+					attempt({ id: "att_1", attempt_no: 1, started_at: T + 1000 }),
+				],
+			}),
+		});
+		const items = within(screen.getByRole("list")).getAllByRole("listitem");
+		expect(items[1]).toHaveTextContent("Attempt #1");
+		expect(items[2]).toHaveTextContent("Attempt #2");
+	});
+
+	it("labels replay creation time instead of receipt", () => {
+		renderTimeline({
+			receivedAt: T,
+			delivery: delivery({
+				kind: "replay",
+				status: "delivered",
+				created_at: T + 60_000,
+				created_by: "ops@example.com",
+				attempts: [
+					attempt({ http_status: 200, error_kind: null, error_message: null }),
+				],
+			}),
+		});
+		expect(screen.getByText(/created/i)).toBeInTheDocument();
+		expect(screen.queryByText(/^Received$/)).not.toBeInTheDocument();
+	});
+
+	it("renders response snippets as escaped text", async () => {
+		const user = userEvent.setup();
+		renderTimeline({
+			receivedAt: T,
+			delivery: delivery({
+				attempts: [
+					attempt({ response_snippet: "<img src=x onerror=alert(1)>" }),
+				],
+			}),
+		});
+		await user.click(screen.getByRole("button", { name: /show response/i }));
+		expect(document.querySelector("img")).toBeNull();
+		expect(
+			await screen.findByText("<img src=x onerror=alert(1)>", {
+				exact: false,
+			}),
+		).toBeInTheDocument();
+	});
+
+	it("keeps collapsed histories in the DOM with headers but no attempts", () => {
+		const { container } = renderTimeline({
+			receivedAt: T,
+			defaultOpen: false,
+			delivery: delivery({
+				status: "dead",
+				attempts: [
+					attempt(),
+					attempt({ id: "att_2", attempt_no: 2, started_at: T + 3000 }),
+				],
+			}),
+		});
+		expect(container).toHaveTextContent("dlv_1");
+		expect(screen.queryByText("Attempt #1")).not.toBeInTheDocument();
+		expect(screen.queryByText("Attempt #2")).not.toBeInTheDocument();
 	});
 });

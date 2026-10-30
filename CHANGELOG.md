@@ -7,19 +7,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Reliability Console shell, incident-first Overview with historical-period failure labels and live-state separation, responsive recent events, and event delivery timeline/inspector with delivery-scoped attempt selection and permission-aware recovery. Browser acceptance covers desktop/narrow containment, explicit payload access, and replay keyboard focus; the approved visual reference and implementation decisions are documented in `docs/dashboard-reliability-console.md` and `docs/dashboard.md`.
+- Light dashboard redesign: single light theme with documented,
+  contrast-computed tokens (`docs/dashboard.md`; author-side check,
+  not a certification), responsive sidebar/drawer cutover at
+  1024px, skip link, keyboard-operable recovery flows, role-matrix UI
+  gating, explicit payload reveal, and one-time secret acknowledgement.
+  Browser coverage is split: `e2e/redesign.spec.ts` (route-intercepted
+  fixtures, no real D1) and `e2e/smoke.spec.ts` (real Worker + fresh D1,
+  sequential).
+
+### Breaking
+
+- Cloudflare Access is removed as the auth layer: the Worker no longer
+  reads Access JWTs, and `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`,
+  `ACCESS_DEV_EMAIL`, `BOOTSTRAP_ADMIN_EMAILS`, and the `jose` dependency
+  are gone. Dashboard login is username/password with server-side
+  sessions; automation uses API tokens. An admin password reset revokes
+  the user's sessions and API tokens; a self-service change keeps tokens.
+- Identity is now the username: `users` is keyed by `username` (existing
+  emails stay valid as usernames), and `email` → `username` everywhere,
+  including `actor_email` → `actor` in audit logs and the API.
+- Smoke tests and the bench tool authenticate with `HOOKFLARE_API_TOKEN`
+  (Bearer) instead of `CF_ACCESS_CLIENT_ID`/`CF_ACCESS_CLIENT_SECRET`.
+- A first deploy needs `SETUP_TOKEN` (one-time onboarding that creates
+  the first admin) instead of a Zero Trust application; Turnstile
+  (`TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY`) on the login and
+  onboarding forms is recommended but optional.
+
+### Upgrade notes (2.0.0)
+
+1. Apply the D1 migrations: existing `users` and `audit_logs` rows
+   migrate losslessly (emails become usernames; service identities
+   become disabled rows that can never log in).
+2. Set `SETUP_TOKEN` (`wrangler secret put SETUP_TOKEN`), open the
+   Worker URL, and claim the first admin on the onboarding page — a
+   migrated database has no password hashes yet, so setup is open once.
+   Then set passwords for the other users (Settings › Users) and delete
+   `SETUP_TOKEN`.
+3. Create an API token for automation (Settings › Users) and export it
+   as `HOOKFLARE_API_TOKEN` where the smoke/bench runs.
+4. Optionally create a Turnstile widget for the Worker hostname and set
+   `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` (see
+   `docs/runbook.md#setup`). Without both, the login pages show a
+   "Turnstile is off" notice.
+5. The Zero Trust Access application in front of the Worker is no longer
+   needed — remove it, or keep it as a network gate (Hookflare ignores
+   its JWT).
+6. The migration renames columns in place (`email` → `username`,
+   `actor_email` → `actor`), so it is a contract migration: once it has
+   run, a 1.x Worker cannot use the database. Rolling back below 2.0.0
+   means a D1 Time Travel restore to the bookmark the deploy printed,
+   then `wrangler rollback` (see `docs/runbook.md#rollback`).
+
 ### Changed
 
 - The ten pre-release D1 migrations are squashed into one baseline,
   `0000_init.sql`; `migrations/squashed.json` lets the CI migration check
   accept the removal. A database created before the squash must be
-  recreated (see `docs/runbook/migrations.md`).
+  recreated (see `docs/runbook.md#migrations`).
 - Workers Builds deploys run `pnpm run deploy -- --skip-smoke`
-  (`docs/runbook/deploy.md`).
+  (`docs/runbook.md#deploy-and-smoke`).
 
 ## [1.0.0] - 2026-10-17
 
 First release. Milestones M0–M6 of the
-[roadmap](docs/superpowers/specs/2026-10-14-hookflare-roadmap.md).
+[roadmap](docs/roadmap.md).
 
 ### Added
 
@@ -51,7 +106,7 @@ First release. Milestones M0–M6 of the
   test, migration safety check in CI, sink Worker and load generator, daily
   `BackupWorkflow` to R2 with restore and verify scripts, `backup_stale`
   alert, `/healthz` job heartbeat, and the operations runbook in
-  [`docs/runbook/`](docs/runbook/).
+  [`docs/runbook.md`](docs/runbook.md).
 
 ### Known limitations
 

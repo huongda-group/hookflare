@@ -65,4 +65,115 @@ describe("Settings › Alerts", () => {
 		expect(await screen.findByText("Retry defaults")).toBeInTheDocument();
 		expect(screen.queryByRole("tab", { name: "Alerts" })).toBeNull();
 	});
+
+	it("rejects a blank rule override inline and never PATCHes", async () => {
+		const bodies: unknown[] = [];
+		server.use(
+			http.patch(apiUrl("/settings"), async ({ request }) => {
+				bodies.push(await request.json());
+				return HttpResponse.json({});
+			}),
+		);
+		const user = userEvent.setup();
+		renderApp("/settings?tab=alerts");
+		const field = await screen.findByLabelText("Failure threshold");
+		await user.clear(field);
+		await user.click(screen.getByRole("button", { name: "Save rules" }));
+		expect(
+			await screen.findByText(/expected number|received nan|invalid/i, {
+				selector: "[data-field-error]",
+			}),
+		).toBeInTheDocument();
+		expect(bodies).toHaveLength(0);
+	});
+
+	it("reverts unsaved rule edits back to the server values", async () => {
+		const user = userEvent.setup();
+		renderApp("/settings?tab=alerts");
+		const field = await screen.findByLabelText("Failure threshold");
+		expect(field).toHaveValue(5);
+		await user.clear(field);
+		await user.type(field, "7");
+		expect(field).toHaveValue(7);
+		await user.click(screen.getByRole("button", { name: "Revert" }));
+		expect(field).toHaveValue(5);
+	});
+
+	it("guards dirty rule edits on navigation", async () => {
+		const user = userEvent.setup();
+		const { router } = renderApp("/settings?tab=alerts");
+		const field = await screen.findByLabelText("Failure threshold");
+		await user.clear(field);
+		await user.type(field, "7");
+		await user.click(screen.getByRole("link", { name: "Projects" }));
+		expect(
+			await screen.findByRole("heading", {
+				name: "Discard unsaved changes?",
+			}),
+		).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Discard changes" }));
+		await waitFor(() => expect(router.state.location.pathname).toBe("/projects"));
+	});
+
+	it("never fetches stored credentials when opening edit", async () => {
+		const credentialGets: string[] = [];
+		server.use(
+			http.get(apiUrl("/alert-channels"), () =>
+				HttpResponse.json({ data: [channel] }),
+			),
+			http.get(apiUrl("/alert-channels/:id"), ({ params }) => {
+				credentialGets.push(String(params.id));
+				return HttpResponse.json(channel);
+			}),
+		);
+		const user = userEvent.setup();
+		renderApp("/settings?tab=alerts");
+		const row = (await screen.findByText("ops")).closest("tr") as HTMLElement;
+		await user.click(within(row).getByRole("button", { name: "Edit" }));
+		expect(
+			await screen.findByRole("heading", { name: "Edit channel" }),
+		).toBeInTheDocument();
+		expect(credentialGets).toHaveLength(0);
+	});
+
+	it("only offers supported channel types when creating", async () => {
+		server.use(
+			http.get(apiUrl("/alert-channels"), () =>
+				HttpResponse.json({ data: [] }),
+			),
+		);
+		const user = userEvent.setup();
+		renderApp("/settings?tab=alerts");
+		await user.click(await screen.findByRole("button", { name: "Add channel" }));
+		const options = Array.from(
+			screen.getByLabelText("Type").querySelectorAll("option"),
+		).map((o) => o.textContent);
+		expect(options.sort()).toEqual(["discord", "slack", "telegram"]);
+	});
+
+	it("toggles a channel off and deletes it through the current API", async () => {
+		const patched: unknown[] = [];
+		let deleted = false;
+		server.use(
+			http.get(apiUrl("/alert-channels"), () =>
+				HttpResponse.json({ data: [channel] }),
+			),
+			http.patch(apiUrl("/alert-channels/ach_1"), async ({ request }) => {
+				patched.push(await request.json());
+				return HttpResponse.json(channel);
+			}),
+			http.delete(apiUrl("/alert-channels/ach_1"), () => {
+				deleted = true;
+				return new HttpResponse(null, { status: 204 });
+			}),
+		);
+		const user = userEvent.setup();
+		renderApp("/settings?tab=alerts");
+		const row = (await screen.findByText("ops")).closest("tr") as HTMLElement;
+		await user.click(within(row).getByRole("button", { name: "Disable" }));
+		await waitFor(() => expect(patched).toEqual([{ enabled: false }]));
+		await user.click(within(row).getByRole("button", { name: "Delete" }));
+		await user.click(await screen.findByRole("button", { name: "Delete" }));
+		await waitFor(() => expect(deleted).toBe(true));
+	});
 });

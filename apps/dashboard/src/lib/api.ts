@@ -14,23 +14,20 @@ export class ApiError extends Error {
 
 const BASE = "/api/admin/v1";
 
-// Spec §9.1: an expired Access session answers with a redirect to the login
-// domain. fetch either fails (CORS) or follows it to HTML; both mean "reload".
-let expired = false;
+/**
+ * Spec M7 §6.7: a `401` from the admin API (the session is gone) sends the
+ * user to `/login`. The public `/auth/*` paths are exempt because their `401`
+ * is `invalid_credentials`, which the login and setup pages show inline.
+ */
 const listeners = new Set<() => void>();
-function markExpired() {
-	if (expired) return;
-	expired = true;
+function notifyUnauthorized() {
 	for (const l of listeners) l();
 }
-export function subscribeSessionExpired(cb: () => void) {
+export function subscribeUnauthorized(cb: () => void) {
 	listeners.add(cb);
-	return () => listeners.delete(cb);
-}
-export const isSessionExpired = () => expired;
-export function resetSessionExpired() {
-	expired = false;
-	for (const l of listeners) l();
+	return () => {
+		listeners.delete(cb);
+	};
 }
 
 /** `?a=1&s=x&s=y`. Arrays repeat the key; undefined, null, and "" are skipped. */
@@ -50,32 +47,35 @@ export function qs(query: Record<string, unknown>): string {
 const url = (path: string) =>
 	new URL(`${BASE}${path}`, window.location.origin).toString();
 
-/** `allowHtml`: the payload endpoint returns the stored body, which may itself be HTML. */
 export async function apiRaw(
 	path: string,
 	init: RequestInit = {},
-	opts: { allowHtml?: boolean } = {},
 ): Promise<Response> {
 	let res: Response;
 	try {
 		res = await fetch(url(path), { credentials: "same-origin", ...init });
 	} catch {
-		markExpired();
-		throw new ApiError(0, "session_expired");
+		throw new ApiError(0, "network_error");
 	}
 	const type = res.headers.get("content-type") ?? "";
-	// The admin API never redirects, so a followed redirect is the Access login.
-	if (res.redirected || (!opts.allowHtml && type.includes("text/html"))) {
-		markExpired();
-		throw new ApiError(res.status, "session_expired");
-	}
 	if (!res.ok) {
 		const body = type.includes("json")
 			? ((await res.json()) as Record<string, unknown>)
 			: {};
+		const code =
+			typeof body.error === "string" ? body.error : `http_${res.status}`;
+		// `POST /me/password` answers 401 `wrong_password` for a bad current
+		// password. That is a form error, not an expired session, so it must
+		// not send the user to /login (spec M7 §6.6).
+		if (
+			res.status === 401 &&
+			!path.startsWith("/auth/") &&
+			code !== "wrong_password"
+		)
+			notifyUnauthorized();
 		throw new ApiError(
 			res.status,
-			typeof body.error === "string" ? body.error : `http_${res.status}`,
+			code,
 			body.issues as Issue[] | undefined,
 			body.required as string | undefined,
 			body,
@@ -89,18 +89,29 @@ async function json<T>(path: string, init: RequestInit = {}): Promise<T> {
 	return (await res.json()) as T;
 }
 
-function send<T>(method: string, path: string, body?: unknown) {
-	return json<T>(path, {
+function sendInit(method: string, body?: unknown): RequestInit {
+	return {
 		method,
 		headers: body === undefined ? {} : { "content-type": "application/json" },
 		body: body === undefined ? undefined : JSON.stringify(body),
-	});
+	};
+}
+
+function send<T>(method: string, path: string, body?: unknown) {
+	return json<T>(path, sendInit(method, body));
+}
+
+/** For endpoints that answer `204 No Content` (login, logout, change password). */
+function sendVoid(method: string, path: string, body?: unknown): Promise<void> {
+	return apiRaw(path, sendInit(method, body)).then(() => undefined);
 }
 
 export const api = {
 	get: <T>(path: string, query: Record<string, unknown> = {}) =>
 		json<T>(`${path}${qs(query)}`),
 	post: <T>(path: string, body?: unknown) => send<T>("POST", path, body),
+	/** A POST whose success is an empty body (`204`). */
+	postVoid: (path: string, body?: unknown) => sendVoid("POST", path, body),
 	patch: <T>(path: string, body?: unknown) => send<T>("PATCH", path, body),
 	/** DELETE answers 204 with an empty body, so there is nothing to parse. */
 	delete: (path: string) =>

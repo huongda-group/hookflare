@@ -117,7 +117,7 @@ export function auditStmt(
 	if (!actor) throw new Error("auditStmt called without an actor");
 	return auditInsert(c.var.deps.db, {
 		...e,
-		actor: actor.email,
+		actor: actor.username,
 		at: c.var.deps.now(),
 	});
 }
