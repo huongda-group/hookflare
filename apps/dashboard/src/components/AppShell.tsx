@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
-import { ChevronRight, Menu } from "lucide-react";
+import { ChevronRight, Menu, Webhook } from "lucide-react";
 import { type JSX, useEffect, useState } from "react";
 import { AccountMenu } from "@/components/AccountMenu";
 import { AppNavigation } from "@/components/AppNavigation";
@@ -149,22 +149,39 @@ export function AppShell() {
 			>
 				Skip to content
 			</a>
-			<div className="flex min-h-screen">
+			<div className="flex min-h-screen bg-canvas">
 				{/* Two copies of the links exist only while the drawer is open: the
 				    sidebar is CSS-hidden below 1024px and the dialog is unmounted
 				    when closed (loaded while open by `Open navigation`). */}
-				<aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-sidebar p-4 lg:flex">
+				<aside className="hidden w-[222px] shrink-0 flex-col border-r border-border bg-sidebar px-3.5 pt-6 pb-4 lg:flex">
 					<Link
 						to="/"
-						className="mb-6 rounded-md px-3 text-lg font-semibold text-foreground"
+						aria-label="Hookflare home"
+						className="mb-7 flex items-center gap-2.5 rounded-md px-3 text-xl font-semibold tracking-tight text-foreground"
 					>
-						Hookflare
+						<span className="grid size-[29px] place-items-center rounded-lg bg-brand text-white">
+							<Webhook className="size-5" aria-hidden="true" />
+						</span>
+						hookflare
 					</Link>
+					<div className="mb-7 flex items-center gap-2.5 rounded-lg border border-border bg-surface px-2.5 py-2.5">
+						<span className="grid size-7 shrink-0 place-items-center rounded-md bg-sidebar text-muted-foreground">
+							<Webhook className="size-4" aria-hidden="true" />
+						</span>
+						<div className="min-w-0">
+							<p className="truncate text-xs font-semibold">
+								Hookflare instance
+							</p>
+							<p className="text-[11px] text-muted-foreground">
+								Current deployment
+							</p>
+						</div>
+					</div>
 					<AppNavigation />
 					<div className="mt-auto pt-6">{account}</div>
 				</aside>
 				<div className="flex min-w-0 flex-1 flex-col">
-					<header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-surface px-4 lg:px-6">
+					<header className="flex h-[54px] shrink-0 items-center gap-3 border-b border-border bg-surface px-4 lg:h-[61px] lg:px-9">
 						<Dialog open={navOpen} onOpenChange={setNavOpen}>
 							<DialogTrigger asChild>
 								<Button
@@ -176,12 +193,15 @@ export function AppShell() {
 									<Menu aria-hidden="true" />
 								</Button>
 							</DialogTrigger>
-							<DialogContent className="top-0 left-0 flex h-dvh max-h-dvh w-72 max-w-[85vw] translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-y-0 border-l-0 p-4 sm:max-w-72">
+							<DialogContent className="top-0 left-0 flex h-dvh max-h-dvh w-72 max-w-[85vw] translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-y-0 border-l-0 bg-sidebar p-4 sm:max-w-72">
 								<DialogTitle>Navigation</DialogTitle>
 								<DialogDescription className="sr-only">
 									Primary navigation and account actions
 								</DialogDescription>
-								<div className="flex min-h-0 flex-1 flex-col pt-2">
+								<div className="flex min-h-0 flex-1 flex-col overflow-y-auto pt-5">
+									<div className="mb-6 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-semibold">
+										Hookflare instance
+									</div>
 									<AppNavigation onNavigate={() => setNavOpen(false)} />
 									<div className="mt-auto pt-6">{account}</div>
 								</div>
@@ -192,7 +212,7 @@ export function AppShell() {
 					<main
 						id="main-content"
 						tabIndex={-1}
-						className="min-w-0 flex-1 p-4 focus:outline-none lg:p-6"
+						className="mx-auto w-full min-w-0 max-w-[1510px] flex-1 px-[17px] py-6 focus:outline-none lg:px-9 lg:py-8"
 					>
 						<TooltipProvider>
 							<Outlet />

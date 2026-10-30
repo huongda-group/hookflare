@@ -6,10 +6,10 @@ import {
 	Clock,
 	ListOrdered,
 	LoaderCircle,
+	type LucideIcon,
 	OctagonX,
 	Pause,
 	RotateCw,
-	type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -100,7 +100,7 @@ export function StatusBadge({
 		<span
 			data-status={status}
 			className={cn(
-				"inline-flex max-w-full items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium whitespace-nowrap",
+				"inline-flex max-w-full items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium whitespace-nowrap",
 				meta?.surface ?? "bg-secondary text-foreground",
 				className,
 			)}

@@ -313,16 +313,22 @@ export function overviewPayload(o: Record<string, unknown> = {}) {
 export function stressDataset() {
 	const longEventId = `evt_${"9".repeat(96)}`;
 	const longUrl = `https://hooks.example.com/${"long-path-segment-".repeat(12)}/callback`;
+	const longSourceName = `Source ${"ingress-".repeat(24)}`;
+	const longDestinationName = `Destination ${"delivery-".repeat(24)}`;
+	const longAccountName = `operator-${"account-".repeat(24)}`;
 	return {
 		longEventId,
 		longUrl,
+		longSourceName,
+		longDestinationName,
+		longAccountName,
 		projects: [rows.project()],
 		destinations: [
-			rows.destination(),
+			rows.destination({ name: longDestinationName }),
 			rows.destination({ id: "dst_2", name: "Billing API" }),
 			rows.destination({ id: "dst_3", name: "Long URL hook", url: longUrl }),
 		],
-		sources: [rows.source()],
+		sources: [rows.source({ name: longSourceName })],
 		events: [rows.eventSummary({ id: longEventId })],
 		eventDetail: rows.eventDetail({ id: longEventId }),
 		failures: [
@@ -505,15 +511,9 @@ export async function installApp(page: Page, opts: AppOptions = {}) {
 			if (live.singleReplay?.kind === "error")
 				return fail(live.singleReplay.status, live.singleReplay.code);
 			return json({
-				replayed: [
-					{
-						delivery_id: "dlv_1",
-						new_delivery_id: "dlv_new1",
-						enqueued: true,
-						status: "queued",
-					},
-				],
-				skipped: [],
+				delivery_id: "dlv_new1",
+				enqueued: true,
+				status: "queued",
 			});
 		}
 

@@ -1,11 +1,11 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
 import {
 	createMemoryHistory,
 	createRootRoute,
 	createRouter,
 	RouterProvider,
 } from "@tanstack/react-router";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import type { ReactNode } from "react";
@@ -80,9 +80,10 @@ describe("LoginPage", () => {
 		expect(
 			await screen.findByRole("heading", { name: "Sign in to Hookflare" }),
 		).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
 		expect(
-			screen.getByRole("button", { name: "Sign in" }),
-		).toBeInTheDocument();
+			screen.getByRole("region", { name: "Sign in to Hookflare" }),
+		).toContainElement(screen.getByLabelText("Password"));
 	});
 
 	it("does not claim Turnstile is off while auth-state is still pending", async () => {
@@ -92,7 +93,9 @@ describe("LoginPage", () => {
 		renderBare(<LoginPage />);
 		expect(await screen.findByRole("status")).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Sign in" })).toBeDisabled();
-		expect(screen.queryByText(/bot protection is off/i)).not.toBeInTheDocument();
+		expect(
+			screen.queryByText(/bot protection is off/i),
+		).not.toBeInTheDocument();
 		expect(screen.queryByText(/turnstile is off/i)).not.toBeInTheDocument();
 	});
 

@@ -1,9 +1,14 @@
-import { screen, within } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { delivery, webhookEvent } from "@/test/fixtures";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { createQueryClient } from "@/router";
+import { attempt, delivery, webhookEvent } from "@/test/fixtures";
 import { renderApp } from "@/test/render";
-import { apiUrl, server } from "@/test/server";
+import { apiUrl, meFor, server } from "@/test/server";
+import { EventDetailPage } from "./EventDetailPage";
 
 const detail = (o = {}) =>
 	http.get(apiUrl("/events/evt_1"), () => HttpResponse.json(webhookEvent(o)));
@@ -11,6 +16,143 @@ const detail = (o = {}) =>
 const { createObjectURL, revokeObjectURL } = URL;
 
 describe("Event Detail", () => {
+	it("shows the resolved source in the header and falls back to its exact ID", async () => {
+		let sourceLoads = 0;
+		server.use(
+			detail({ source_id: "src_named" }),
+			http.get(apiUrl("/sources/src_named"), () => {
+				sourceLoads++;
+				return HttpResponse.json({
+					id: "src_named",
+					name: "Production webhook",
+				});
+			}),
+		);
+		renderApp("/events/evt_1");
+		const heading = await screen.findByRole("heading", { name: "evt_1" });
+		expect(heading.parentElement).toHaveTextContent("src_named");
+		await waitFor(() =>
+			expect(heading.parentElement).toHaveTextContent("Production webhook"),
+		);
+		expect(sourceLoads).toBe(1);
+	});
+	it("does not disable Replay on a different event after discovering a missing payload", async () => {
+		server.use(
+			detail(),
+			http.get(apiUrl("/events/evt_2"), () =>
+				HttpResponse.json(webhookEvent({ id: "evt_2" })),
+			),
+			http.get(apiUrl("/events/evt_1/payload"), () =>
+				HttpResponse.json({ error: "payload_missing" }, { status: 404 }),
+			),
+		);
+		server.use(
+			http.get(apiUrl("/me"), () => HttpResponse.json(meFor("operator"))),
+		);
+		const user = userEvent.setup();
+		const queryClient = createQueryClient();
+		const page = (id: string) => (
+			<QueryClientProvider client={queryClient}>
+				<TooltipProvider>
+					<EventDetailPage eventId={id} />
+				</TooltipProvider>
+			</QueryClientProvider>
+		);
+		const { rerender } = render(page("evt_1"));
+		await screen.findByRole("heading", { name: "evt_1" });
+		await user.click(screen.getByRole("tab", { name: /payload/i }));
+		await user.click(screen.getByRole("button", { name: "Show payload" }));
+		expect(
+			await screen.findByRole("button", { name: "Replay" }),
+		).toBeDisabled();
+		rerender(page("evt_2"));
+		await screen.findByRole("heading", { name: "evt_2" });
+		expect(screen.getByRole("button", { name: "Replay" })).toBeEnabled();
+	});
+	it("selects the attempt by delivery and attempt ID despite overlapping numbers and refreshed objects", async () => {
+		let revision = 0;
+		server.use(
+			http.get(apiUrl("/events/evt_1"), () =>
+				HttpResponse.json(
+					webhookEvent({
+						deliveries: [
+							delivery({
+								id: "original",
+								attempts: [
+									attempt({
+										id: "original-1",
+										response_snippet: revision
+											? "original refreshed"
+											: "original response",
+									}),
+								],
+							}),
+							delivery({
+								id: "replay",
+								kind: "replay",
+								created_at: delivery().created_at + 1000,
+								attempts: [
+									attempt({
+										id: "replay-1",
+										response_snippet: "replay response",
+									}),
+								],
+							}),
+						],
+					}),
+				),
+			),
+		);
+		const { user } = renderApp("/events/evt_1");
+		expect(await screen.findByText("replay response")).toBeInTheDocument();
+		const original = screen.getByRole("region", { name: /delivery original/i });
+		await user.click(
+			within(original).getByRole("button", { name: /expand delivery/i }),
+		);
+		await user.click(
+			within(original).getByRole("button", { name: /attempt #1/i }),
+		);
+		expect(screen.getByRole("tabpanel")).toHaveTextContent("original response");
+		revision = 1;
+		await user.click(screen.getByRole("button", { name: /refresh event/i }));
+		await waitFor(() =>
+			expect(screen.getByRole("tabpanel")).toHaveTextContent(
+				"original refreshed",
+			),
+		);
+	});
+
+	it("falls back to the newest available attempt when a selected ID disappears", async () => {
+		let changed = false;
+		server.use(
+			http.get(apiUrl("/events/evt_1"), () =>
+				HttpResponse.json(
+					webhookEvent({
+						deliveries: [
+							delivery({
+								attempts: changed
+									? [
+											attempt({
+												id: "new",
+												attempt_no: 2,
+												response_snippet: "new response",
+											}),
+										]
+									: [attempt({ response_snippet: "old response" })],
+							}),
+						],
+					}),
+				),
+			),
+		);
+		const { user } = renderApp("/events/evt_1");
+		expect(await screen.findByText("old response")).toBeInTheDocument();
+		changed = true;
+		await user.click(screen.getByRole("button", { name: /refresh event/i }));
+		await waitFor(() =>
+			expect(screen.getByRole("tabpanel")).toHaveTextContent("new response"),
+		);
+	});
 	it("lists deliveries newest first", async () => {
 		server.use(
 			detail({
@@ -28,7 +170,7 @@ describe("Event Detail", () => {
 		);
 		renderApp("/events/evt_1");
 		const sections = await screen.findAllByRole("region", {
-			name: /delivery/i,
+			name: /^Delivery dlv_/,
 		});
 		expect(within(sections[0]).getByText("dlv_2")).toBeInTheDocument();
 		expect(within(sections[1]).getByText("dlv_1")).toBeInTheDocument();

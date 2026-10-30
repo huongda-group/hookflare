@@ -1,5 +1,11 @@
 import { expect, test } from "@playwright/test";
-import { installApp, pageOverflow, rows, stressDataset } from "./fixtures";
+import {
+	installApp,
+	overviewPayload,
+	pageOverflow,
+	rows,
+	stressDataset,
+} from "./fixtures";
 
 /**
  * Browser verification for the light dashboard redesign (Task 13).
@@ -321,9 +327,7 @@ test("payload needs an explicit action, stays bounded, and missing disables repl
 	await page.getByRole("tab", { name: "Payload" }).click();
 	expect(fixture.payloadRequests()).toHaveLength(0);
 	await page.getByRole("button", { name: "Show payload" }).click();
-	await expect(
-		page.getByText('"ok":true').or(page.getByText(/ok/)),
-	).toBeVisible();
+	await expect(page.getByRole("tabpanel")).toContainText("ok");
 	expect(fixture.payloadRequests()).toHaveLength(1);
 	// The payload/code region may scroll locally; the page must not.
 	expect(await pageOverflow(page)).toBe(0);
@@ -475,4 +479,211 @@ test("named screens render their headings and landmarks", async ({
 		body: await page.screenshot(),
 		contentType: "image/png",
 	});
+});
+
+test("attention precedes reporting and retains period-scoped investigation", async ({
+	page,
+}) => {
+	const overview = overviewPayload();
+	await installApp(page, { overview, role: "viewer" });
+	await page.goto("/?project_id=prj_1");
+	const attention = page.getByRole("heading", { name: "Needs attention" });
+	const reporting = page.getByRole("heading", { name: "Delivery performance" });
+	await expect(attention).toBeVisible();
+	await expect(reporting).toBeVisible();
+	expect(
+		await attention.evaluate(
+			(a, b) =>
+				!!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING),
+			await reporting.elementHandle(),
+		),
+	).toBe(true);
+	await expect(page.getByRole("link", { name: "1 open alert" })).toBeVisible();
+	await expect(page.getByText("Failures in selected period")).toBeVisible();
+	await page.getByRole("link", { name: "Investigate Billing API" }).click();
+	await expect.poll(() => new URL(page.url()).pathname).toBe("/failures");
+	await expect
+		.poll(() => Object.fromEntries(new URL(page.url()).searchParams))
+		.toMatchObject({
+			destination_id: "dst_1",
+			project_id: "prj_1",
+			from: String(overview.from),
+			to: String(overview.to),
+		});
+});
+
+test("attempt selection inspects its own delivery and never renders response HTML", async ({
+	page,
+}) => {
+	const original = rows.eventDetail().deliveries[0];
+	const replay = {
+		...original,
+		id: "dlv_replay",
+		kind: "replay",
+		created_by: "operator",
+		created_at: original.created_at + 10_000,
+		attempts: [
+			{
+				...original.attempts[0],
+				id: "att_replay",
+				response_snippet: "<script>replay response</script>",
+			},
+		],
+	};
+	await installApp(page, {
+		eventDetail: rows.eventDetail({ deliveries: [original, replay] }),
+	});
+	await page.goto("/events/evt_1");
+	const inspector = page.getByRole("region", {
+		name: "Request & response inspector",
+	});
+	await expect(inspector).toContainText("replay response");
+	await expect(inspector).toContainText("dlv_replay");
+	await expect(inspector.locator("script")).toHaveCount(0);
+	await page.getByRole("button", { name: "Expand delivery dlv_1" }).click();
+	await page
+		.getByRole("region", { name: "Delivery dlv_1" })
+		.getByRole("button", { name: /Attempt #1/ })
+		.click();
+	await expect(inspector).toContainText("upstream down");
+	await expect(inspector).toContainText("dlv_1");
+	await expect(inspector).not.toContainText("replay response");
+});
+
+test("viewer cannot fetch payload or replay, operator reveal and replay Escape return focus", async ({
+	page,
+}) => {
+	const fixture = await installApp(page, { role: "viewer" });
+	await page.goto("/events/evt_1");
+	await expect(
+		page.getByRole("button", { name: "Replay", exact: true }),
+	).toHaveCount(0);
+	await page.getByRole("tab", { name: "Payload" }).click();
+	await expect(page.getByText(/payload.read permission/)).toBeVisible();
+	expect(fixture.payloadRequests()).toHaveLength(0);
+	fixture.setRole("operator");
+	await page.goto("/events/evt_1");
+	await page.getByRole("tab", { name: "Payload" }).click();
+	expect(fixture.payloadRequests()).toHaveLength(0);
+	await page.getByRole("button", { name: "Show payload" }).click();
+	await expect(page.getByRole("tabpanel")).toContainText("ok");
+	expect(fixture.payloadRequests()).toHaveLength(1);
+	const replay = page.getByRole("button", { name: "Replay", exact: true });
+	await replay.click();
+	await expect(
+		page.getByRole("dialog", { name: "Replay delivery" }),
+	).toBeVisible();
+	await expect(page.getByLabel("Reason")).toBeFocused();
+	await page.keyboard.press("Escape");
+	await expect(replay).toBeFocused();
+});
+
+test("delivery without attempts explains why no response is available", async ({
+	page,
+}) => {
+	const original = rows.eventDetail().deliveries[0];
+	await installApp(page, {
+		eventDetail: rows.eventDetail({
+			deliveries: [
+				{
+					...original,
+					status: "queued",
+					attempt_count: 0,
+					last_http_status: null,
+					last_error: null,
+					completed_at: null,
+					attempts: [],
+				},
+			],
+		}),
+	});
+	await page.goto("/events/evt_1");
+	const inspector = page.getByRole("region", {
+		name: "Request & response inspector",
+	});
+	await expect(inspector).toContainText("Delivery dlv_1 · No attempts yet");
+	await expect(inspector).toContainText(
+		"No attempt is available for inspection.",
+	);
+	await expect(
+		page.getByRole("region", { name: "Delivery dlv_1" }),
+	).toContainText("awaiting an attempt");
+});
+
+test("production-shaped long IDs stay contained on overview and detail at 390, 1024 and 1440", async ({
+	page,
+}, testInfo) => {
+	const stress = stressDataset();
+	await page.emulateMedia({ reducedMotion: "reduce" });
+	await installApp(page, {
+		username: stress.longAccountName,
+		sourceDetail: stress.sources[0],
+		destinationDetail: stress.destinations[0],
+		events: { kind: "data", items: stress.events },
+		eventDetail: stress.eventDetail,
+		failures: { kind: "data", items: stress.failures },
+		sources: { kind: "data", items: stress.sources },
+		destinations: { kind: "data", items: stress.destinations },
+	});
+	for (const width of [1440, 1024, 390]) {
+		await page.setViewportSize({ width, height: 900 });
+		await page.goto("/");
+		const row = page.getByRole("row").filter({ hasText: stress.longEventId });
+		await expect(row.getByText(stress.longEventId)).toBeVisible();
+		if (width === 390)
+			await expect(row.getByText("Dead letter", { exact: true })).toBeVisible();
+		expect(await pageOverflow(page), `overview ${width}px`).toBe(0);
+		await testInfo.attach(`reliability-overview-${width}`, {
+			body: await page.screenshot({
+				fullPage: true,
+				path: `../../.superpowers/sdd/dashboard-reliability-console-plan/visual-evidence/overview-${width}.png`,
+			}),
+			contentType: "image/png",
+		});
+		await page.goto(`/events/${stress.longEventId}`);
+		await expect(page.locator("h1")).toContainText(stress.longEventId);
+		const context = page.getByRole("region", {
+			name: "Event delivery context",
+		});
+		await expect(context).toContainText(stress.longSourceName);
+		await expect(context).toContainText(stress.longDestinationName);
+		await expect(context).toContainText("Dead letter");
+		await expect(
+			page.getByRole("button", { name: "Replay", exact: true }),
+		).toBeVisible();
+		if (width === 390) {
+			const trigger = page.getByRole("button", { name: "Open navigation" });
+			await expect(trigger).toBeVisible();
+			await trigger.click();
+			const drawer = page.getByRole("dialog", { name: "Navigation" });
+			await expect(drawer.getByTitle(stress.longAccountName)).toBeVisible();
+			await expect(
+				drawer.getByRole("button", { name: "Change password" }),
+			).toBeVisible();
+			await expect(
+				drawer.getByRole("button", { name: "Log out" }),
+			).toBeVisible();
+			await page.keyboard.press("Escape");
+		} else {
+			const nav = page.getByRole("navigation", { name: "Main" });
+			await expect(nav).toBeVisible();
+			await expect(page.getByTitle(stress.longAccountName)).toBeVisible();
+			await expect(
+				page.getByRole("button", { name: "Change password" }),
+			).toBeVisible();
+			await expect(page.getByRole("button", { name: "Log out" })).toBeVisible();
+		}
+		expect(await pageOverflow(page), `detail ${width}px`).toBe(0);
+		await testInfo.attach(`reliability-detail-${width}`, {
+			body: await page.screenshot({
+				fullPage: true,
+				path: `../../.superpowers/sdd/dashboard-reliability-console-plan/visual-evidence/detail-${width}.png`,
+			}),
+			contentType: "image/png",
+		});
+		if (width === 1024)
+			await expect(
+				page.getByRole("navigation", { name: "Main" }),
+			).toBeVisible();
+	}
 });

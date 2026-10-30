@@ -10,7 +10,9 @@ Overview summarizes webhook intake, delivery outcomes, active backlog, and alert
 
 UI `/` uses GET `/api/admin/v1/overview`; destination statistics use GET `/api/admin/v1/destinations/stats`. Read permission is `events.read`.
 
-Use prominent key values, explicit time range, chart labels, and links into filtered investigation. Distinguish zero from no data or a failed fetch. The rollup job recomputes bounded windows; do not infer historical totals from the current active backlog.
+The Needs attention section comes before Delivery performance: current open-alert count and destination failures are separate signals. Destination failures are **historical in the selected period**, never unresolved-current counts; Investigate links carry destination, project (when scoped), and `from`/`to`. An empty snapshot makes no whole-system health claim.
+
+Reporting groups received, completed, success rate, terminal failures, a data-driven traffic chart, and a separate current-state strip. `pending + queued + in_flight` is the displayed Pending value. Range controls update the query and chart; daily grouping outside 24h uses local day labels. `generated_at` is API response generation time, not rollup execution time. Recent events show source → latest destination, latest-delivery status, and received time together on narrow screens, with exact ID fallback when names cannot be resolved. Project detail reuses the Overview content; loading, retry, and no-activity states remain distinct.
 
 ## Ideas, boundaries, and open work
 
@@ -25,4 +27,3 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/gateway/src/jobs/rollup.ts](../apps/gateway/src/jobs/rollup.ts)
 - [apps/dashboard/src/pages/OverviewPage.tsx](../apps/dashboard/src/pages/OverviewPage.tsx)
 - [apps/gateway/test/admin/overview.test.ts](../apps/gateway/test/admin/overview.test.ts)
-

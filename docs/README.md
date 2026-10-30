@@ -37,6 +37,7 @@ Read this index first, then only the feature pages relevant to the task. Open li
 | [settings.md](settings.md) | Settings and policy defaults |
 | [audit.md](audit.md) | Audit trail |
 | [dashboard.md](dashboard.md) | Dashboard design system |
+| [dashboard-reliability-console.md](dashboard-reliability-console.md) | Approved Reliability Console direction and [implementation plan](dashboard-reliability-console-plan.md) |
 | [operations.md](operations.md) | Deployment, operations, and verification |
 | [roadmap.md](roadmap.md) | Roadmap, design decisions, and open work |
 

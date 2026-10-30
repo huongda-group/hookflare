@@ -13,4 +13,3 @@ apps/dashboard/playwright-report
 .deploy/
 tools/bench/results/
 .restore/
-.superpowers/

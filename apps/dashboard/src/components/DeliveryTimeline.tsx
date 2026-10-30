@@ -1,4 +1,4 @@
-import type { Delivery } from "@hookflare/shared";
+import type { Delivery, DeliveryAttempt } from "@hookflare/shared";
 import { useState } from "react";
 import { StatusBadge } from "./StatusBadge";
 import { TimeText } from "./TimeText";
@@ -20,19 +20,37 @@ export function DeliveryTimeline({
 	delivery,
 	receivedAt,
 	defaultOpen = true,
+	selectedAttemptId,
+	onSelectAttempt,
 }: {
 	delivery: Delivery;
 	receivedAt: number;
 	/** Newest delivery on the page renders open; older ones render collapsed. */
 	defaultOpen?: boolean;
+	selectedAttemptId?: string;
+	onSelectAttempt?: (attempt: DeliveryAttempt) => void;
 }) {
 	const [open, setOpen] = useState(defaultOpen);
 	const terminal = TERMINAL[delivery.status];
 	const attempts = [...delivery.attempts].sort(
 		(a, b) => a.attempt_no - b.attempt_no,
 	);
+	const summary: Record<string, string> = {
+		dead: "Delivery stopped after retries were exhausted. No further automatic retry is scheduled.",
+		failed_final:
+			"Delivery failed final. No further automatic retry is scheduled.",
+		delivered: "Delivery completed successfully.",
+		retrying:
+			delivery.next_attempt_at === null
+				? "Retrying; next attempt time unavailable."
+				: "Retrying; next attempt is scheduled below.",
+		paused: "Delivery paused; no attempt is currently in progress.",
+		pending: "Pending delivery; awaiting enqueue.",
+		queued: "Delivery queued; awaiting an attempt.",
+		in_flight: "Delivery in flight; an attempt is in progress.",
+	};
 	return (
-		<section className="rounded border p-4">
+		<section className="rounded-lg border bg-card p-4">
 			<header className="flex flex-wrap items-center gap-2">
 				<button
 					type="button"
@@ -58,6 +76,9 @@ export function DeliveryTimeline({
 					</span>
 				)}
 			</header>
+			<p className="mt-3 rounded-md bg-secondary p-3 text-xs text-muted-foreground">
+				{summary[delivery.status]}
+			</p>
 			{open && (
 				<ol className="mt-3 space-y-2 border-l pl-4">
 					{delivery.kind === "replay" ? (
@@ -72,14 +93,20 @@ export function DeliveryTimeline({
 						</li>
 					)}
 					{attempts.map((a) => (
-						<AttemptRow key={a.id} attempt={a} />
+						<AttemptRow
+							key={a.id}
+							attempt={a}
+							selected={a.id === selectedAttemptId}
+							onSelect={onSelectAttempt}
+						/>
 					))}
-					{delivery.status === "retrying" && (
-						<li data-step="retrying" className="text-warning">
-							Retrying — next attempt{" "}
-							<TimeText ms={delivery.next_attempt_at} />
-						</li>
-					)}
+					{delivery.status === "retrying" &&
+						delivery.next_attempt_at !== null && (
+							<li data-step="retrying" className="text-warning">
+								Retrying — next attempt{" "}
+								<TimeText ms={delivery.next_attempt_at} />
+							</li>
+						)}
 					{delivery.status === "in_flight" && (
 						<li data-step="in_flight" className="text-muted-foreground">
 							In flight — attempt in progress
@@ -105,7 +132,15 @@ export function DeliveryTimeline({
 	);
 }
 
-function AttemptRow({ attempt }: { attempt: Delivery["attempts"][number] }) {
+function AttemptRow({
+	attempt,
+	selected,
+	onSelect,
+}: {
+	attempt: DeliveryAttempt;
+	selected: boolean;
+	onSelect?: (attempt: DeliveryAttempt) => void;
+}) {
 	const [open, setOpen] = useState(false);
 	const outcome =
 		attempt.http_status !== null
@@ -114,14 +149,27 @@ function AttemptRow({ attempt }: { attempt: Delivery["attempts"][number] }) {
 	return (
 		<li data-step={`attempt-${attempt.attempt_no}`}>
 			<div className="flex flex-wrap items-center gap-2">
-				<span className="font-medium">Attempt #{attempt.attempt_no}</span>
-				<span>{outcome}</span>
+				{onSelect ? (
+					<button
+						type="button"
+						aria-pressed={selected}
+						onClick={() => onSelect(attempt)}
+						className={`min-h-10 rounded-md border px-2 text-left font-medium focus-visible:outline-2 focus-visible:outline-ring [@media(pointer:coarse)]:min-h-11 ${selected ? "border-action bg-info-surface" : "border-border"}`}
+					>
+						<span>Attempt #{attempt.attempt_no}</span> · {outcome}
+					</button>
+				) : (
+					<>
+						<span className="font-medium">Attempt #{attempt.attempt_no}</span>
+						<span>{outcome}</span>
+					</>
+				)}
 				<span className="text-muted-foreground">{attempt.duration_ms} ms</span>
 				<TimeText ms={attempt.started_at} />
 				{attempt.error_message && (
 					<span className="text-failure">{attempt.error_message}</span>
 				)}
-				{attempt.response_snippet && (
+				{!onSelect && attempt.response_snippet && (
 					<button
 						type="button"
 						aria-expanded={open}

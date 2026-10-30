@@ -18,6 +18,26 @@ const renderTimeline = (props: Parameters<typeof DeliveryTimeline>[0]) =>
 	);
 
 describe("DeliveryTimeline", () => {
+	it("does not imply a scheduled retry time when the retry timestamp is absent", () => {
+		renderTimeline({
+			receivedAt: T,
+			delivery: delivery({ status: "retrying", next_attempt_at: null }),
+		});
+		expect(
+			screen.getByText(/next attempt time unavailable/i),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByText(/Retrying — next attempt/),
+		).not.toBeInTheDocument();
+	});
+	it("announces terminal and waiting state without claiming an unrecorded retry policy", () => {
+		renderTimeline({
+			receivedAt: T,
+			delivery: delivery({ status: "failed_final", attempts: [] }),
+		});
+		expect(screen.getByText(/no further automatic retry/i)).toBeInTheDocument();
+		expect(screen.queryByText(/max attempts|backoff/i)).not.toBeInTheDocument();
+	});
 	it("orders received → attempts → dead", () => {
 		renderTimeline({
 			receivedAt: T,

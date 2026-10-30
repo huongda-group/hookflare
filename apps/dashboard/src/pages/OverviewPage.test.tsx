@@ -47,7 +47,9 @@ describe("Overview", () => {
 			within(
 				(await screen.findByText(label)).closest("[data-tile]") as HTMLElement,
 			);
-		expect((await tile("Events received")).getByText("120")).toBeInTheDocument();
+		expect(
+			(await tile("Events received")).getByText("120"),
+		).toBeInTheDocument();
 		expect(
 			(await tile("Delivery success rate")).getByText("95.2%"),
 		).toBeInTheDocument();
@@ -131,10 +133,48 @@ describe("Overview", () => {
 		await screen.findByText("Billing API");
 		expect(screen.queryByRole("alert")).toBeNull();
 	});
+
+	it("shows current alerts even when the selected period has no failed destinations", async () => {
+		server.use(
+			http.get(apiUrl("/overview"), () =>
+				HttpResponse.json(
+					overview({
+						failing_destinations: [],
+						open_alerts: { count: 2, by_rule: {} },
+					}),
+				),
+			),
+		);
+		renderApp("/");
+		expect(await screen.findByText("2 open alerts")).toBeInTheDocument();
+		expect(
+			screen.getByText(/No destination failures in the selected period/),
+		).toBeInTheDocument();
+		expect(screen.queryByText(/unresolved/i)).toBeNull();
+	});
+
+	it("shows events without deliveries explicitly in the recent events table", async () => {
+		server.use(
+			http.get(apiUrl("/overview"), () => HttpResponse.json(overview())),
+			http.get(apiUrl("/events"), () =>
+				HttpResponse.json({
+					data: [eventSummary({ latest_delivery: null })],
+					next_cursor: null,
+				}),
+			),
+		);
+		renderApp("/");
+		const table = await screen.findByRole("table", { name: /recent events/i });
+		expect(within(table).getByRole("link", { name: "evt_1" })).toHaveAttribute(
+			"href",
+			"/events/evt_1",
+		);
+		expect(within(table).getAllByText("No delivery")).toHaveLength(2);
+	});
 });
 
 describe("Overview redesign (spec §8.3)", () => {
-	it("orders sections: reporting, traffic, live states, failing, recent", async () => {
+	it("places historical attention ahead of reporting and recent events", async () => {
 		server.use(
 			http.get(apiUrl("/overview"), () => HttpResponse.json(overview())),
 			http.get(apiUrl("/events"), () =>
@@ -143,21 +183,17 @@ describe("Overview redesign (spec §8.3)", () => {
 		);
 		renderApp("/");
 		await screen.findByText("evt_1");
-		const names = [
-			"Reporting",
-			"Traffic",
-			"Current delivery states",
-			"Failing destinations",
-			"Recent events",
-		];
-		const heads = names.map((n) =>
-			screen.getByRole("heading", { name: n }),
-		);
+		const names = ["Needs attention", "Delivery performance", "Recent events"];
+		const heads = names.map((n) => screen.getByRole("heading", { name: n }));
 		for (let i = 1; i < heads.length; i++)
 			expect(
 				heads[i - 1].compareDocumentPosition(heads[i]) &
 					Node.DOCUMENT_POSITION_FOLLOWING,
 			).toBeTruthy();
+		expect(
+			screen.getByText(/Failures in selected period/i),
+		).toBeInTheDocument();
+		expect(screen.queryByText(/unresolved/i)).toBeNull();
 	});
 
 	it("groups pending live states and marks them independent of the range", async () => {
@@ -165,7 +201,13 @@ describe("Overview redesign (spec §8.3)", () => {
 			http.get(apiUrl("/overview"), () =>
 				HttpResponse.json(
 					overview({
-						live: { pending: 1, queued: 2, in_flight: 3, retrying: 4, paused: 2 },
+						live: {
+							pending: 1,
+							queued: 2,
+							in_flight: 3,
+							retrying: 4,
+							paused: 2,
+						},
 					}),
 				),
 			),
@@ -203,6 +245,9 @@ describe("Overview redesign (spec §8.3)", () => {
 		expect(href).toContain("project_id=prj_1");
 		expect(href).toContain(`from=${overview().from}`);
 		expect(href).toContain(`to=${overview().to}`);
+		expect(
+			screen.getByText(/Failures in selected period/i),
+		).toBeInTheDocument();
 	});
 
 	it("labels generated_at as API query time, not rollup execution", async () => {
@@ -286,16 +331,16 @@ describe("Overview redesign (spec §8.3)", () => {
 		});
 		server.use(
 			http.get(apiUrl("/overview"), async ({ request }) => {
-				if (
-					new URL(request.url).searchParams.get("project_id") === "prj_old"
-				) {
+				if (new URL(request.url).searchParams.get("project_id") === "prj_old") {
 					oldStarted = true;
 					await gate;
 					return HttpResponse.json(
 						overview({ totals: totalsFor(111), trend: [] }),
 					);
 				}
-				return HttpResponse.json(overview({ totals: totalsFor(999), trend: [] }));
+				return HttpResponse.json(
+					overview({ totals: totalsFor(999), trend: [] }),
+				);
 			}),
 			http.get(apiUrl("/events"), () =>
 				HttpResponse.json({ data: [], next_cursor: null }),

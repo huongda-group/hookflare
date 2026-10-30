@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Reliability Console shell, incident-first Overview with historical-period failure labels and live-state separation, responsive recent events, and event delivery timeline/inspector with delivery-scoped attempt selection and permission-aware recovery. Browser acceptance covers desktop/narrow containment, explicit payload access, and replay keyboard focus; the approved visual reference and implementation decisions are documented in `docs/dashboard-reliability-console.md` and `docs/dashboard.md`.
 - Light dashboard redesign: single light theme with documented,
   contrast-computed tokens (`docs/dashboard.md`; author-side check,
   not a certification), responsive sidebar/drawer cutover at

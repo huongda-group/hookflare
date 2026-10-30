@@ -12,7 +12,9 @@ Metadata is readable with `events.read`. Raw payload requires `payload.read`; se
 
 UI routes: `/events` and `/events/:eventId`. API: GET `/api/admin/v1/events`, `/:id`, `/:id/deliveries`, and `/:id/payload`. Filters and cursor pagination must remain consistent when navigating back or changing the query.
 
-Use explicit Show payload before fetching/rendering payload data. Keep large bodies bounded in the UI; display raw/JSON views without treating untrusted data as HTML. Distinguish loading, no results, request failure, and unavailable payload. Place delivery status and recovery actions ahead of raw payload detail.
+Event detail shows the actual source, selected delivery destination/outcome, newest-first independent delivery histories, and a response inspector. An attempt is selected by delivery ID and attempt ID, so replay attempts numbered alike do not collide; polling keeps valid selection and event navigation resets it. Zero deliveries/attempts have explicit states. The inspector identifies the selected delivery and attempt; Response renders only the stored **snippet** as text, including HTML-like content, and does not invent a full body or response headers. Request headers are the accepted event's redacted headers, not reconstructed outbound headers.
+
+Show payload is an explicit `payload.read`-gated request; large bodies remain bounded. Viewer accounts cannot replay or retrieve payload. A confirmed missing payload disables replay. Permission-aware Replay uses the existing dialog and validates a reason; creating a new delivery is not successful backend delivery, and the original history remains intact. Status summaries distinguish dead, failed-final, retrying, paused, pending, queued, in-flight, and delivered without asserting an unknown historical retry policy.
 
 ## Ideas, boundaries, and open work
 
@@ -27,4 +29,3 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/dashboard/src/pages/EventDetailPage.tsx](../apps/dashboard/src/pages/EventDetailPage.tsx)
 - [apps/dashboard/src/components/PayloadPanel.tsx](../apps/dashboard/src/components/PayloadPanel.tsx)
 - [apps/gateway/test/admin/events.test.ts](../apps/gateway/test/admin/events.test.ts)
-

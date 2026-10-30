@@ -72,7 +72,12 @@ const GROUPS: NavGroupSpec[] = [
 		permission: "events.read",
 		items: [
 			{ to: "/archives", label: "Archives", Icon: Archive },
-			{ to: "/audit", label: "Audit", Icon: ScrollText, permission: "audit.read" },
+			{
+				to: "/audit",
+				label: "Audit",
+				Icon: ScrollText,
+				permission: "audit.read",
+			},
 			{ to: "/settings", label: "Settings", Icon: Settings },
 		],
 	},
@@ -88,7 +93,7 @@ export function AppNavigation({
 	onNavigate?: () => void;
 }): JSX.Element {
 	return (
-		<nav aria-label="Main" className="flex flex-col gap-6">
+		<nav aria-label="Main" className="flex flex-col gap-5">
 			{GROUPS.map((group) => (
 				<NavGroup key={group.label} group={group} onNavigate={onNavigate} />
 			))}
@@ -107,7 +112,7 @@ function NavGroup({
 	if (!allowed) return null;
 	return (
 		<div className="flex flex-col gap-1">
-			<h2 className="px-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+			<h2 className="px-3 text-[11px] font-semibold tracking-[0.1em] text-muted-foreground uppercase">
 				{group.label}
 			</h2>
 			<ul className="flex flex-col gap-0.5">
@@ -143,7 +148,7 @@ function NavItem({
 				onClick={onNavigate}
 				// Spec §6: active shows background plus text weight, not color
 				// alone. `exact` only for `/`, so detail routes light up parents.
-				className="flex min-h-11 items-center gap-2.5 rounded-md px-3 py-2 text-sm text-foreground transition-colors hover:bg-accent"
+				className="flex min-h-10 items-center gap-2.5 rounded-[7px] px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:min-h-11"
 				activeProps={{
 					className: "bg-selected font-medium text-selected-foreground",
 					"aria-current": "page",

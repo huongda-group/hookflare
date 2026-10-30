@@ -6,7 +6,7 @@
 
 The dashboard is an internal operations interface built with React, Vite, Tailwind, and TanStack Router/Query. It supports setup, login, overview, projects, endpoints, events, failures, alerts, archives, audit, settings, and account dialogs. The implemented visual direction is a single light theme.
 
-The older product brief's “palette unapproved” and the approved spec's “not yet implemented” language describe earlier stages. Current components and the dated review supersede those statements; the review is not a fresh verification run.
+The approved [Reliability Console direction](dashboard-reliability-console.md) is implemented for the shared shell, Overview, and Event detail. Other routes retain their task layouts within the shared shell. The prototype's sample counters, simulated replay, and preview navigation are not product behavior.
 
 ## Design and interaction
 
@@ -16,29 +16,28 @@ Every data view distinguishes loading, empty, failure, and loaded states. Forms 
 
 IDs and long URLs must wrap safely; use names where available and IDs for disambiguation. Dialogs close with Escape and restore focus. Provide a skip link and landmarks. Do not claim accessibility certification from calculated token contrast or fixture screenshots.
 
-Implemented token values are listed below. Page-specific behavior lives in the corresponding feature document; existing browser checks are linked under Source and verification entry points.
+Implemented token values are listed below. Page-specific behavior lives in the corresponding feature document.
 
 ## Implemented visual tokens
 
-These values come from the migrated dashboard design record; contrast values are author-side calculations, not accessibility certification. The stylesheet remains the implementation reference.
+These are the implemented Reliability Console values in `index.css` (not the superseded light-theme palette). This table does not certify accessibility.
 
 | Token | Value | Used on |
 | --- | --- | --- |
-| `--canvas` | `#F8FAFB` | App background |
+| `--canvas` | `#F7F8FA` | App background |
 | `--surface` | `#FFFFFF` | Cards, dialogs, table panels |
-| `--sidebar` | `#F0F3F5` | Navigation sidebar |
-| `--border` / `--input` | `#D6DFE6` | Separators, control outlines (1.35:1 vs white — low-emphasis only; controls also carry a visible label and a 5.8:1 focus indicator) |
-| `--foreground` | `#202831` | Body text (14.1–14.9:1) |
-| `--muted-foreground` | `#536371` | Secondary text (5.5–6.2:1) |
-| `--action` / `--action-hover` | `#246A9E` / `#1C567F` | Primary buttons, links, focus ring (5.8:1 / 7.8:1 with white label) |
-| `--selected` / `--selected-foreground` | `#DCE8F2` / `#215C87` | Active nav item (5.7:1) |
-| `--success` on `--success-surface` | `#29624B` on `#EAF4EF` | (6.3:1) |
-| `--warning` on `--warning-surface` | `#855B16` on `#FCF0DD` | (5.3:1) |
-| `--failure` on `--failure-surface` | `#963B34` on `#FBEAE8` | (6.1:1; white on `#963B34`: 7.1:1) |
-| `--focus` | `#246A9E` | Focus indicator (≥5.2:1 vs every surface) |
+| `--sidebar` | `#F1F3F7` | Navigation sidebar |
+| `--border` / `--input` | `#E3E7ED` / `#D4DCE7` | Separators and controls |
+| `--foreground` / `--muted-foreground` | `#202733` / `#667080` | Body and secondary text |
+| `--action` / `--action-hover` | `#245BDB` / `#1C4CBD` | Primary buttons and links |
+| `--selected` / `--selected-foreground` | `#E1E9FB` / `#244DA7` | Active navigation |
+| `--success` / `--success-surface` | `#23704D` / `#E9F5ED` | Delivered status |
+| `--warning` / `--warning-surface` | `#805316` / `#FFF2DA` | Retrying status |
+| `--failure` / `--failure-surface` | `#A43737` / `#FBE6E5` | Terminal failure status |
+| `--focus` | `#245BDB` | Visible keyboard focus |
+| `--chart-received` / `--chart-delivered` / `--chart-failed` | `#426CCC` / `#47A083` / `#D0847E` | Chart series; textual alternatives remain |
 
-Radii: `--radius-control: 0.5rem` (6–8px controls), `--radius-panel: 0.75rem`
-(12px panels).
+Radii: `--radius-control: 0.5rem` (8px controls), `--radius-panel: 0.625rem` (10px panels). System UI fonts are used for text and system monospace for technical identifiers. `PageHeader`, `StatusBadge`, `AppShell`, `OverviewAttention`, `RecentEventsTable`, `EventDeliveryContext`, `DeliveryTimeline`, and `EventInspector` compose the shared visual vocabulary. There is no dark theme or remote font.
 
 ## Ideas, boundaries, and open work
 
@@ -53,4 +52,3 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/dashboard/src/components/ui/dialog.tsx](../apps/dashboard/src/components/ui/dialog.tsx)
 - [apps/dashboard/e2e/redesign.spec.ts](../apps/dashboard/e2e/redesign.spec.ts)
 - [apps/dashboard/e2e/smoke.spec.ts](../apps/dashboard/e2e/smoke.spec.ts)
-

@@ -5,10 +5,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import {
-	AuthLayout,
-	focusFirstInvalidField,
-} from "@/components/AuthLayout";
+import { AuthLayout, focusFirstInvalidField } from "@/components/AuthLayout";
 import { PasswordField } from "@/components/PasswordField";
 import { FieldError } from "@/components/ProjectFormDialog";
 import { TurnstileWidget } from "@/components/TurnstileWidget";
@@ -100,8 +97,8 @@ export function LoginPage({ next }: { next?: string }) {
 					</Button>
 				</div>
 			) : null}
-			<form onSubmit={submit} className="space-y-4">
-				<div>
+			<form onSubmit={submit} className="space-y-5">
+				<div className="space-y-2">
 					<Label htmlFor="login-username">Username</Label>
 					<Input
 						id="login-username"
@@ -110,7 +107,7 @@ export function LoginPage({ next }: { next?: string }) {
 					/>
 					<FieldError message={errors.username?.message} />
 				</div>
-				<div>
+				<div className="space-y-2">
 					<PasswordField
 						id="login-password"
 						label="Password"
@@ -135,7 +132,7 @@ export function LoginPage({ next }: { next?: string }) {
 				<FieldError message={errors.root?.message} />
 				<Button
 					type="submit"
-					className="w-full"
+					className="mt-2 h-11 w-full"
 					disabled={
 						form.formState.isSubmitting ||
 						blocked ||

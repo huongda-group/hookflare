@@ -19,9 +19,24 @@ export function AccountMenu({
 	onLogout: () => void;
 }): JSX.Element {
 	return (
-		<div className="border-t border-border pt-4">
-			<p className="truncate text-sm font-medium text-foreground">{username}</p>
-			<p className="text-xs text-muted-foreground capitalize">{role}</p>
+		<div className="min-w-0 border-t border-border pt-4">
+			<div className="flex min-w-0 items-center gap-2.5 px-1">
+				<span
+					aria-hidden="true"
+					className="grid size-8 shrink-0 place-items-center rounded-full bg-avatar text-xs font-semibold text-avatar-foreground"
+				>
+					{username.slice(0, 2).toUpperCase()}
+				</span>
+				<div className="min-w-0">
+					<p
+						className="truncate text-xs font-semibold text-foreground"
+						title={username}
+					>
+						{username}
+					</p>
+					<p className="text-[11px] text-muted-foreground capitalize">{role}</p>
+				</div>
+			</div>
 			<div className="mt-2 flex flex-col items-stretch gap-1">
 				<Button
 					variant="ghost"

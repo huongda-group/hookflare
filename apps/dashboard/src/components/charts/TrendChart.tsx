@@ -34,11 +34,11 @@ export function TrendChart({
 			"en-GB",
 			daily
 				? { day: "2-digit", month: "short" }
-				: { hour: "2-digit", minute: "2-digit" },
+				: { hour: "2-digit", minute: "2-digit", timeZone: "UTC" },
 		);
 	return (
 		<figure aria-label="Event trend" className="w-full">
-			<div className="h-64 w-full">
+			<div className="h-44 w-full sm:h-52">
 				<ResponsiveContainer>
 					<LineChart data={data}>
 						<CartesianGrid strokeDasharray="3 3" />
@@ -50,7 +50,7 @@ export function TrendChart({
 							type="monotone"
 							dataKey="received"
 							name="Received"
-							stroke="var(--muted-foreground)"
+							stroke="var(--action)"
 							dot={false}
 						/>
 						<Line
@@ -72,18 +72,20 @@ export function TrendChart({
 				</ResponsiveContainer>
 			</div>
 			<figcaption className="sr-only">
-				{received} events received, {delivered} deliveries completed,{" "}
-				{failed} failed across {data.length}{" "}
-				{data.length === 1 ? "point" : "points"}.
+				{received} events received, {delivered} deliveries completed, {failed}{" "}
+				failed across {data.length} {data.length === 1 ? "point" : "points"}.
 			</figcaption>
+			<p className="mt-2 text-xs text-muted-foreground">
+				{daily
+					? "Daily traffic rollups · local time"
+					: "Hourly traffic rollups · UTC"}
+			</p>
 			<details className="mt-2 text-sm">
 				<summary className="cursor-pointer text-action underline underline-offset-2">
 					Trend data table
 				</summary>
-				<div
-					role="region"
+				<section
 					aria-label="Traffic trend data"
-					tabIndex={0}
 					className="mt-2 overflow-x-auto rounded-lg border border-border"
 				>
 					<table aria-label="Traffic trend" className="w-full text-sm">
@@ -105,8 +107,13 @@ export function TrendChart({
 						</thead>
 						<tbody>
 							{data.map((p) => (
-								<tr key={p.hour} className="border-b border-border last:border-0">
-									<td className="px-3 py-1.5 whitespace-nowrap">{fmt(p.hour)}</td>
+								<tr
+									key={p.hour}
+									className="border-b border-border last:border-0"
+								>
+									<td className="px-3 py-1.5 whitespace-nowrap">
+										{fmt(p.hour)}
+									</td>
 									<td className="px-3 py-1.5 tabular-nums">{p.received}</td>
 									<td className="px-3 py-1.5 tabular-nums">{p.delivered}</td>
 									<td className="px-3 py-1.5 tabular-nums">{p.failed}</td>
@@ -114,7 +121,7 @@ export function TrendChart({
 							))}
 						</tbody>
 					</table>
-				</div>
+				</section>
 			</details>
 		</figure>
 	);

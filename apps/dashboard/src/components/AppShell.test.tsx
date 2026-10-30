@@ -21,6 +21,14 @@ describe("AppShell", () => {
 		}
 	});
 
+	it("keeps instance identity linked to Overview without adding a fake workspace switcher", async () => {
+		const { user, router } = renderApp("/events");
+		await screen.findByText("admin@example.com");
+		expect(screen.getByText("Hookflare instance")).toBeInTheDocument();
+		await user.click(screen.getByRole("link", { name: "Hookflare home" }));
+		await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+	});
+
 	it("hides Audit from viewers", async () => {
 		renderApp("/", { role: "viewer" });
 		await screen.findByText("viewer@example.com");
@@ -203,9 +211,7 @@ describe("AppShell", () => {
 		renderApp("/");
 		await screen.findByText("admin@example.com");
 		for (const group of ["Monitor", "Configure", "Administer"]) {
-			expect(
-				screen.getByRole("heading", { name: group }),
-			).toBeInTheDocument();
+			expect(screen.getByRole("heading", { name: group })).toBeInTheDocument();
 		}
 	});
 
@@ -288,9 +294,7 @@ describe("AppShell", () => {
 		expect(queryClient.getQueryData(seeded)).toBeDefined();
 		await user.click(screen.getByRole("button", { name: "Log out" }));
 		await waitFor(() => expect(attempts).toBeGreaterThanOrEqual(1));
-		await waitFor(() =>
-			expect(router.state.location.pathname).toBe("/login"),
-		);
+		await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
 		expect(queryClient.getQueryData(seeded)).toBeUndefined();
 	});
 
@@ -337,14 +341,12 @@ describe("AppShell", () => {
 		queryClient.setQueryData(["users", "op", "tokens"], {
 			data: [{ id: "tok_1", name: "smoke", token: secret }],
 		});
-		expect(
-			JSON.stringify(queryClient.getQueryCache().getAll()),
-		).toContain(secret);
+		expect(JSON.stringify(queryClient.getQueryCache().getAll())).toContain(
+			secret,
+		);
 		await user.click(screen.getByRole("button", { name: "Log out" }));
 		await waitFor(() => expect(attempts).toBeGreaterThanOrEqual(1));
-		await waitFor(() =>
-			expect(router.state.location.pathname).toBe("/login"),
-		);
+		await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
 		for (const q of queryClient.getQueryCache().getAll()) {
 			expect(JSON.stringify(q.state.data ?? null)).not.toContain(secret);
 		}
