@@ -170,7 +170,7 @@ export function parseCurrentVersion(json) {
 export function deployPlan({ smoke, skipSmoke }) {
 	if (smoke === null && !skipSmoke) {
 		throw new Error(
-			"deploy: smoke env missing; set it (see docs/runbook/deploy.md) or pass --skip-smoke",
+			"deploy: smoke env missing; set it (see docs/runbook.md#deploy-and-smoke) or pass --skip-smoke",
 		);
 	}
 	const steps = ["record", "build", "migrate", "deploy"];

@@ -275,7 +275,7 @@ describe("Settings › Storage", () => {
 		});
 		expect(link).toHaveAttribute(
 			"href",
-			"https://github.com/huongda-group/hookflare/blob/main/docs/runbook/backup-restore.md",
+			"https://github.com/huongda-group/hookflare/blob/main/docs/runbook.md#backup-and-restore",
 		);
 		expect(
 			screen.queryByRole("button", { name: /restore/i }),

@@ -38,7 +38,7 @@ const FIELD_IDS: Record<string, string> = {
 };
 
 const SETUP_GUIDE_URL =
-	"https://github.com/huongda-group/hookflare/blob/main/docs/runbook/setup.md";
+	"https://github.com/huongda-group/hookflare/blob/main/docs/runbook.md#setup";
 
 export function SetupPage() {
 	const navigate = useNavigate();

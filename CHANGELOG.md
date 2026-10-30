@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Light dashboard redesign: single light theme with documented,
-  contrast-computed tokens (`apps/dashboard/DESIGN.md`; author-side check,
+  contrast-computed tokens (`docs/dashboard.md`; author-side check,
   not a certification), responsive sidebar/drawer cutover at
   1024px, skip link, keyboard-operable recovery flows, role-matrix UI
   gating, explicit payload reveal, and one-time secret acknowledgement.
@@ -50,7 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    as `HOOKFLARE_API_TOKEN` where the smoke/bench runs.
 4. Optionally create a Turnstile widget for the Worker hostname and set
    `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` (see
-   `docs/runbook/setup.md`). Without both, the login pages show a
+   `docs/runbook.md#setup`). Without both, the login pages show a
    "Turnstile is off" notice.
 5. The Zero Trust Access application in front of the Worker is no longer
    needed — remove it, or keep it as a network gate (Hookflare ignores
@@ -59,21 +59,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    `actor_email` → `actor`), so it is a contract migration: once it has
    run, a 1.x Worker cannot use the database. Rolling back below 2.0.0
    means a D1 Time Travel restore to the bookmark the deploy printed,
-   then `wrangler rollback` (see `docs/runbook/rollback.md`).
+   then `wrangler rollback` (see `docs/runbook.md#rollback`).
 
 ### Changed
 
 - The ten pre-release D1 migrations are squashed into one baseline,
   `0000_init.sql`; `migrations/squashed.json` lets the CI migration check
   accept the removal. A database created before the squash must be
-  recreated (see `docs/runbook/migrations.md`).
+  recreated (see `docs/runbook.md#migrations`).
 - Workers Builds deploys run `pnpm run deploy -- --skip-smoke`
-  (`docs/runbook/deploy.md`).
+  (`docs/runbook.md#deploy-and-smoke`).
 
 ## [1.0.0] - 2026-10-17
 
 First release. Milestones M0–M6 of the
-[roadmap](docs/superpowers/specs/2026-10-14-hookflare-roadmap.md).
+[roadmap](docs/roadmap.md).
 
 ### Added
 
@@ -105,7 +105,7 @@ First release. Milestones M0–M6 of the
   test, migration safety check in CI, sink Worker and load generator, daily
   `BackupWorkflow` to R2 with restore and verify scripts, `backup_stale`
   alert, `/healthz` job heartbeat, and the operations runbook in
-  [`docs/runbook/`](docs/runbook/).
+  [`docs/runbook.md`](docs/runbook.md).
 
 ### Known limitations
 

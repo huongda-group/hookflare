@@ -11,15 +11,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **M7 (built-in auth):** username/password login with server-side sessions in D1, one-time onboarding protected by `SETUP_TOKEN`, API tokens for automation, Turnstile on the login/setup forms, smoke/bench via `HOOKFLARE_API_TOKEN`. Access is removed (its `ACCESS_*` vars, bootstrap admin emails, and the JWT dependency); identity is the username (`actor`, not `actor_email`, in audit logs).
 - **M4 (dashboard):** React SPA served as Workers Static Assets from the same Worker, `stats_hourly` rollup every 5 minutes, overview and per-destination stats, editable retry defaults.
 - **M5 (operations):** `DestinationLimiter` DO (max_in_flight, rate_limit_per_s; a rejection never counts as an attempt); alerts job with Discord/Slack/Telegram channels through an outbox; daily `ArchiveWorkflow` (gzip NDJSON + verified manifest in R2, then purge D1) with the Archives page.
-- **M6 (production readiness):** staging config, `scripts/deploy.mjs` (restore point → build → migrate → deploy → smoke), migration safety check in CI, sink Worker and load generator (`tools/sink`, `tools/bench`), daily `BackupWorkflow` + restore/verify scripts, `/healthz` job heartbeat, and the runbook in `docs/runbook/`.
+- **M6 (production readiness):** staging config, `scripts/deploy.mjs` (restore point → build → migrate → deploy → smoke), migration safety check in CI, sink Worker and load generator (`tools/sink`, `tools/bench`), daily `BackupWorkflow` + restore/verify scripts, `/healthz` job heartbeat, and the runbook in `docs/runbook.md`.
 
-Still pending after 1.0.0: the live staging drills (rollback, restore, canary), benchmark B6 and the recommended-limits results document, and the M6d production rollout. Runbook steps not yet run live are marked **(verify on staging in drill)** — keep that marker until a drill record in `docs/runbook/drills/` proves otherwise.
+Still pending after 1.0.0: the live staging drills (rollback, restore, canary), benchmark B6 and the recommended-limits results document, and the M6d production rollout. Runbook steps not yet run live are marked **(verify on staging in drill)** — keep that marker until a dated drill record in `docs/runbook.md#drills` proves otherwise.
 
 ## Source documents and precedence
 
-- `DESIGN.md`: original product/system spec.
-- `docs/superpowers/specs/2026-10-14-hookflare-roadmap.md`: architecture baseline, locked decisions (DEC-1–DEC-12), and milestones M0–M6. **Where it differs from `DESIGN.md`, the roadmap wins**; §3 of the roadmap lists every deviation.
-- Per-milestone specs go to `docs/superpowers/specs/YYYY-MM-DD-mN-<topic>-design.md`. Each milestone follows the cycle spec → user review → implementation plan → implementation. All docs and specs are written in English (open-source project).
+- Start at `docs/README.md`. Current documentation is organized by feature (`login.md`, `profile.md`, `contract.md`, and related pages), with business rules, design, boundaries, and source/test links.
+- Code and shared schemas establish exact implemented behavior. Keep the feature document aligned when changing behavior; distinguish proposed ideas from implemented features and live acceptance.
+- `docs/architecture.md` and `docs/roadmap.md` describe cross-feature decisions and open work. `docs/runbook.md` owns operational procedures and pending drill records.
+- Read `docs/README.md` and only the feature pages relevant to the task. Follow source/test links as needed. Load runbook procedures only for operational work; do not read all docs by default. Superseded plans and duplicate historical documents are intentionally removed.
+- Write new docs and design changes in the root `docs` feature structure, not in module directories or a milestone-specific documentation tree. All docs and specs are written in English (open-source project).
 
 ## Commands
 
@@ -39,7 +41,7 @@ All commands run from the repository root.
 | `pnpm db:generate` | `drizzle-kit generate` from `apps/gateway/src/core/db/schema.ts` into `apps/gateway/migrations/` (never hand-edit generated migrations; CI fails on drift) |
 | `pnpm db:migrate:remote` | `wrangler d1 migrations apply DB --remote` |
 | `pnpm db:migrate:remote:staging` | the same against `wrangler.staging.jsonc` |
-| `pnpm run deploy` / `pnpm deploy:staging` | `scripts/deploy.mjs`: record a restore point, `build`, remote migrations, `wrangler deploy`, smoke test (`--skip-smoke` to skip); see `docs/runbook/deploy.md` |
+| `pnpm run deploy` / `pnpm deploy:staging` | `scripts/deploy.mjs`: record a restore point, `build`, remote migrations, `wrangler deploy`, smoke test (`--skip-smoke` to skip); see `docs/runbook.md#deploy-and-smoke` |
 | `pnpm run smoke` / `pnpm smoke:staging` | end-to-end smoke test through the sink (needs `HOOKFLARE_URL`/`HOOKFLARE_STAGING_URL`, `HOOKFLARE_API_TOKEN` from an admin API token, `SINK_URL`) |
 
 To run a single test: `pnpm --filter gateway exec vitest run test/core/ids.test.ts -t "strictly increasing"`.

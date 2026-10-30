@@ -7,7 +7,7 @@ Hookflare sits between webhook providers (Stripe, GitHub, Shopify, your own serv
 > [!NOTE]
 > **1.0.0 — first release.** The full pipeline, admin API, dashboard, alerts, archival, backups, and the operations runbook are in place. See [`CHANGELOG.md`](CHANGELOG.md). The live staging drills (rollback, restore, canary) are still pending; runbook steps not yet run live are marked **(verify on staging in drill)**.
 
-Operations runbook: [`docs/runbook/`](docs/runbook/).
+Feature documentation: [`docs/README.md`](docs/README.md). Operations runbook: [`docs/runbook.md`](docs/runbook.md).
 
 ---
 
@@ -96,7 +96,7 @@ pnpm test && pnpm typecheck && pnpm lint
 
 ### Option B: deploy to Cloudflare
 
-Each deployment is one isolated environment (production and staging are separate Workers with their own resources). The steps below are for production with [`apps/gateway/wrangler.jsonc`](apps/gateway/wrangler.jsonc); for staging use [`wrangler.staging.jsonc`](apps/gateway/wrangler.staging.jsonc), the `-staging` resource names, and `pnpm deploy:staging`. The full procedure, including the sink Worker and the API token used by smoke tests, is in [`docs/runbook/setup.md`](docs/runbook/setup.md).
+Each deployment is one isolated environment (production and staging are separate Workers with their own resources). The steps below are for production with [`apps/gateway/wrangler.jsonc`](apps/gateway/wrangler.jsonc); for staging use [`wrangler.staging.jsonc`](apps/gateway/wrangler.staging.jsonc), the `-staging` resource names, and `pnpm deploy:staging`. The full procedure, including the sink Worker and the API token used by smoke tests, is in [`docs/runbook.md#setup`](docs/runbook.md#setup).
 
 **1. Log in and create resources**
 
@@ -153,7 +153,7 @@ pnpm run deploy -- --skip-smoke   # first deploy: no sink or API token yet
 curl https://<your-worker-domain>/healthz   # {"status":"ok","version":"<worker version id>"}
 ```
 
-`pnpm run deploy` runs [`scripts/deploy.mjs`](scripts/deploy.mjs): it records a restore point (D1 Time Travel bookmark and the live Worker version), builds the dashboard, applies remote D1 migrations, deploys the Worker, smoke-tests, and prints the exact rollback commands. Later deploys should run the smoke test; see [`docs/runbook/deploy.md`](docs/runbook/deploy.md). (`pnpm deploy` is a built-in pnpm command, so always use `pnpm run deploy`.)
+`pnpm run deploy` runs [`scripts/deploy.mjs`](scripts/deploy.mjs): it records a restore point (D1 Time Travel bookmark and the live Worker version), builds the dashboard, applies remote D1 migrations, deploys the Worker, smoke-tests, and prints the exact rollback commands. Later deploys should run the smoke test; see [`docs/runbook.md#deploy-and-smoke`](docs/runbook.md#deploy-and-smoke). (`pnpm deploy` is a built-in pnpm command, so always use `pnpm run deploy`.)
 
 Open `https://<your-worker-domain>/`, create the first admin on the onboarding page (it asks for `SETUP_TOKEN`), and continue in the dashboard: create a project, a destination, and a source, then add alert channels and review Settings › Storage (retention and backups).
 
@@ -216,7 +216,7 @@ gateway for Cloudflare Workers, and verify it runs locally.
    its output instead of changing code to make it pass.
 7. Stop. Do NOT run `wrangler login`, create Cloudflare resources, set secrets,
    or deploy unless I explicitly ask. If I do, follow README "Option B" and
-   `docs/runbook/setup.md` step by step, show me each command that changes my
+   `docs/runbook.md#setup` step by step, show me each command that changes my
    Cloudflare account before running it, and use `pnpm run deploy`
    (never `pnpm deploy`). If the Cloudflare API MCP server is connected, use it
    for account operations (README "Cloudflare operations with the Cloudflare
@@ -243,7 +243,7 @@ The first call opens an OAuth page where you choose the account and permissions.
 | Workers Builds triggers: build/deploy command, branch, path filters (`/accounts/{id}/builds/triggers`) | MCP `execute` |
 | Cloudflare product questions (Turnstile, Queues limits, Workflows) | MCP `docs` |
 | Local dev, local D1 migrations, `wrangler types` | `pnpm` scripts (wrangler) |
-| Deploys, remote migrations, rollback | `pnpm run deploy` and [`docs/runbook/`](docs/runbook/), never hand-made API calls, so the restore point and smoke result are recorded |
+| Deploys, remote migrations, rollback | `pnpm run deploy` and [`docs/runbook.md`](docs/runbook.md), never hand-made API calls, so the restore point and smoke result are recorded |
 
 Pass the account ID explicitly when the OAuth grant covers several accounts. A write through `execute` changes the live account immediately: review every call that creates, updates, or deletes something (above all SQL against a production D1) before approving it.
 
@@ -263,14 +263,13 @@ Each request Hookflare sends to your backend includes:
 
 | Header | Purpose |
 |---|---|
-| `webhook-id`, `webhook-timestamp`, `webhook-signature` | Standard Webhooks signature, used to verify the request came from Hookflare |
+| `webhook-timestamp`, `webhook-signature` | Standard Webhooks timestamp and signature; verify together with `webhook-id` and the raw body |
 | `X-Webhook-Event-ID` | Stable event ID; **use it as your idempotency key** |
-| `X-Webhook-Delivery-ID` | ID of this delivery (a replay gets a new one) |
-| `X-Webhook-Attempt` | Attempt number, starting at 1 |
+| `webhook-id` | Delivery ID, stable across retry attempts; replay creates a new one |
 
-Return any `2xx` to acknowledge. Return `429` (optionally with `Retry-After`) or `5xx` to ask for a retry. Any other `4xx` or `3xx` marks the delivery as failed without retrying. Redirects are never followed.
+Return any `2xx` to acknowledge. Return `408`, `429` (optionally with `Retry-After`), or `5xx` to ask for a retry. Any other `4xx` or `3xx` marks the delivery as failed without retrying. Redirects are never followed.
 
-Retries on `408`/`429`/`5xx`, timeouts, and network errors use exponential backoff (30 s → 6 h by default, ±20% jitter, `Retry-After` honored on `429`), up to 20 attempts (~62 h window) by default. Per-destination `max_attempts`, `backoff_base_s`, and `backoff_max_s` override the defaults. Every retry carries the same `webhook-id`: deduplicate on it, because delivery is at-least-once. `3xx` and other `4xx` responses are final and never retried.
+Retries on `408`/`429`/`5xx`, timeouts, and network errors use exponential backoff (30 s → 6 h by default, ±20% jitter, `Retry-After` honored on `429`), up to 20 attempts by default (the total window depends on jitter and responses). Per-destination `max_attempts`, `backoff_base_s`, and `backoff_max_s` override the defaults. Every retry of a delivery carries the same `webhook-id`; replay creates a new one. Use `X-Webhook-Event-ID` for deduplication across replay. See the [integration contract](docs/contract.md). `3xx` and other `4xx` responses are final and never retried.
 
 Pausing a destination (`POST /api/admin/v1/destinations/:id/pause`) holds its deliveries with status `paused` without consuming attempts; resuming it (`POST /api/admin/v1/destinations/:id/resume`) releases them for delivery.
 
@@ -287,7 +286,7 @@ Pausing a destination (`POST /api/admin/v1/destinations/:id/pause`) holds its de
 | **M6: Production readiness** | Staging, deploy & rollback, benchmarks, backup/restore, runbook, uptime monitoring | Code done (1.0.0); live staging drills pending |
 | **M7: Built-in auth** | Username/password login, onboarding, API tokens, Turnstile (replaces Access) | Code done (2.0.0); unreleased |
 
-Full details: [`docs/superpowers/specs/2026-10-14-hookflare-roadmap.md`](docs/superpowers/specs/2026-10-14-hookflare-roadmap.md). The original system spec is in [`DESIGN.md`](DESIGN.md).
+Full details: [feature documentation](docs/README.md), [roadmap](docs/roadmap.md), and [architecture](docs/architecture.md).
 
 ### Out of scope
 
@@ -295,7 +294,7 @@ Hookflare is deliberately **not** an integration platform. The following are out
 
 ## Contributing
 
-1.0.0 is the first release, and feedback on the [roadmap](docs/superpowers/specs/2026-10-14-hookflare-roadmap.md) is very welcome. Please open an issue to discuss a change before you send a pull request.
+1.0.0 is the first release, and feedback on the [roadmap](docs/roadmap.md) is very welcome. Please open an issue to discuss a change before you send a pull request.
 
 ## Releases
 

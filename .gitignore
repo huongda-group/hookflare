@@ -10,7 +10,7 @@ apps/dashboard/playwright-report
 !.dev.vars.example
 .env*
 .DS_Store
-docs/superpowers/plans/
 .deploy/
 tools/bench/results/
 .restore/
+.superpowers/

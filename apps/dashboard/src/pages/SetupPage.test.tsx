@@ -115,7 +115,7 @@ describe("SetupPage", () => {
 		const guide = screen.getByRole("link", { name: /setup guide/i });
 		expect(guide).toHaveAttribute(
 			"href",
-			"https://github.com/huongda-group/hookflare/blob/main/docs/runbook/setup.md",
+			"https://github.com/huongda-group/hookflare/blob/main/docs/runbook.md#setup",
 		);
 	});
 

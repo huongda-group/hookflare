@@ -80,7 +80,7 @@
 			"database_name": "hookflare-staging",
 			// Staging D1 database. The all-zero ID is a placeholder on purpose:
 			// the real ID comes from `wrangler d1 create hookflare-staging` in
-			// the live staging setup step (docs/runbook/setup.md), which
+			// the live staging setup step (docs/runbook.md#setup), which
 			// replaces it. Do not deploy with the placeholder. Local dev and tests
 			// use local D1 and never contact it.
 			"database_id": "00000000-0000-0000-0000-000000000000"

@@ -24,7 +24,7 @@ import { useBackupSummary, useSettings } from "@/lib/queries/endpoints";
 import { qk } from "@/lib/queries/keys";
 
 const RUNBOOK_URL =
-	"https://github.com/huongda-group/hookflare/blob/main/docs/runbook/backup-restore.md";
+	"https://github.com/huongda-group/hookflare/blob/main/docs/runbook.md#backup-and-restore";
 
 const DAYS = [
 	["hot_retention_days", "Hot retention (days)"],
