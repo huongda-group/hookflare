@@ -5,7 +5,10 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { AuthLayout, focusFirstInvalidField } from "@/components/AuthLayout";
+import {
+	AuthLayout,
+	focusFirstInvalidField,
+} from "@/components/AuthLayout";
 import { PasswordField } from "@/components/PasswordField";
 import { FieldError } from "@/components/ProjectFormDialog";
 import { TurnstileWidget } from "@/components/TurnstileWidget";
@@ -109,8 +112,8 @@ export function SetupPage() {
 					</Button>
 				</div>
 			) : null}
-			<form onSubmit={submit} className="space-y-5">
-				<div className="space-y-2">
+			<form onSubmit={submit} className="space-y-4">
+				<div>
 					<Label htmlFor="setup-username">Username</Label>
 					<Input
 						id="setup-username"
@@ -133,7 +136,7 @@ export function SetupPage() {
 						message={errors.username?.message}
 					/>
 				</div>
-				<div className="space-y-2">
+				<div>
 					<PasswordField
 						id="setup-password"
 						label="Password"
@@ -156,7 +159,7 @@ export function SetupPage() {
 						message={errors.password?.message}
 					/>
 				</div>
-				<div className="space-y-2">
+				<div>
 					<PasswordField
 						id="setup-confirm"
 						label="Confirm password"
@@ -166,10 +169,7 @@ export function SetupPage() {
 						}
 						{...form.register("confirm")}
 					/>
-					<FieldError
-						id="setup-confirm-error"
-						message={errors.confirm?.message}
-					/>
+					<FieldError id="setup-confirm-error" message={errors.confirm?.message} />
 				</div>
 				{blocked ? null : (
 					<TurnstileWidget
@@ -187,7 +187,7 @@ export function SetupPage() {
 				<FieldError message={errors.root?.message} />
 				<Button
 					type="submit"
-					className="mt-2 h-11 w-full"
+					className="w-full"
 					disabled={
 						form.formState.isSubmitting ||
 						blocked ||
