@@ -332,7 +332,6 @@ export const loginRequest = z.strictObject({
 export const setupRequest = z.strictObject({
 	username,
 	password,
-	setup_token: z.string().min(1).max(256),
 	turnstile_token: z.string().max(2048).optional(),
 });
 /** `GET /auth/state` (spec M7). */
