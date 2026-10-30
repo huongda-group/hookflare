@@ -323,20 +323,20 @@ describe("built-in auth contracts", () => {
 		).toBe(true);
 	});
 
-	it("setupRequest requires a setup_token", () => {
-		expect(
-			setupRequest.safeParse({
-				username: "ops.bot",
-				password: "pässwörd 12345",
-			}).success,
-		).toBe(false);
+	it("setupRequest needs only username and password", () => {
 		expect(
 			setupRequest.parse({
 				username: " Ops.Bot ",
 				password: "pässwörd 12345",
-				setup_token: "t".repeat(24),
 			}),
-		).toMatchObject({ username: "ops.bot", setup_token: "t".repeat(24) });
+		).toMatchObject({ username: "ops.bot" });
+		expect(
+			setupRequest.safeParse({
+				username: "ops.bot",
+				password: "pässwörd 12345",
+				extra: "stale",
+			}).success,
+		).toBe(false);
 	});
 
 	it("createApiTokenRequest rejects expires_in_days below 1", () => {

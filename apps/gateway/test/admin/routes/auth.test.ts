@@ -147,10 +147,10 @@ describe("GET /auth/state", () => {
 });
 
 describe("POST /auth/setup", () => {
-	it("rejects a stale setup_token with 400", async () => {
+	it("rejects an unknown field with 400", async () => {
 		const deps = testDeps();
 		const res = await request(deps, "POST", "/auth/setup", {
-			body: { username: "admin", password: PASSWORD, setup_token: "stale" },
+			body: { username: "admin", password: PASSWORD, extra: "stale" },
 		});
 		expect(res.status).toBe(400);
 	});
