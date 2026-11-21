@@ -5,10 +5,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import {
-	AuthLayout,
-	focusFirstInvalidField,
-} from "@/components/AuthLayout";
+import { AuthLayout, focusFirstInvalidField } from "@/components/AuthLayout";
 import { PasswordField } from "@/components/PasswordField";
 import { FieldError } from "@/components/ProjectFormDialog";
 import { TurnstileWidget } from "@/components/TurnstileWidget";
@@ -112,8 +109,8 @@ export function SetupPage() {
 					</Button>
 				</div>
 			) : null}
-			<form onSubmit={submit} className="space-y-4">
-				<div>
+			<form onSubmit={submit} className="flex flex-col gap-5">
+				<div className="grid gap-2">
 					<Label htmlFor="setup-username">Username</Label>
 					<Input
 						id="setup-username"
@@ -125,10 +122,7 @@ export function SetupPage() {
 						}
 						{...form.register("username")}
 					/>
-					<p
-						id="setup-username-help"
-						className="mt-1 text-sm text-muted-foreground"
-					>
+					<p id="setup-username-help" className="text-sm text-muted-foreground">
 						3–64 characters: lowercase letters, numbers, and . _ @ + -
 					</p>
 					<FieldError
@@ -136,7 +130,7 @@ export function SetupPage() {
 						message={errors.username?.message}
 					/>
 				</div>
-				<div>
+				<div className="grid gap-2">
 					<PasswordField
 						id="setup-password"
 						label="Password"
@@ -148,10 +142,7 @@ export function SetupPage() {
 						}
 						{...form.register("password")}
 					/>
-					<p
-						id="setup-password-help"
-						className="mt-1 text-sm text-muted-foreground"
-					>
+					<p id="setup-password-help" className="text-sm text-muted-foreground">
 						12–256 characters. Leading and trailing spaces are kept.
 					</p>
 					<FieldError
@@ -159,7 +150,7 @@ export function SetupPage() {
 						message={errors.password?.message}
 					/>
 				</div>
-				<div>
+				<div className="grid gap-2">
 					<PasswordField
 						id="setup-confirm"
 						label="Confirm password"
@@ -169,7 +160,10 @@ export function SetupPage() {
 						}
 						{...form.register("confirm")}
 					/>
-					<FieldError id="setup-confirm-error" message={errors.confirm?.message} />
+					<FieldError
+						id="setup-confirm-error"
+						message={errors.confirm?.message}
+					/>
 				</div>
 				{blocked ? null : (
 					<TurnstileWidget
@@ -187,7 +181,7 @@ export function SetupPage() {
 				<FieldError message={errors.root?.message} />
 				<Button
 					type="submit"
-					className="w-full"
+					className="h-11 w-full"
 					disabled={
 						form.formState.isSubmitting ||
 						blocked ||

@@ -60,10 +60,83 @@ test("navigation has no page-level overflow from 1440px down to 320px", async ({
 	}
 });
 
+test("the delivery path stays readable on desktop and out of the way on mobile", async ({
+	page,
+}) => {
+	const app = await installApp(page, {
+		authState: { setup_required: true, turnstile_site_key: null },
+	});
+	const intro = page.getByRole("region", { name: "About Hookflare" });
+	const path = intro.getByRole("list", { name: "Delivery path" });
+	await page.setViewportSize({ width: 1024, height: 900 });
+	await page.goto("/setup");
+	await expect(
+		intro.getByRole("heading", { name: "Trace every webhook delivery." }),
+	).toBeVisible();
+	await expect(path.getByRole("listitem")).toHaveText([
+		/Event\s+received/i,
+		/Delivery\s+tracked/i,
+		/Attempt\s+recorded/i,
+	]);
+	expect(await pageOverflow(page)).toBe(0);
+
+	app.update({
+		authState: { setup_required: false, turnstile_site_key: null },
+	});
+	await page.setViewportSize({ width: 1440, height: 900 });
+	await page.goto("/login");
+	await expect(path).toBeVisible();
+	await page.setViewportSize({ width: 390, height: 900 });
+	await expect(intro).toBeHidden();
+	await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+	expect(await pageOverflow(page)).toBe(0);
+});
+
+test("setup separates labels, inputs, and adjacent fields on mobile", async ({
+	page,
+}) => {
+	await installApp(page, {
+		authState: { setup_required: true, turnstile_site_key: null },
+	});
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.goto("/setup");
+	for (const name of ["Username", "Password", "Confirm password"]) {
+		const input = page.getByLabel(name, { exact: true });
+		const spacing = await input.evaluate((element: HTMLInputElement) => {
+			const label = element.labels?.[0];
+			const help = document.getElementById(`${element.id}-help`);
+			const { top, bottom } = element.getBoundingClientRect();
+			return {
+				label: label ? top - label.getBoundingClientRect().bottom : 0,
+				help: help ? help.getBoundingClientRect().top - bottom : null,
+			};
+		});
+		expect
+			.soft(spacing.label, `${name} label-to-input gap`)
+			.toBeGreaterThanOrEqual(8);
+		if (spacing.help !== null) {
+			expect
+				.soft(spacing.help, `${name} input-to-help gap`)
+				.toBeGreaterThanOrEqual(8);
+		}
+	}
+	for (const [help, next] of [
+		["setup-username-help", "setup-password"],
+		["setup-password-help", "setup-confirm"],
+	]) {
+		const helpBox = await page.locator(`#${help}`).boundingBox();
+		const labelBox = await page.locator(`label[for="${next}"]`).boundingBox();
+		expect(
+			labelBox && helpBox ? labelBox.y - helpBox.y - helpBox.height : 0,
+		).toBeGreaterThanOrEqual(20);
+	}
+	expect(await pageOverflow(page)).toBe(0);
+});
+
 test("setup and login render explicit states and stay keyboard operable", async ({
 	page,
 }) => {
-	// Setup: onboarding open, token help present, submit by keyboard.
+	// Setup: onboarding open, bot protection notice, keyboard-operable fields.
 	const setup = await installApp(page, {
 		role: "admin",
 		authState: { setup_required: true, turnstile_site_key: null },
@@ -75,6 +148,9 @@ test("setup and login render explicit states and stay keyboard operable", async 
 	).toBeVisible();
 	await expect(
 		page.getByRole("button", { name: "Create admin account" }),
+	).toBeVisible();
+	await expect(
+		page.getByText("Bot protection is off.", { exact: true }),
 	).toBeVisible();
 	await page.getByLabel("Username", { exact: true }).fill("e2e-admin");
 	const password = page.getByLabel("Password", { exact: true });

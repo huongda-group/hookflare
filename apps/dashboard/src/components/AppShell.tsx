@@ -159,9 +159,11 @@ export function AppShell() {
 						aria-label="Hookflare home"
 						className="mb-7 flex items-center gap-2.5 rounded-md px-3 text-xl font-semibold tracking-tight text-foreground"
 					>
-						<span className="grid size-[29px] place-items-center rounded-lg bg-brand text-white">
-							<Webhook className="size-5" aria-hidden="true" />
-						</span>
+						<img
+							src="/favicon.svg"
+							alt=""
+							className="size-[29px] shrink-0 object-contain"
+						/>
 						hookflare
 					</Link>
 					<div className="mb-7 flex items-center gap-2.5 rounded-lg border border-border bg-surface px-2.5 py-2.5">

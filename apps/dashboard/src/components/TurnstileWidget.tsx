@@ -44,9 +44,8 @@ function loadTurnstile(): Promise<void> {
 
 /**
  * The explicit-render Turnstile widget (spec §6.5.1, §8.1–8.2). States are
- * explicit: loading while the script renders, off (a neutral notice naming
- * what still protects the form), and error/expiry (a blocking server error
- * is surfaced, never a UI bypass). Tokens are single-use, so the page bumps
+ * explicit: loading while the script renders, off (a neutral notice), and
+ * error/expiry (no UI bypass). Tokens are single-use, so the page bumps
  * `resetKey` after every failed submit and the yielded token is dropped.
  */
 export function TurnstileWidget({
@@ -62,7 +61,9 @@ export function TurnstileWidget({
 }) {
 	const container = useRef<HTMLDivElement>(null);
 	const widgetId = useRef<string | null>(null);
-	const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+	const [status, setStatus] = useState<"loading" | "ready" | "error">(
+		"loading",
+	);
 	// The callback is read through a ref so a re-render never re-renders the widget.
 	const onTokenRef = useRef(onToken);
 	useEffect(() => {
@@ -106,11 +107,7 @@ export function TurnstileWidget({
 
 	if (siteKey === null)
 		return (
-			<p className="text-sm text-muted-foreground">
-				{action === "setup"
-					? "Bot protection is off. The setup token is still required."
-					: "Bot protection is off."}
-			</p>
+			<p className="text-sm text-muted-foreground">Bot protection is off.</p>
 		);
 	if (status === "error")
 		return (

@@ -1,12 +1,11 @@
-import {
-	ArrowDownRight,
-	ArrowRight,
-	ListChecks,
-	Radio,
-	Send,
-	ShieldCheck,
-} from "lucide-react";
+import { ArrowRight, ListChecks, Radio, Send, ShieldCheck } from "lucide-react";
 import type { JSX, ReactNode } from "react";
+
+const deliverySteps = [
+	{ label: "Event", detail: "received", Icon: Radio },
+	{ label: "Delivery", detail: "tracked", Icon: Send },
+	{ label: "Attempt", detail: "recorded", Icon: ListChecks },
+] as const;
 
 /**
  * Shared first-run and sign-in frame. The illustration describes the actual
@@ -25,9 +24,11 @@ export function AuthLayout({
 		<main className="min-h-screen bg-canvas text-foreground">
 			<div className="mx-auto flex min-h-screen w-full max-w-[1280px] flex-col px-5 py-6 sm:px-8 lg:px-12 lg:py-9">
 				<header className="flex items-center gap-3">
-					<span className="flex size-9 items-center justify-center rounded-lg bg-brand text-white shadow-[0_3px_10px_#253b6926]">
-						<ArrowDownRight className="size-5" aria-hidden="true" />
-					</span>
+					<img
+						src="/favicon.svg"
+						alt=""
+						className="size-9 shrink-0 object-contain"
+					/>
 					<span className="text-xl font-semibold tracking-[-0.03em]">
 						hookflare
 					</span>
@@ -37,72 +38,50 @@ export function AuthLayout({
 						className="hidden min-w-0 lg:block"
 						aria-label="About Hookflare"
 					>
-						<p className="mb-5 inline-flex items-center gap-2 text-sm font-medium text-action">
+						<p className="mb-4 inline-flex items-center gap-2 text-xs font-semibold tracking-[0.12em] text-info uppercase">
 							<Radio className="size-4" aria-hidden="true" /> Webhook operations
 						</p>
-						<h2 className="max-w-[16ch] text-[clamp(2.5rem,4vw,3.75rem)] leading-[1.09] font-semibold tracking-[-0.035em]">
-							Every delivery has a story.
+						<h2 className="max-w-[21ch] text-[clamp(2rem,3.4vw,3.25rem)] leading-[1.1] font-semibold tracking-[-0.04em] text-balance">
+							Trace every webhook delivery.
 						</h2>
-						<p className="mt-6 max-w-[45ch] text-base leading-7 text-muted-foreground">
-							Receive webhooks, deliver to your backends, and trace every
-							attempt from one clear operations view.
+						<p className="mt-4 max-w-[43ch] text-base leading-7 text-muted-foreground">
+							Receive webhooks, route them to your backends, and inspect every
+							delivery attempt.
 						</p>
-						<div className="mt-12 w-full overflow-hidden rounded-xl border border-border bg-white shadow-[0_12px_32px_#2027330a]">
-							<div className="flex items-baseline justify-between gap-3 border-b border-border px-6 py-4">
-								<span className="text-sm font-semibold text-foreground">
+						<div className="mt-8 max-w-[30rem] rounded-lg border border-border bg-surface">
+							<div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border px-4 py-3 xl:px-5">
+								<h3 id="auth-delivery-path" className="text-sm font-semibold">
 									Delivery path
-								</span>
+								</h3>
 								<span className="text-xs text-muted-foreground">
-									A record of every step
+									From receipt to attempt
 								</span>
 							</div>
 							<ol
-								aria-label="Delivery path"
-								className="grid grid-cols-3 px-5 py-7"
+								aria-labelledby="auth-delivery-path"
+								className="grid grid-cols-3 gap-2 px-4 py-4 xl:px-5"
 							>
-								<li className="relative flex min-w-0 flex-col items-center text-center">
-									<span
-										aria-hidden="true"
-										className="absolute top-[22px] left-[calc(50%+28px)] w-[calc(100%-56px)] border-t border-border"
-									/>
-									<ArrowRight
-										aria-hidden="true"
-										className="absolute top-[15px] right-[-8px] size-4 bg-white text-muted-foreground"
-									/>
-									<span className="relative flex size-11 items-center justify-center rounded-xl bg-info-surface text-info">
-										<Radio className="size-5" aria-hidden="true" />
-									</span>
-									<span className="mt-3 text-sm font-semibold">Event</span>
-									<span className="mt-1 text-xs text-muted-foreground">
-										Received
-									</span>
-								</li>
-								<li className="relative flex min-w-0 flex-col items-center text-center">
-									<span
-										aria-hidden="true"
-										className="absolute top-[22px] left-[calc(50%+28px)] w-[calc(100%-56px)] border-t border-border"
-									/>
-									<ArrowRight
-										aria-hidden="true"
-										className="absolute top-[15px] right-[-8px] size-4 bg-white text-muted-foreground"
-									/>
-									<span className="relative flex size-11 items-center justify-center rounded-xl bg-info-surface text-info">
-										<Send className="size-5" aria-hidden="true" />
-									</span>
-									<span className="mt-3 text-sm font-semibold">Delivery</span>
-									<span className="mt-1 text-xs text-muted-foreground">
-										Tracked
-									</span>
-								</li>
-								<li className="flex min-w-0 flex-col items-center text-center">
-									<span className="flex size-11 items-center justify-center rounded-xl bg-info-surface text-info">
-										<ListChecks className="size-5" aria-hidden="true" />
-									</span>
-									<span className="mt-3 text-sm font-semibold">Attempt</span>
-									<span className="mt-1 text-xs text-muted-foreground">
-										Recorded
-									</span>
-								</li>
+								{deliverySteps.map(({ label, detail, Icon }, index) => (
+									<li key={label} className="min-w-0">
+										<div aria-hidden="true" className="flex items-center gap-2">
+											<span className="grid size-9 shrink-0 place-items-center rounded-md bg-info-surface text-info">
+												<Icon className="size-4" />
+											</span>
+											{index < deliverySteps.length - 1 && (
+												<span className="flex min-w-0 flex-1 items-center text-muted-foreground">
+													<span className="h-px flex-1 bg-border" />
+													<ArrowRight className="size-3 shrink-0" />
+												</span>
+											)}
+										</div>
+										<p className="mt-2 text-sm font-semibold">
+											{label}{" "}
+											<span className="block text-xs leading-5 font-normal text-muted-foreground">
+												{detail}
+											</span>
+										</p>
+									</li>
+								))}
 							</ol>
 						</div>
 					</section>

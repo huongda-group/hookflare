@@ -14,6 +14,8 @@ Sessions store a SHA-256 token hash in D1. The cookie is `hookflare_session`, Ht
 
 Public API prefix: `/api/admin/v1/auth`. Routes: `GET /state`, `POST /setup`, `POST /login`, `POST /logout`. The UI uses `/setup` and `/login`, safe local `next` navigation, explicit loading/configuration/errors, and inline invalid-credential feedback.
 
+On desktop, both screens show a shared introduction and an illustrative event → delivery → attempt path. The path does not indicate live system status. Narrow screens show only the auth card, and setup keeps labels, inputs, and help text grouped by field.
+
 Setup accepts `username`, `password`, and `turnstile_token` when required. There is no setup-token field or secret; legacy clients that still send `setup_token` fail strict validation with `400 invalid_request` once the request passes the Origin, rate-limit, and Turnstile checks.
 
 Tokenless setup keeps private self-hosting simple, but setup is first-come: anyone who can reach an uninitialized instance and pass its checks can claim the initial admin. Create that account before making the Worker URL public. Turnstile limits automated abuse; it does not identify the intended owner. See the [deployment runbook](runbook.md).

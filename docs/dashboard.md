@@ -43,11 +43,9 @@ Radii: `--radius-control: 0.5rem` (8px controls), `--radius-panel: 0.625rem` (10
 
 Dark/system themes and extra mobile-specific product scope are not implemented commitments. Fixture browser tests cover responsive containment at 390px, 1024px, and 1440px and approximate 200% zoom. Manual browser-zoom verification remains open. The separate smoke suite uses a real local Worker and D1; fixture tests do not.
 
-### Proposed logo exploration
+## Branding
 
-The dashboard already serves favicon and install icons from `public/`; the shell and auth layout display the lowercase `hookflare` wordmark. An optional future comparison could evaluate five alternate SVG marks: forwarding flow, connected nodes, retry loop, protected route, and an H monogram. Keep the treatments comparable with navy `#253B69`, blue `#245BDB`, and restrained geometry. The marks should remain distinct at small sizes and communicate webhook delivery and recovery without suggesting fan-out.
-
-If explored, keep the SVGs and a standalone comparison sheet outside application source. Review small-size legibility, independent SVG rendering, accessible titles, and wordmark consistency before deciding whether to replace the existing wordmark.
+The dashboard sidebar and the shared sign-in and setup layout use the same SVG mark as the browser favicon, alongside the lowercase `hookflare` wordmark. Browser fallback and install icons use the same artwork and are served from `apps/dashboard/public/`.
 
 ## Source and verification entry points
 
