@@ -1,10 +1,10 @@
 # Backups and restore
 
-[Documentation index](README.md) · Source review: 2026-10-30. Implementation descriptions are based on this checkout; no live deployment or fresh application test result is implied.
+[Documentation index](README.md)
 
 ## Business rules and current behavior
 
-Backups support operational recovery, while archives support retention. A scheduled BackupWorkflow dumps tables to R2, writes and verifies a manifest, and applies backup retention. Defaults enable backup with 35-day retention.
+Backups support operational recovery, while [archives](archives.md) support retention. `BackupWorkflow` dumps tables to R2, writes and verifies a manifest, and applies backup retention. Scheduled runs start daily at 20:00 UTC while enabled. Backups are enabled by default with 35-day retention.
 
 The R2 export reads tables over time and is not a point-in-time snapshot. Restore must handle missing parents, report skipped orphans, and pass verification before cutover. D1 Time Travel is a separate restore path.
 
@@ -30,4 +30,3 @@ The files below define behavior and existing checks; listing a test does not mea
 - [scripts/restore-backup.mjs](../scripts/restore-backup.mjs)
 - [scripts/verify-restore.mjs](../scripts/verify-restore.mjs)
 - [apps/gateway/test/jobs/backup-run.test.ts](../apps/gateway/test/jobs/backup-run.test.ts)
-

@@ -1,6 +1,6 @@
 # API tokens and automation
 
-[Documentation index](README.md) · Source review: 2026-10-30. Implementation descriptions are based on this checkout; no live deployment or fresh application test result is implied.
+[Documentation index](README.md)
 
 ## Business rules and current behavior
 
@@ -16,7 +16,7 @@ Settings → Users opens the token dialog. Show the secret once with an explicit
 
 ## Ideas, boundaries, and open work
 
-Tokens have user-level permissions, not independent scopes. The historical Access service-token workflow is superseded.
+Tokens have user-level permissions, not independent scopes.
 
 ## Source and verification entry points
 
@@ -26,4 +26,3 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/gateway/src/admin/auth/session.ts](../apps/gateway/src/admin/auth/session.ts)
 - [apps/dashboard/src/components/ApiTokensDialog.tsx](../apps/dashboard/src/components/ApiTokensDialog.tsx)
 - [apps/gateway/test/admin/routes/api-tokens.test.ts](../apps/gateway/test/admin/routes/api-tokens.test.ts)
-

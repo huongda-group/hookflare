@@ -1,6 +1,6 @@
 # Destinations and backend protection
 
-[Documentation index](README.md) · Source review: 2026-10-30. Implementation descriptions are based on this checkout; no live deployment or fresh application test result is implied.
+[Documentation index](README.md)
 
 ## Business rules and current behavior
 
@@ -28,4 +28,3 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/gateway/src/delivery/limiter.ts](../apps/gateway/src/delivery/limiter.ts)
 - [apps/dashboard/src/pages/endpoints/DestinationDetailPage.tsx](../apps/dashboard/src/pages/endpoints/DestinationDetailPage.tsx)
 - [apps/gateway/test/admin/destinations.test.ts](../apps/gateway/test/admin/destinations.test.ts)
-

@@ -1,33 +1,33 @@
 # Webhook and admin API contract
 
-[Documentation index](README.md) · Source review: 2026-10-30. Implementation descriptions are based on this checkout; no live deployment or fresh application test result is implied.
+[Documentation index](README.md)
 
 ## Business rules and current behavior
 
-This document describes the integration contract, not a commercial agreement. Public ingress is `POST /in/:sourceId`; admin endpoints use `/api/admin/v1`; `/healthz` reports runtime health.
+This is the wire contract for webhook senders, destination backends, and admin API clients. Public ingress is `POST /in/:sourceId`; admin endpoints use `/api/admin/v1`; `/healthz` reports runtime health.
 
 | Ingress result | Meaning |
 | --- | --- |
-| 202 | Persisted and enqueued, or persisted as paused for a paused destination |
-| 200 with `duplicate: true` | Existing provider event ID for this source |
+| 202 with `event_id` | Persisted and enqueued, or persisted as paused for a paused destination |
+| 200 with `duplicate: true` and `event_id` | Reuses the existing Hookflare event for this source and provider event ID |
 | 400 | Invalid request, such as an interrupted body read |
 | 401 | Source authentication failed |
 | 404 | Source or related admission configuration is unavailable |
 | 413 | Body exceeds the configured limit |
 | 429 | Rate limited |
-| 503 | Required persistence/queue dependency failed; a persisted event may still be recovered |
+| 503 | Required dependency unavailable, such as storage, queue, or an auth secret that could not be loaded; a persisted event may still be recovered |
 
-A 202 is not backend delivery confirmation. Clients must handle retries and duplicate events.
+A `202` is not backend delivery confirmation. A `503` after persistence does not mean the event was lost: reconciliation can still enqueue it. If you retry the request, reuse the provider event ID when [the source](sources.md) is configured to extract it.
 
 ## Design and interaction
 
-Outbound signatures use Standard Webhooks v1: HMAC-SHA256 over the delivery ID, timestamp in seconds, and original body bytes. The actual generated headers are:
+Outbound signatures use Standard Webhooks v1: HMAC-SHA256 over the UTF-8 prefix `<delivery-id>.<timestamp>.` followed by the original body bytes. Verify against the raw body, not parsed and re-serialized JSON. The generated headers are:
 
 | Header | Meaning |
 | --- | --- |
 | `webhook-id` | Delivery ID; stable across attempts of that delivery |
 | `webhook-timestamp` | Signature timestamp in seconds |
-| `webhook-signature` | One or more `v1,` signatures during secret rotation |
+| `webhook-signature` | One `v1,<base64>` signature normally; two space-separated signatures during the rotation grace window, current secret first |
 | `X-Webhook-Event-ID` | Event ID; stable across original delivery and replay |
 | `User-Agent` | `Hookflare/1` |
 
@@ -35,11 +35,11 @@ Replay produces a new `webhook-id`. Choose event-level deduplication when the bu
 
 A backend 2xx completes delivery. 408, 429, 5xx, timeout, and network errors are retryable within budget; 3xx and other 4xx are final. Redirects are not followed. `Retry-After` is considered for 429.
 
-Admin bodies and responses use the shared Zod/TypeScript contracts below. Paginated endpoints expose `data` and `next_cursor`; preserve opaque cursors and reset them when filters change. Auth accepts a session cookie or Bearer token, not both. Error bodies use `error`, with validation issues where applicable. Use each feature's route document and the actual schema for exact fields, limits, and exceptions.
+Admin bodies and responses use the shared Zod/TypeScript contracts below. Paginated endpoints expose `data` and `next_cursor`; preserve opaque cursors and reset them when filters change. On protected routes, use a [session cookie](login.md) or [Bearer token](api-tokens.md), not both (`400 ambiguous_credentials`). Cookie-authenticated mutations require a matching `Origin`. Error bodies use `error`, with validation issues where applicable. Use each feature's route document and the actual schema for exact fields, limits, and exceptions.
 
 ## Ideas, boundaries, and open work
 
-The original system specification contained proposed headers and API paths that differ from the implementation. This current contract follows the source. Generated OpenAPI documentation is not currently provided.
+Generated OpenAPI documentation is not currently provided.
 
 ## Source and verification entry points
 
@@ -49,6 +49,6 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/gateway/src/delivery/consumer.ts](../apps/gateway/src/delivery/consumer.ts)
 - [apps/gateway/src/ingress/route.ts](../apps/gateway/src/ingress/route.ts)
 - [apps/gateway/src/admin/router.ts](../apps/gateway/src/admin/router.ts)
+- [apps/gateway/src/admin/auth/session.ts](../apps/gateway/src/admin/auth/session.ts)
 - [packages/shared/src/admin.ts](../packages/shared/src/admin.ts)
 - [apps/gateway/test/core/sign.test.ts](../apps/gateway/test/core/sign.test.ts)
-

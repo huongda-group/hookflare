@@ -1,6 +1,6 @@
 # Users and permissions
 
-[Documentation index](README.md) · Source review: 2026-10-30. Implementation descriptions are based on this checkout; no live deployment or fresh application test result is implied.
+[Documentation index](README.md)
 
 ## Business rules and current behavior
 
@@ -33,4 +33,3 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/dashboard/src/pages/settings/UsersTab.tsx](../apps/dashboard/src/pages/settings/UsersTab.tsx)
 - [apps/gateway/test/admin/rbac-matrix.test.ts](../apps/gateway/test/admin/rbac-matrix.test.ts)
 - [apps/gateway/test/admin/users.test.ts](../apps/gateway/test/admin/users.test.ts)
-

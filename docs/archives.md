@@ -1,6 +1,6 @@
 # Archives and retention
 
-[Documentation index](README.md) · Source review: 2026-10-30. Implementation descriptions are based on this checkout; no live deployment or fresh application test result is implied.
+[Documentation index](README.md)
 
 ## Business rules and current behavior
 
@@ -30,4 +30,3 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/gateway/src/admin/routes/archives.ts](../apps/gateway/src/admin/routes/archives.ts)
 - [apps/dashboard/src/pages/ArchivesPage.tsx](../apps/dashboard/src/pages/ArchivesPage.tsx)
 - [apps/gateway/test/jobs/archive-verify-purge.test.ts](../apps/gateway/test/jobs/archive-verify-purge.test.ts)
-

@@ -1,6 +1,6 @@
 # Delivery, retry, and recovery state
 
-[Documentation index](README.md) · Source review: 2026-10-30. Implementation descriptions are based on this checkout; no live deployment or fresh application test result is implied.
+[Documentation index](README.md)
 
 ## Business rules and current behavior
 
@@ -30,4 +30,3 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/gateway/src/core/policy.ts](../apps/gateway/src/core/policy.ts)
 - [apps/gateway/src/jobs/reconcile.ts](../apps/gateway/src/jobs/reconcile.ts)
 - [apps/gateway/test/delivery/consumer.test.ts](../apps/gateway/test/delivery/consumer.test.ts)
-

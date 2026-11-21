@@ -63,9 +63,15 @@ node scripts/check-migrations.mjs --base origin/main
 pnpm exec wrangler d1 migrations list --remote --config <config>
 ```
 
-Normally the deploy script applies migrations. A contract migration, Durable Object migration, or incompatible Workflow-class change can make old code unusable: [roll forward](#rollback) instead of assuming Worker rollback is safe. The auth migration renames email identity columns to username/actor; a 1.x Worker cannot use that migrated admin schema.
+Normally the deploy script applies migrations. A contract migration, Durable Object migration, or incompatible Workflow-class change can make old code unusable: [roll forward](#rollback) instead of assuming Worker rollback is safe.
 
-The 1.0.0 baseline squash only fits databases that did not apply the removed pre-release files. Do not apply it over those tables or squash a database with real data without a separate migration/recovery plan. Current files: [migrations](../apps/gateway/migrations), [migration checker](../scripts/check-migrations.mjs).
+The baseline `0000_init.sql` only fits databases that did not apply the removed pre-release files. Do not apply it over those tables or squash a database with real data without a separate migration/recovery plan. Current files: [migrations](../apps/gateway/migrations), [migration checker](../scripts/check-migrations.mjs).
+
+### Upgrading from 1.x
+
+Before replacing an Access-backed deployment, record the D1 restore point and keep the Worker private through onboarding. The auth migrations rename `users.email` to `username` and `actor_email` to `actor` in `audit_logs` and `test_deliveries`, preserving existing values. Migrated users have no password until one is set; service identities are disabled. The migrated admin schema is incompatible with a 1.x Worker.
+
+After deploy, [create the first admin](login.md) before making the Worker URL public. Set passwords for other users who should have access, and [issue API tokens](api-tokens.md) for automation. Cloudflare Access can remain as an outer network gate, but its JWT does not sign users in to Hookflare. See [rollback](#rollback) before restoring older code.
 
 ## Rollback
 
@@ -84,7 +90,7 @@ Use the previous version from the deploy record, then smoke-test the same enviro
 
 ## Backup and restore
 
-Backup runs daily at 20:00 UTC while enabled; default retention is 35 days. Inspect Settings → Storage or `GET /api/admin/v1/backups/summary`; start a manual run with `POST /api/admin/v1/backups/run`. Only one run may be active. Turning the setting off does not stop an active workflow; termination is a separate Workflows action. Only verified backups are recovery candidates, not `expiring` or partial copies.
+Inspect Settings → Storage for backup status or to start a manual run. See [backups and restore](backup-restore.md) for the schedule, defaults, and API. Only one run may be active. Turning the setting off does not stop an active workflow; termination is a separate Workflows action. Only verified backups are recovery candidates, not `expiring` or partial copies.
 
 ### Path A: Time Travel
 
@@ -175,8 +181,9 @@ If all admin access is lost, inspect usernames, roles, disabled state, and wheth
 
 | Acceptance | Status |
 | --- | --- |
-| Staging rollback, restore A/B, monitoring/canary | Pending — no live evidence recorded |
-| Benchmark B6 and recommended limits; production-readiness rollout | Pending in repository release notes |
+| Staging setup, rollback, restore A/B, monitoring/canary | Pending — no live evidence recorded |
+| Throughput benchmark and recommended limits | Pending — no results recorded |
+| Production-readiness rollout | Pending — no acceptance recorded |
 
 Record dated results here when performed: UTC times, environment, versions, restore point/backup prefix, exit codes, smoke event/delivery IDs, orphan counts, surprises, and corrective actions; never token values. Rollback must demonstrate failing smoke then successful recovery. Restore must demonstrate data verification plus smoke and record recovery time (RTO) and lost-data window (RPO). Monitoring must demonstrate notification and recovery. Use scratch resources for production backup drills.
 

@@ -1,6 +1,6 @@
 # Alerts and notification channels
 
-[Documentation index](README.md) · Source review: 2026-10-30. Implementation descriptions are based on this checkout; no live deployment or fresh application test result is implied.
+[Documentation index](README.md)
 
 ## Business rules and current behavior
 
@@ -10,7 +10,7 @@ Admins configure rules and Discord, Slack, or Telegram channels. Channel configu
 
 ## Design and interaction
 
-UI `/alerts` and `/alerts/:alertId` show incident metadata and notification history. Settings → Alerts edits rules and channels. API groups are `/api/admin/v1/alerts` and `/api/admin/v1/alert-channels`; channel operations include create/update/delete and test.
+UI `/alerts` and `/alerts/:alertId` show incident metadata and notification history. Reading incidents via `/api/admin/v1/alerts` requires `events.read`. Settings → Alerts edits rules and channels; `/api/admin/v1/alert-channels` requires `settings.manage` for list, create, update, delete, and test.
 
 A channel test result must not imply the incident rules or external monitoring are all healthy. Display notification errors and retry/recovery affordances distinctly from webhook delivery failures.
 
@@ -28,4 +28,3 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/gateway/src/admin/routes/alert-channels.ts](../apps/gateway/src/admin/routes/alert-channels.ts)
 - [apps/dashboard/src/pages/AlertDetailPage.tsx](../apps/dashboard/src/pages/AlertDetailPage.tsx)
 - [apps/gateway/test/jobs/alerts-rules.test.ts](../apps/gateway/test/jobs/alerts-rules.test.ts)
-

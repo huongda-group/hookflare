@@ -8,10 +8,12 @@ Read this index first, then only the feature pages relevant to the task. Open li
 
 ## How to read and maintain these documents
 
-- **Current behavior:** feature pages describe business rules and the checked-in implementation. Linked code/schema determines exact wire behavior; resolve drift explicitly instead of silently treating an old proposal as shipped.
+- **Current behavior:** this directory is the canonical documentation for the checked-in implementation. Each feature has one owning page. Link to that page instead of repeating its rules. Use linked code and schema to verify exact behavior.
 - **Design:** each feature includes UI/technical decisions and links to its implementation and tests.
 - **Ideas and open work:** explicitly scoped as backlog, non-goals, or pending acceptance. They are not implemented promises.
-- **Operations:** use the runbook for executable deployment/recovery procedures; preserve pending drill markers.
+- **Operations:** use the runbook for deployment, upgrades, and recovery. A source or test link is not evidence of live acceptance; preserve drill markers until a result is recorded.
+
+For onboarding and account management, start with [login](login.md), [profile](profile.md), [users](users.md), or [API tokens](api-tokens.md). For integration, start with the [wire contract](contract.md), then follow [sources](sources.md) or [delivery](delivery.md) for lifecycle details.
 
 ## Features
 
@@ -36,14 +38,13 @@ Read this index first, then only the feature pages relevant to the task. Open li
 | [backup-restore.md](backup-restore.md) | Backups and restore |
 | [settings.md](settings.md) | Settings and policy defaults |
 | [audit.md](audit.md) | Audit trail |
-| [dashboard.md](dashboard.md) | Dashboard design system |
-| [dashboard-reliability-console.md](dashboard-reliability-console.md) | Approved Reliability Console direction and [implementation plan](dashboard-reliability-console-plan.md) |
+| [dashboard.md](dashboard.md) | Reliability Console, design system, and UI verification |
 | [operations.md](operations.md) | Deployment, operations, and verification |
-| [roadmap.md](roadmap.md) | Roadmap, design decisions, and open work |
+| [roadmap.md](roadmap.md) | Open work and backlog |
 
 ## Operations and releases
 
 - [Operations runbook](runbook.md)
-- [Release history](../CHANGELOG.md)
+- [Release index](../CHANGELOG.md): versions and release links, not feature documentation
 
-Keep new feature documentation here, with business rules, current behavior, design, open ideas, and source/test links. Update the relevant feature instead of creating duplicate module docs or date/milestone-led specifications. README at repository root remains the quick start; CLAUDE.md remains contributor/agent guidance.
+Keep new feature documentation here, with business rules, current behavior, design rationale, open ideas, and source/test links. Record lasting decisions in the relevant feature page rather than keeping duplicate specs or task checklists after their work is done. README at repository root remains the quick start; CLAUDE.md remains contributor/agent guidance.

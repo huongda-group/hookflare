@@ -1,6 +1,6 @@
 # Product and business model
 
-[Documentation index](README.md) · Source review: 2026-10-30. Implementation descriptions are based on this checkout; no live deployment or fresh application test result is implied.
+[Documentation index](README.md)
 
 ## Business rules and current behavior
 
@@ -8,7 +8,7 @@ Hookflare receives inbound webhooks, persists them, and delivers them to a confi
 
 One deployment is one environment. A project groups sources and destinations. A source selects one destination; an event is an accepted input; a delivery is one delivery lifecycle; an attempt is one outbound HTTP call. Replay creates another delivery for the same event.
 
-Global roles are viewer, operator, and admin. They describe repository permissions, not research personas. See [users](users.md) for the permission matrix.
+Global roles are viewer, operator, and admin. See [users](users.md) for the permission matrix.
 
 ## Design and interaction
 
@@ -18,7 +18,7 @@ Reliability and auditability take priority. Keep event, delivery, and attempt di
 
 ## Ideas, boundaries, and open work
 
-Payload transformation, fan-out, workflow editors, SaaS billing, and realtime WebSocket dashboards are out of scope. Provider presets, per-project permissions, and restoring archived events are backlog ideas, not shipped capabilities. See [roadmap](roadmap.md).
+Payload transformation, fan-out, workflow editors, SaaS billing, and realtime WebSocket dashboards are out of scope. See [roadmap](roadmap.md) for open work.
 
 ## Source and verification entry points
 
@@ -27,4 +27,3 @@ The files below define behavior and existing checks; listing a test does not mea
 - [README.md](../README.md)
 - [apps/gateway/src/core/db/schema.ts](../apps/gateway/src/core/db/schema.ts)
 - [apps/dashboard/src/components/AppNavigation.tsx](../apps/dashboard/src/components/AppNavigation.tsx)
-

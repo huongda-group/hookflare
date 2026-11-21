@@ -1,6 +1,6 @@
 # Deployment, operations, and verification
 
-[Documentation index](README.md) · Source review: 2026-10-30. Implementation descriptions are based on this checkout; no live deployment or fresh application test result is implied.
+[Documentation index](README.md)
 
 ## Business rules and current behavior
 
@@ -18,7 +18,7 @@ Validation layers: unit/integration tests for behavior, fault injection for part
 
 ## Ideas, boundaries, and open work
 
-The repository's release notes retain pending staging drills, B6/recommended limits, and production-readiness acceptance. Do not mark them completed during a documentation-only reorganization.
+See [runbook drills](runbook.md#drills) for outstanding live staging, benchmark, and rollout acceptance.
 
 ## Source and verification entry points
 
@@ -31,4 +31,3 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/gateway/src/core/heartbeat.ts](../apps/gateway/src/core/heartbeat.ts)
 - [tools/bench/src/run.ts](../tools/bench/src/run.ts)
 - [.github/workflows/ci.yml](../.github/workflows/ci.yml)
-

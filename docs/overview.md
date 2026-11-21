@@ -1,6 +1,6 @@
 # Overview and statistics
 
-[Documentation index](README.md) · Source review: 2026-10-30. Implementation descriptions are based on this checkout; no live deployment or fresh application test result is implied.
+[Documentation index](README.md)
 
 ## Business rules and current behavior
 
@@ -16,7 +16,7 @@ Reporting groups received, completed, success rate, terminal failures, a data-dr
 
 ## Ideas, boundaries, and open work
 
-Traffic tiers in historical design documents are capacity targets. No live latency or throughput promise follows from a chart or fixture screenshot.
+The rollup and recent-event views are not uptime probes or capacity measurements. See [operations](operations.md) for monitoring and benchmark evidence.
 
 ## Source and verification entry points
 
@@ -26,4 +26,5 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/gateway/src/core/db/stats.ts](../apps/gateway/src/core/db/stats.ts)
 - [apps/gateway/src/jobs/rollup.ts](../apps/gateway/src/jobs/rollup.ts)
 - [apps/dashboard/src/pages/OverviewPage.tsx](../apps/dashboard/src/pages/OverviewPage.tsx)
+- [apps/dashboard/src/pages/OverviewPage.test.tsx](../apps/dashboard/src/pages/OverviewPage.test.tsx)
 - [apps/gateway/test/admin/overview.test.ts](../apps/gateway/test/admin/overview.test.ts)

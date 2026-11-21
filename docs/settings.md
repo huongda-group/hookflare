@@ -1,6 +1,6 @@
 # Settings and policy defaults
 
-[Documentation index](README.md) · Source review: 2026-10-30. Implementation descriptions are based on this checkout; no live deployment or fresh application test result is implied.
+[Documentation index](README.md)
 
 ## Business rules and current behavior
 
@@ -27,4 +27,3 @@ The files below define behavior and existing checks; listing a test does not mea
 - [packages/shared/src/admin.ts](../packages/shared/src/admin.ts)
 - [apps/dashboard/src/pages/SettingsPage.tsx](../apps/dashboard/src/pages/SettingsPage.tsx)
 - [apps/gateway/test/admin/settings.test.ts](../apps/gateway/test/admin/settings.test.ts)
-

@@ -2,12 +2,9 @@
 
 **A reliable inbound webhook gateway that runs entirely on Cloudflare.**
 
-Hookflare sits between webhook providers (Stripe, GitHub, Shopify, your own services…) and your backends. It verifies each incoming webhook, persists it durably, and acknowledges it, all before your backend is involved. It then delivers the webhook with automatic retries, keeps a full delivery log, and lets you replay anything from a dashboard.
+Hookflare sits between webhook providers (Stripe, GitHub, Shopify, your own services…) and your backends. It authenticates incoming webhooks according to source configuration, persists them, and delivers them asynchronously. The dashboard lets operators inspect attempts and replay eligible events.
 
-> [!NOTE]
-> **1.0.0 — first release.** The full pipeline, admin API, dashboard, alerts, archival, backups, and the operations runbook are in place. See [`CHANGELOG.md`](CHANGELOG.md). The live staging drills (rollback, restore, canary) are still pending; runbook steps not yet run live are marked **(verify on staging in drill)**.
-
-Feature documentation: [`docs/README.md`](docs/README.md). Operations runbook: [`docs/runbook.md`](docs/runbook.md).
+[Feature documentation](docs/README.md) · [Operations runbook](docs/runbook.md) · [Release index](CHANGELOG.md)
 
 ---
 
@@ -15,22 +12,20 @@ Feature documentation: [`docs/README.md`](docs/README.md). Operations runbook: [
 
 When your backend goes down, deploys, or gets overloaded, webhook providers retry only for a limited time and then drop events. Hookflare decouples **receiving** a webhook from **processing** it:
 
-- **Never lose a webhook.** An event is acknowledged with `202 Accepted` only after it is stored in D1 (and R2 for large payloads) **and** enqueued. If any of those steps fails, the provider gets a `503` and retries.
-- **Survive long outages.** Exponential backoff with jitter keeps retrying for roughly 62 hours by default, so a backend that is down for two days still receives every event.
-- **See everything.** Every delivery attempt is logged with its HTTP status, latency, and error. You can search events, inspect payloads, and replay one or many from the dashboard.
+- **Decouple intake from delivery.** Accepted events are stored before delivery; the [wire contract](docs/contract.md) explains enqueue failures and paused destinations.
+- **Recover from outages.** Retryable failures use [configurable backoff and attempt limits](docs/delivery.md). Operators can investigate and replay eligible events after fixing the backend.
+- **Inspect delivery history.** Search events, inspect attempt outcomes, and reveal stored payloads with the appropriate permissions.
 - **Zero servers to run.** It is built only on Cloudflare managed services: Workers, D1, Queues, R2, Durable Objects, and Workflows.
 
 ## Features
 
 | Area | What you get |
 |---|---|
-| **Ingress** | One public URL per source; `hmac` (SHA-1/256/512, hex or base64) / `token` (header or query) / `none` verification on the raw body; deduplication by provider event ID (from a header or a JSON path); body size limit (1 MiB default, up to 10 MiB per source); 100 requests / 10 s per source |
-| **Delivery** | At-least-once delivery; [Standard Webhooks](https://www.standardwebhooks.com/) signing toward your backend; per-destination timeout, retry budget, backoff, concurrency, and rate limit |
-| **Retry & DLQ** | Retries on 408/429/5xx, network errors, and timeouts (honoring `Retry-After`); other 3xx/4xx responses fail immediately; events that exhaust their retries become dead-lettered |
-| **Recovery** | A cron reconciler re-enqueues stuck, lost, or never-enqueued deliveries; pausing an endpoint holds its deliveries and resuming it releases them |
-| **Dashboard** | Overview stats and trends, projects and endpoints, event search, delivery timelines, a failures / dead-letter view, single and bulk replay, alerts, archives, audit log, users, and settings |
-| **Security** | Username/password login with server-side sessions, API tokens for automation, Admin / Operator / Viewer roles, audit log for every change, encrypted secrets, SSRF protection, HTTPS-only destinations, credential headers stripped |
-| **Operations** | Alerts (consecutive failures, new dead letters, stuck deliveries, D1 storage, stuck archive, stale backup) to Discord, Slack, or Telegram; daily archival of old data to R2 with configurable retention; daily D1 backup to R2 with restore scripts; `/healthz` with a job heartbeat |
+| [Ingress](docs/sources.md) | Source authentication, provider event deduplication, and admission controls |
+| [Delivery](docs/delivery.md) | Signed, at-least-once delivery with configurable retries and recovery |
+| [Dashboard](docs/dashboard.md) | Overview, event investigation, and operator recovery |
+| [Security](docs/users.md) | Built-in login, API tokens, role-based permissions, and audit history |
+| [Operations](docs/operations.md) | Monitoring, alerts, archival, and backup/restore |
 
 ## How it works
 
@@ -252,54 +247,19 @@ For local development, run `pnpm dev` (create the first admin via the onboarding
 
 Production serves the dashboard from the same Worker. The first visit shows the onboarding page (`/setup`); afterwards login is username/password at `/login`, and automation uses API tokens (Settings › Users). `/in/*` and `/healthz` stay public.
 
-## Delivery contract for your backend
+## Integration
 
-Each request Hookflare sends to your backend includes:
-
-| Header | Purpose |
-|---|---|
-| `webhook-timestamp`, `webhook-signature` | Standard Webhooks timestamp and signature; verify together with `webhook-id` and the raw body |
-| `X-Webhook-Event-ID` | Stable event ID; **use it as your idempotency key** |
-| `webhook-id` | Delivery ID, stable across retry attempts; replay creates a new one |
-
-Return any `2xx` to acknowledge. Return `408`, `429` (optionally with `Retry-After`), or `5xx` to ask for a retry. Any other `4xx` or `3xx` marks the delivery as failed without retrying. Redirects are never followed.
-
-Retries on `408`/`429`/`5xx`, timeouts, and network errors use exponential backoff (30 s → 6 h by default, ±20% jitter, `Retry-After` honored on `429`), up to 20 attempts by default (the total window depends on jitter and responses). Per-destination `max_attempts`, `backoff_base_s`, and `backoff_max_s` override the defaults. Every retry of a delivery carries the same `webhook-id`; replay creates a new one. Use `X-Webhook-Event-ID` for deduplication across replay. See the [integration contract](docs/contract.md). `3xx` and other `4xx` responses are final and never retried.
-
-Pausing a destination (`POST /api/admin/v1/destinations/:id/pause`) holds its deliveries with status `paused` without consuming attempts; resuming it (`POST /api/admin/v1/destinations/:id/resume`) releases them for delivery.
-
-## Roadmap
-
-| Milestone | Scope | Status |
-|---|---|---|
-| **M0: Foundation** | Monorepo, Wrangler config, migrations, CI | Done |
-| **M1: Core pipeline** | Ingress, D1 ledger, queue, single-shot delivery, signing, SSRF guard | Done |
-| **M2: Reliability** | Retries, dead letter, idempotency, R2 payloads, reconciler, pause/resume | Done |
-| **M3: Admin API & security** | Access + RBAC, audit log, replay, test delivery, secret rotation | Done |
-| **M4: Dashboard** | All dashboard pages, stats rollups | Done |
-| **M5: Operations** | Alerting, R2 archival, per-destination concurrency and rate limits | Done |
-| **M6: Production readiness** | Staging, deploy & rollback, benchmarks, backup/restore, runbook, uptime monitoring | Code done (1.0.0); live staging drills pending |
-| **M7: Built-in auth** | Username/password login, onboarding, API tokens, Turnstile (replaces Access) | Code done (2.0.0); unreleased |
-
-Full details: [feature documentation](docs/README.md), [roadmap](docs/roadmap.md), and [architecture](docs/architecture.md).
-
-### Out of scope
-
-Hookflare is deliberately **not** an integration platform. The following are out of scope: payload transformations, multi-destination fan-out, workflow editors, SaaS billing, and real-time WebSocket dashboards.
+See the [wire contract](docs/contract.md) for signing, response codes, and
+deduplication across retries or replay, and [delivery](docs/delivery.md) for
+the retry policy and delivery states.
 
 ## Contributing
 
-1.0.0 is the first release, and feedback on the [roadmap](docs/roadmap.md) is very welcome. Please open an issue to discuss a change before you send a pull request.
+Feedback on the [roadmap](docs/roadmap.md) is welcome. Please open an issue to discuss a change before you send a pull request.
 
 ## Releases
 
-Releases follow [SemVer](https://semver.org/) and are tagged `X.Y.Z` (no `v` prefix) on `main`. Release notes live in [`CHANGELOG.md`](CHANGELOG.md).
-
-| Version | Date | Highlights |
-|---|---|---|
-| [1.0.0](CHANGELOG.md#100---2026-10-17) | 2026-10-17 | First release: milestones M0–M6 |
-
-To run a specific release, check out its tag before installing: `git checkout 1.0.0`.
+See [`CHANGELOG.md`](CHANGELOG.md) for released versions. To run a specific release, check out its tag before installing. Use the docs in that checkout rather than assuming the current docs also apply to older releases.
 
 ## License
 

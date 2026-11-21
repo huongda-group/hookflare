@@ -1,12 +1,12 @@
 # Dashboard design system
 
-[Documentation index](README.md) · Source review: 2026-10-30. Implementation descriptions are based on this checkout; no live deployment or fresh application test result is implied.
+[Documentation index](README.md)
 
 ## Business rules and current behavior
 
 The dashboard is an internal operations interface built with React, Vite, Tailwind, and TanStack Router/Query. It supports setup, login, overview, projects, endpoints, events, failures, alerts, archives, audit, settings, and account dialogs. The implemented visual direction is a single light theme.
 
-The approved [Reliability Console direction](dashboard-reliability-console.md) is implemented for the shared shell, Overview, and Event detail. Other routes retain their task layouts within the shared shell. The prototype's sample counters, simulated replay, and preview navigation are not product behavior.
+The Reliability Console gives operators two entry points: [Overview](overview.md) surfaces destinations that need investigation, and [Event detail](events.md) connects the source to a delivery, an attempt, and its outcome. Other authenticated routes share the shell and use their own task layouts.
 
 ## Design and interaction
 
@@ -20,7 +20,7 @@ Implemented token values are listed below. Page-specific behavior lives in the c
 
 ## Implemented visual tokens
 
-These are the implemented Reliability Console values in `index.css` (not the superseded light-theme palette). This table does not certify accessibility.
+These are the semantic values in `index.css`. This table does not certify accessibility.
 
 | Token | Value | Used on |
 | --- | --- | --- |
@@ -41,13 +41,21 @@ Radii: `--radius-control: 0.5rem` (8px controls), `--radius-panel: 0.625rem` (10
 
 ## Ideas, boundaries, and open work
 
-Dark/system themes and extra mobile-specific product scope are not implemented commitments. Manual browser zoom acceptance remains an open item in the dated review; viewport/CSS-zoom tests are not equivalent proof.
+Dark/system themes and extra mobile-specific product scope are not implemented commitments. Fixture browser tests cover responsive containment at 390px, 1024px, and 1440px and approximate 200% zoom. Manual browser-zoom verification remains open. The separate smoke suite uses a real local Worker and D1; fixture tests do not.
+
+### Proposed logo exploration
+
+The dashboard already serves favicon and install icons from `public/`; the shell and auth layout display the lowercase `hookflare` wordmark. An optional future comparison could evaluate five alternate SVG marks: forwarding flow, connected nodes, retry loop, protected route, and an H monogram. Keep the treatments comparable with navy `#253B69`, blue `#245BDB`, and restrained geometry. The marks should remain distinct at small sizes and communicate webhook delivery and recovery without suggesting fan-out.
+
+If explored, keep the SVGs and a standalone comparison sheet outside application source. Review small-size legibility, independent SVG rendering, accessible titles, and wordmark consistency before deciding whether to replace the existing wordmark.
 
 ## Source and verification entry points
 
 The files below define behavior and existing checks; listing a test does not mean it was run during this documentation change.
 
 - [apps/dashboard/src/index.css](../apps/dashboard/src/index.css)
+- [apps/dashboard/index.html](../apps/dashboard/index.html)
+- [apps/dashboard/public/site.webmanifest](../apps/dashboard/public/site.webmanifest)
 - [apps/dashboard/src/components/AppShell.tsx](../apps/dashboard/src/components/AppShell.tsx)
 - [apps/dashboard/src/components/ui/dialog.tsx](../apps/dashboard/src/components/ui/dialog.tsx)
 - [apps/dashboard/e2e/redesign.spec.ts](../apps/dashboard/e2e/redesign.spec.ts)
