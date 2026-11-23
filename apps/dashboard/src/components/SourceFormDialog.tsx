@@ -8,6 +8,7 @@ import {
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { Controller, useForm } from "react-hook-form";
+import type { z } from "zod";
 import { DirtyFormGuard } from "@/components/DirtyFormGuard";
 import { FormField } from "@/components/FormField";
 import { FormSection } from "@/components/FormSection";
@@ -124,7 +125,10 @@ function SourceForm({
 	const editing = source !== undefined;
 	const form = useForm<Values>({
 		resolver: zodResolver(
-			(editing ? patchSourceRequest : createSourceRequest) as never,
+			(editing ? patchSourceRequest : createSourceRequest) as z.ZodType<
+				Values,
+				Values
+			>,
 		),
 		defaultValues: editing
 			? {
