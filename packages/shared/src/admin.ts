@@ -91,11 +91,11 @@ export function eventIdConfigError(
 }
 
 function refineEventId(
-	value: { event_id_from?: string; event_id_selector?: string | null },
+	value: { event_id_from: string; event_id_selector?: string | null },
 	ctx: z.RefinementCtx,
 ) {
 	const error = eventIdConfigError(
-		value.event_id_from ?? "none",
+		value.event_id_from,
 		value.event_id_selector,
 	);
 	if (error) {

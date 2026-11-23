@@ -48,7 +48,8 @@ export async function runArchive(
 						? buildEventPart(deps(), b.id, n, plan.cut, logger)
 						: buildAuditPart(deps(), b.id, n),
 				);
-				if (r.itemCount === 0) break;
+				// A part of only lost payloads parked them; the day goes on.
+				if (r.itemCount === 0 && !r.parked) break;
 			}
 			const v = await step(`verify:${b.id}`, () => verifyBatch(deps(), b.id));
 			if (!v.ok) {

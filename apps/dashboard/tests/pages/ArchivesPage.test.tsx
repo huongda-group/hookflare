@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
@@ -181,5 +181,91 @@ describe("Archives page", () => {
 			await screen.findByRole("button", { name: /retry loading more/i }),
 		).toBeInTheDocument();
 		expect(screen.getByText("2026-01-02")).toBeInTheDocument();
+	});
+	it("collapses an expanded batch and explains parts of a batch without files", async () => {
+		server.use(
+			http.get(apiUrl("/archives"), () =>
+				HttpResponse.json({
+					data: [
+						batch({
+							with_files: false,
+							parts: [{ ...batch().parts[0], downloadable: false }],
+						}),
+					],
+					next_cursor: null,
+				}),
+			),
+		);
+		const user = userEvent.setup();
+		renderApp("/archives", { role: "operator" });
+		const toggle = await screen.findByRole("button", { name: "1 parts" });
+		await user.click(toggle);
+		expect(
+			screen.getByText(/download unavailable — this batch stored no files/i),
+		).toBeInTheDocument();
+		expect(screen.getByText(/part 1: evt_a … evt_z/)).toBeInTheDocument();
+		await user.click(toggle);
+		expect(screen.queryByText(/part 1: evt_a/)).not.toBeInTheDocument();
+	});
+
+	it("recovers from a failed load via Retry", async () => {
+		let fail = true;
+		server.use(
+			http.get(apiUrl("/archives"), () =>
+				fail
+					? new HttpResponse(null, { status: 500 })
+					: HttpResponse.json({ data: [batch()], next_cursor: null }),
+			),
+		);
+		const user = userEvent.setup();
+		renderApp("/archives", { role: "operator" });
+		const retry = await screen.findByRole("button", { name: "Retry" });
+		fail = false;
+		await user.click(retry);
+		expect(await screen.findByText("2026-01-02")).toBeInTheDocument();
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+	});
+
+	it("shows progress while loading more and while retrying a failed page", async () => {
+		let calls = 0;
+		let release = () => {};
+		server.use(
+			http.get(apiUrl("/archives"), async ({ request }) => {
+				calls += 1;
+				const cursor = new URL(request.url).searchParams.get("cursor");
+				if (!cursor)
+					return HttpResponse.json({ data: [batch()], next_cursor: "c1" });
+				await new Promise<void>((r) => {
+					release = r;
+				});
+				return calls === 2
+					? new HttpResponse(null, { status: 500 })
+					: HttpResponse.json({
+							data: [batch({ id: "arb_2", day: "2026-01-01" })],
+							next_cursor: null,
+						});
+			}),
+		);
+		const user = userEvent.setup();
+		renderApp("/archives", { role: "operator" });
+		await user.click(await screen.findByRole("button", { name: "Load more" }));
+		expect(
+			await screen.findByRole("button", { name: "Loading…" }),
+		).toBeDisabled();
+		await waitFor(() => expect(calls).toBe(2));
+		release();
+		await user.click(
+			await screen.findByRole("button", { name: "Retry loading more" }),
+		);
+		expect(
+			await screen.findByRole("button", { name: "Loading…" }),
+		).toBeDisabled();
+		await waitFor(() => expect(calls).toBe(3));
+		release();
+		expect(await screen.findByText("2026-01-01")).toBeInTheDocument();
+		expect(screen.getByText("2026-01-02")).toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: /load more|loading/i }),
+		).not.toBeInTheDocument();
 	});
 });

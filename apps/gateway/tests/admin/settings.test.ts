@@ -4,7 +4,7 @@ import {
 	type Settings,
 } from "@hookflare/shared";
 import { eq } from "drizzle-orm";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { startArchiveRun } from "../../src/core/archive-run";
 import { auditLogs, settings } from "../../src/core/db/schema";
 import { createLogger } from "../../src/core/log";
@@ -68,6 +68,42 @@ describe("GET /settings", () => {
 			storage_updated_at: null,
 			archive_last_run: null,
 		} satisfies Settings);
+	});
+});
+
+describe("GET /settings with corrupt rows", () => {
+	it("falls back to defaults and logs a warning per corrupt section", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const deps = testDeps();
+		for (const key of [
+			RETRY_DEFAULTS_KEY,
+			ALERT_RULES_SETTING.key,
+			STORAGE_SETTING.key,
+		]) {
+			await deps.db
+				.insert(settings)
+				.values({ key, valueJson: "not json", updatedAt: 1 });
+		}
+		try {
+			const api = await adminApp(deps, { role: "viewer" });
+			const res = await api.request("GET", "/settings");
+			expect(res.status).toBe(200);
+			expect(await res.json()).toMatchObject({
+				retry_defaults: { max_attempts: 20 },
+				alert_rules: DEFAULT_ALERT_RULES,
+				storage: DEFAULT_STORAGE_SETTINGS,
+			});
+			const msgs = warn.mock.calls.map((c) => JSON.parse(String(c[0])).msg);
+			expect(msgs).toEqual(
+				expect.arrayContaining([
+					"settings.retry_defaults_invalid",
+					"settings.alert_rules_invalid",
+					"settings.storage_invalid",
+				]),
+			);
+		} finally {
+			warn.mockRestore();
+		}
 	});
 });
 
@@ -152,6 +188,29 @@ describe("PATCH /settings", () => {
 		const stored = await (
 			await api.request("GET", "/settings")
 		).json<Settings>();
+		expect(stored.retry_defaults.max_attempts).toBe(9);
+	});
+
+	it("writes no section when only one of two sections conflicts", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps);
+		await api.request("GET", "/me");
+		beforeNextBatch(deps, () =>
+			upsertRetryDefaults(deps.db, { ...next, max_attempts: 9 }, 1),
+		);
+		const res = await api.request("PATCH", "/settings", {
+			alert_rules: { ...DEFAULT_ALERT_RULES, failure_threshold: 7 },
+			retry_defaults: next,
+		});
+		expect(res.status).toBe(409);
+		expect(await auditRows(deps, RETRY_DEFAULTS_KEY)).toEqual([]);
+		expect(await auditRows(deps, ALERT_RULES_SETTING.key)).toEqual([]);
+		const stored = await (
+			await api.request("GET", "/settings")
+		).json<Settings>();
+		expect(stored.alert_rules.failure_threshold).toBe(
+			DEFAULT_ALERT_RULES.failure_threshold,
+		);
 		expect(stored.retry_defaults.max_attempts).toBe(9);
 	});
 

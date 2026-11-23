@@ -54,6 +54,7 @@ import {
 	type PolicyFields,
 	resolvePolicy,
 } from "../../core/policy";
+import { can } from "../../core/rbac";
 import {
 	aad,
 	clearExpiredPrev,
@@ -65,6 +66,7 @@ import { buildOutboundHeaders, signWebhookAll } from "../../core/sign";
 import { checkUrl } from "../../core/ssrf";
 import type { AppEnv } from "../../env";
 import { requirePermission } from "../auth/permission";
+import { sha256Hex } from "../auth/secrets";
 import { decodeCursor, encodeCursor } from "../cursor";
 import {
 	auditStmt,
@@ -85,10 +87,29 @@ function generateSigningSecret(): string {
 	return `whsec_${btoa(String.fromCharCode(...bytes))}`;
 }
 
+/**
+ * Destination URLs often carry credentials in the path or query, so only
+ * actors that may edit them see them in full: everyone else gets the origin,
+ * plus "/…" when anything follows it.
+ */
+export function maskUrl(url: string): string {
+	const u = new URL(url);
+	return u.pathname !== "/" || u.search || u.hash ? `${u.origin}/…` : u.origin;
+}
+
+/** config.write: full destination URLs and custom test payloads. */
+function canWriteConfig(c: Context<AppBindings>): boolean {
+	const role =
+		c.var.actor?.role ??
+		/* istanbul ignore next -- @preserve unreachable: requirePermission already rejected a request without an actor */ "viewer";
+	return can(role, "config.write");
+}
+
 export async function toDestination(
 	env: AppEnv,
 	row: DestinationRow,
 	now: number = Date.now(),
+	showUrl = false,
 ): Promise<Destination> {
 	const live =
 		row.signingSecretPrevEnc &&
@@ -98,7 +119,7 @@ export async function toDestination(
 		id: row.id,
 		project_id: row.projectId,
 		name: row.name,
-		url: row.url,
+		url: showUrl ? row.url : maskUrl(row.url),
 		status: row.status,
 		timeout_ms: row.timeoutMs,
 		max_attempts: row.maxAttempts,
@@ -231,7 +252,10 @@ export function destinationRoutes() {
 			}),
 		]);
 		return c.json(
-			{ ...(await toDestination(env, row, ts)), signing_secret: signingSecret },
+			{
+				...(await toDestination(env, row, ts, canWriteConfig(c))),
+				signing_secret: signingSecret,
+			},
 			201,
 		);
 	});
@@ -249,7 +273,9 @@ export function destinationRoutes() {
 			q.value.limit,
 		);
 		const ts = now();
-		const data = await Promise.all(rows.map((r) => toDestination(env, r, ts)));
+		const data = await Promise.all(
+			rows.map((r) => toDestination(env, r, ts, canWriteConfig(c))),
+		);
 		return c.json({
 			data,
 			next_cursor: nextCursor,
@@ -285,7 +311,12 @@ export function destinationRoutes() {
 		);
 		return found.ok
 			? c.json(
-					await toDestination(c.var.deps.env, found.value, c.var.deps.now()),
+					await toDestination(
+						c.var.deps.env,
+						found.value,
+						c.var.deps.now(),
+						canWriteConfig(c),
+					),
 				)
 			: found.response;
 	});
@@ -364,7 +395,7 @@ export function destinationRoutes() {
 				reason,
 			}),
 		]);
-		return c.json(await toDestination(env, row, ts));
+		return c.json(await toDestination(env, row, ts, canWriteConfig(c)));
 	});
 
 	routes.post(
@@ -409,7 +440,9 @@ export function destinationRoutes() {
 					)
 					.returning(),
 				auditInsertIfChanged(db, {
-					actor: c.var.actor?.username ?? "",
+					actor:
+						c.var.actor?.username ??
+						/* istanbul ignore next -- @preserve unreachable: requirePermission already rejected a request without an actor */ "",
 					at: ts,
 					action: "destination.secret_rotated",
 					resourceType: "destination",
@@ -424,7 +457,7 @@ export function destinationRoutes() {
 			]);
 			if (!row) return c.json({ error: "conflict" }, 409);
 			return c.json({
-				...(await toDestination(env, row, ts)),
+				...(await toDestination(env, row, ts, canWriteConfig(c))),
 				signing_secret: secret,
 			});
 		},
@@ -447,7 +480,9 @@ export function destinationRoutes() {
 				const [[row]] = await db.batch([
 					transitionDestinationStmt(db, id, "active", "paused", ts),
 					auditInsertIfChanged(db, {
-						actor: c.var.actor?.username ?? "",
+						actor:
+							c.var.actor?.username ??
+							/* istanbul ignore next -- @preserve unreachable: requirePermission already rejected a request without an actor */ "",
 						at: ts,
 						action: "destination.paused",
 						resourceType: "destination",
@@ -455,11 +490,12 @@ export function destinationRoutes() {
 						reason: body.value.reason,
 					}),
 				]);
-				if (row) return c.json(await toDestination(env, row, ts));
+				if (row)
+					return c.json(await toDestination(env, row, ts, canWriteConfig(c)));
 			}
 			const s = await settled(c, id, "paused");
 			if (s.response) return s.response;
-			return c.json(await toDestination(env, s.row, now()));
+			return c.json(await toDestination(env, s.row, now(), canWriteConfig(c)));
 		},
 	);
 
@@ -491,7 +527,9 @@ export function destinationRoutes() {
 						)
 						.returning(),
 					auditInsertIfChanged(deps.db, {
-						actor: c.var.actor?.username ?? "",
+						actor:
+							c.var.actor?.username ??
+							/* istanbul ignore next -- @preserve unreachable: requirePermission already rejected a request without an actor */ "",
 						at: ts,
 						action: "destination.resumed",
 						resourceType: "destination",
@@ -512,7 +550,12 @@ export function destinationRoutes() {
 				markQueuedMany(deps, chunk),
 			);
 			return c.json({
-				destination: await toDestination(deps.env, row, deps.now()),
+				destination: await toDestination(
+					deps.env,
+					row,
+					deps.now(),
+					canWriteConfig(c),
+				),
 				resumed: moved.length,
 			});
 		},
@@ -524,6 +567,12 @@ export function destinationRoutes() {
 		async (c) => {
 			const body = await readOptionalJson(c, testDeliveryRequest);
 			if (!body.ok) return body.response;
+			// A custom payload is signed with the real secret, so the backend
+			// cannot tell it from a real event: only config writers may send one.
+			// Operators can still send the default test envelope.
+			if (body.value.payload !== undefined && !canWriteConfig(c)) {
+				return c.json({ error: "forbidden", required: "config.write" }, 403);
+			}
 			const deps = c.var.deps;
 			const id = c.req.param("id");
 			const found = await readProjectResource(c, () =>
@@ -543,17 +592,14 @@ export function destinationRoutes() {
 			}
 			const startedAt = deps.now();
 			const testId = newId("tst", startedAt);
-			const payload = new Uint8Array(
-				new TextEncoder().encode(
-					JSON.stringify(
-						body.value.payload ?? {
-							type: "hookflare.test",
-							destination_id: id,
-							timestamp: startedAt,
-						},
-					),
-				),
+			const payloadText = JSON.stringify(
+				body.value.payload ?? {
+					type: "hookflare.test",
+					destination_id: id,
+					timestamp: startedAt,
+				},
 			);
+			const payload = new Uint8Array(new TextEncoder().encode(payloadText));
 
 			let outcome: {
 				durationMs: number;
@@ -594,15 +640,18 @@ export function destinationRoutes() {
 					body: payload,
 					secrets,
 				});
+				const headers = buildOutboundHeaders({
+					storedHeaders: {},
+					contentType: "application/json",
+					deliveryId: testId,
+					timestampSec,
+					signature,
+				});
+				// Set after the builder, so no stored-header denylist applies.
+				headers.set("x-hookflare-test", "1");
 				const sent = await sendSigned(deps, {
 					url: destination.url,
-					headers: buildOutboundHeaders({
-						storedHeaders: {},
-						contentType: "application/json",
-						deliveryId: testId,
-						timestampSec,
-						signature,
-					}),
+					headers,
 					body: payload,
 					timeoutMs,
 				});
@@ -621,7 +670,9 @@ export function destinationRoutes() {
 				id: testId,
 				destinationId: id,
 				projectId: destination.projectId,
-				actor: c.var.actor?.username ?? "",
+				actor:
+					c.var.actor?.username ??
+					/* istanbul ignore next -- @preserve unreachable: requirePermission already rejected a request without an actor */ "",
 				startedAt,
 				durationMs: outcome.durationMs,
 				httpStatus: outcome.httpStatus,
@@ -640,6 +691,8 @@ export function destinationRoutes() {
 						test_delivery_id: testId,
 						http_status: outcome.httpStatus,
 						error_kind: outcome.errorKind,
+						// The hash identifies what was signed without storing it.
+						payload_sha256: await sha256Hex(payloadText),
 					},
 				}),
 			]);

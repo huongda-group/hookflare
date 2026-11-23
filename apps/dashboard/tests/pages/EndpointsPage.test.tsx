@@ -1,7 +1,8 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { expect, it } from "vitest";
 import { qk } from "@/lib/queries/keys";
+import { EndpointsPage, endpointsSearch } from "@/pages/EndpointsPage";
 import { destination, project, source } from "../helpers/fixtures";
 import { chooseProject, renderApp } from "../helpers/render";
 import { apiUrl, server } from "../helpers/server";
@@ -155,4 +156,36 @@ it("refreshes the originating project when a pending endpoint action completes a
 	} finally {
 		finish();
 	}
+});
+
+it("switches tabs through the URL", async () => {
+	server.use(
+		http.get(apiUrl("/sources"), () =>
+			HttpResponse.json({ data: [source()], next_cursor: null }),
+		),
+	);
+	const { user, router } = renderApp("/endpoints?project_id=prj_1");
+	expect(await screen.findByText("No destinations yet.")).toBeVisible();
+	await user.click(screen.getByRole("tab", { name: "Sources" }));
+	expect(
+		await screen.findByRole("link", { name: "Stripe" }),
+	).toBeInTheDocument();
+	expect(router.state.location.search).toEqual({
+		tab: "sources",
+		project_id: "prj_1",
+	});
+});
+
+it("falls back to the destinations tab for an unknown tab", () => {
+	expect(endpointsSearch.parse({ tab: "bogus", project_id: 7 })).toEqual({
+		tab: "destinations",
+		project_id: undefined,
+	});
+});
+
+it("renders nothing until a project is active", () => {
+	const { container } = render(
+		<EndpointsPage search={{ tab: "sources" }} setSearch={() => {}} />,
+	);
+	expect(container).toBeEmptyDOMElement();
 });

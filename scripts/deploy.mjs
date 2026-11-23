@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
- * Deploy CLI: record a restore point, build, migrate, deploy, smoke-test,
+ * Deploy CLI: build, record a restore point, migrate, deploy, smoke-test,
  * and write the deploy record to `.deploy/<at>.json`. On any failure it
  * prints the manual rollback commands for the steps that started (from
  * `rollbackCommands`) and exits 1; it never runs them. On success it
  * prints the same commands in the report so the restore point is at hand.
+ * The D1 restore is listed only when the migrate step applied migrations.
  *
  * The smoke step needs the gateway URL in the per-Worker variable from
  * `smokeUrlVar` (`HOOKFLARE_URL`, `HOOKFLARE_STAGING_URL`), plus
@@ -18,6 +19,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	deployPlan,
+	migrationsApplied,
 	parseBookmark,
 	parseCurrentVersion,
 	rollbackCommands,
@@ -84,7 +86,7 @@ try {
 	console.error(`deploy: smoke needs ${urlVar}, HOOKFLARE_API_TOKEN, SINK_URL`);
 	process.exit(1);
 }
-/** @type {import("./lib/deploy.mjs").DeployRecord & { previousVersion: string, newVersion: string, smoke: string }} */
+/** @type {import("./lib/deploy.mjs").DeployRecord & { previousVersion: string, newVersion: string, bookmarkAt: string, smoke: string }} */
 const record = {
 	at: recordAt(),
 	config,
@@ -93,6 +95,7 @@ const record = {
 	previousVersion: "unknown",
 	newVersion: "unknown",
 	bookmark: "unknown",
+	bookmarkAt: "unknown",
 	smoke: skipSmoke ? "skipped" : "pending",
 };
 /** Steps that began, so `fail` lists only what they may have changed. */
@@ -151,6 +154,7 @@ for (const step of plan) {
 		}
 		try {
 			record.bookmark = parseBookmark(JSON.parse(info.stdout));
+			record.bookmarkAt = new Date().toISOString();
 			record.previousVersion = parseCurrentVersion(JSON.parse(versions.stdout));
 		} catch (err) {
 			fail(step, err instanceof Error ? err.message : String(err));
@@ -167,9 +171,15 @@ for (const step of plan) {
 			["d1", "migrations", "apply", "DB", "--remote"],
 			{ config, stream: true },
 		);
+		record.migrationsApplied = migrationsApplied(migrated);
 		if (migrated.code !== 0) {
 			fail(step, migrated.stderr.trim() || "migrations apply failed");
 		}
+		console.log(
+			record.migrationsApplied
+				? "deploy: migrations applied; a D1 restore would undo them"
+				: "deploy: no migrations applied; no D1 restore needed",
+		);
 	} else if (step === "deploy") {
 		const deployed = await runWrangler(["deploy"], { config, stream: true });
 		if (deployed.code !== 0) {

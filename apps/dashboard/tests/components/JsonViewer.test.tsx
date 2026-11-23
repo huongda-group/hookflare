@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { JsonViewer } from "@/components/JsonViewer";
 
 describe("JsonViewer", () => {
@@ -114,5 +114,52 @@ describe("JsonViewer", () => {
 			"aria-expanded",
 			"false",
 		);
+	});
+	describe("Download", () => {
+		afterEach(() => vi.restoreAllMocks());
+
+		/** Captures what a Download click hands to the browser. */
+		function captureDownloads() {
+			const blobs: Blob[] = [];
+			const names: string[] = [];
+			vi.spyOn(URL, "createObjectURL").mockImplementation((b) => {
+				blobs.push(b as Blob);
+				return "blob:test";
+			});
+			vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+			vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
+				function (this: HTMLAnchorElement) {
+					names.push(this.download);
+				},
+			);
+			return { blobs, names };
+		}
+
+		it("downloads untyped text as payload.txt without a JSON notice", async () => {
+			const { blobs, names } = captureDownloads();
+			render(<JsonViewer text="plain body" contentType={null} />);
+			expect(screen.queryByText(/not valid JSON/i)).not.toBeInTheDocument();
+			await userEvent.click(screen.getByRole("button", { name: "Download" }));
+			expect(names).toEqual(["payload.txt"]);
+			expect(blobs[0].type).toBe("");
+			expect(await blobs[0].text()).toBe("plain body");
+			expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:test");
+		});
+
+		it("downloads the original bytes under the given filename", async () => {
+			const { blobs, names } = captureDownloads();
+			const original = new Blob(['{"a":1}'], { type: "application/json" });
+			render(
+				<JsonViewer
+					text='{"a":1}'
+					contentType="application/json"
+					filename="evt_1"
+					download={original}
+				/>,
+			);
+			await userEvent.click(screen.getByRole("button", { name: "Download" }));
+			expect(names).toEqual(["evt_1"]);
+			expect(blobs[0]).toBe(original);
+		});
 	});
 });

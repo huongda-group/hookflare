@@ -24,6 +24,7 @@ export function SourceActions({ source: s }: { source: Source }) {
 	const [secret, setSecret] = useState<string | null>(null);
 	if (!useCan("config.write")) return null;
 	const close = (o: boolean) => {
+		/* istanbul ignore else -- @preserve unreachable: these dialogs have no trigger, so Radix only reports closes */
 		if (!o) setOpen(null);
 	};
 	const next = s.status === "active" ? "disabled" : "active";

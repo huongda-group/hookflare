@@ -9,11 +9,11 @@ import { ProjectFormDialog } from "@/components/ProjectFormDialog";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
-import { invalidateDeliveryViews } from "@/lib/queries/invalidate-delivery-views";
 import { Can } from "@/lib/permissions";
+import { useDestinationsPage, useSourcesPage } from "@/lib/queries/endpoints";
+import { invalidateDeliveryViews } from "@/lib/queries/invalidate-delivery-views";
 import { qk } from "@/lib/queries/keys";
 import { useProject } from "@/lib/queries/projects";
-import { useDestinationsPage, useSourcesPage } from "@/lib/queries/endpoints";
 import { OverviewContent } from "./OverviewPage";
 
 export function ProjectDetailPage({

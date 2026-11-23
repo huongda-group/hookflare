@@ -121,7 +121,13 @@ export async function overviewTotals(db: Db, w: StatsScope) {
 		.where(scopeWhere(w))
 		.get();
 	return (
-		row ?? { received: 0, delivered: 0, failedFinal: 0, dead: 0, attempts: 0 }
+		row ?? /* istanbul ignore next -- @preserve unreachable: an aggregate SELECT without GROUP BY always returns one row */ {
+			received: 0,
+			delivered: 0,
+			failedFinal: 0,
+			dead: 0,
+			attempts: 0,
+		}
 	);
 }
 

@@ -1,7 +1,15 @@
-import { and, eq } from "drizzle-orm";
-import { beforeEach, describe, expect, it } from "vitest";
-import { cutoffsFor, DAY_MS } from "../../src/core/db/archive";
-import { archiveParts, auditLogs } from "../../src/core/db/schema";
+import { and, eq, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cutoffsFor, DAY_MS, MISSING_PART } from "../../src/core/db/archive";
+import * as schema from "../../src/core/db/schema";
+import {
+	archiveParts,
+	auditLogs,
+	deliveries,
+	deliveryAttempts,
+	webhookEvents,
+} from "../../src/core/db/schema";
 import { gunzipToLines } from "../../src/jobs/archive/ndjson";
 import { buildAuditPart, buildEventPart } from "../../src/jobs/archive/part";
 import { isolateArchive, seedBatch } from "../helpers/archive";
@@ -38,6 +46,52 @@ async function readPart(batchId: string, partNo: number) {
 		new Uint8Array(await (obj as R2ObjectBody).arrayBuffer()),
 	);
 	return { row, lines: lines.map((l) => JSON.parse(l)) };
+}
+
+async function partRows(batchId: string) {
+	return deps.db
+		.select()
+		.from(archiveParts)
+		.where(eq(archiveParts.batchId, batchId));
+}
+
+async function markOf(eventId: string) {
+	const [ev] = await deps.db
+		.select()
+		.from(webhookEvents)
+		.where(eq(webhookEvents.id, eventId));
+	return { batch: ev.archiveBatchId, part: ev.archivePart };
+}
+
+/** A D1 that runs `before` once, right before the first query matching `match`. */
+function d1Before(match: RegExp, before: () => Promise<unknown>): D1Database {
+	const db = deps.env.DB;
+	let fired = false;
+	const wrap = (stmt: D1PreparedStatement, q: string): D1PreparedStatement =>
+		new Proxy(stmt, {
+			get(target, prop) {
+				if (prop === "bind")
+					return (...a: unknown[]) => wrap(target.bind(...a), q);
+				const v = Reflect.get(target, prop);
+				if (typeof v !== "function") return v;
+				if (["all", "raw", "first", "run"].includes(String(prop)))
+					return async (...a: unknown[]) => {
+						if (!fired && match.test(q)) {
+							fired = true;
+							await before();
+						}
+						return v.apply(target, a);
+					};
+				return v.bind(target);
+			},
+		});
+	return new Proxy(db, {
+		get(target, prop) {
+			if (prop === "prepare") return (q: string) => wrap(target.prepare(q), q);
+			const v = Reflect.get(target, prop);
+			return typeof v === "function" ? v.bind(target) : v;
+		},
+	});
 }
 
 describe("buildEventPart", () => {
@@ -122,6 +176,141 @@ describe("buildEventPart", () => {
 			.where(eq(archiveParts.batchId, batch.id));
 		expect(row.r2Key).toBeNull();
 	});
+
+	it("throws for an unknown batch", async () => {
+		await expect(buildEventPart(deps, "arb_nope", 1, cut)).rejects.toThrow(
+			"archive batch arb_nope not found",
+		);
+		await expect(buildAuditPart(deps, "arb_nope", 1)).rejects.toThrow(
+			"archive batch arb_nope not found",
+		);
+	});
+
+	it("leaves a batch that is no longer building untouched", async () => {
+		const p = await seedPipeline(deps);
+		const { eventId } = await seedDelivery(deps, p, {
+			status: "delivered",
+			event: { receivedAt: DAY_START + 1 },
+		});
+		const batch = await seedBatch(deps, { day: DAY, status: "verified" });
+		expect(await buildEventPart(deps, batch.id, 1, cut)).toEqual({
+			itemCount: 0,
+			bytes: 0,
+		});
+		expect(await markOf(eventId)).toEqual({ batch: null, part: null });
+		expect(await partRows(batch.id)).toEqual([]);
+	});
+
+	it("records no part and parks the events when every marked event's R2 payload is gone", async () => {
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const p = await seedPipeline(deps);
+			const { eventId } = await seedDelivery(deps, p, {
+				status: "delivered",
+				body: new Uint8Array(70 * 1024),
+				event: { receivedAt: DAY_START + 1 },
+			});
+			const [ev] = await deps.db
+				.select()
+				.from(webhookEvents)
+				.where(eq(webhookEvents.id, eventId));
+			await deps.payloads.delete(ev.r2Key as string);
+			const batch = await seedBatch(deps, { day: DAY });
+			expect(await buildEventPart(deps, batch.id, 1, cut)).toEqual({
+				itemCount: 0,
+				bytes: 0,
+				parked: 1,
+			});
+			expect(await partRows(batch.id)).toEqual([]);
+			expect(await markOf(eventId)).toEqual({
+				batch: batch.id,
+				part: MISSING_PART,
+			});
+			// Part 2 marks nothing: the parked event is never picked again.
+			expect(await buildEventPart(deps, batch.id, 2, cut)).toEqual({
+				itemCount: 0,
+				bytes: 0,
+			});
+			expect(
+				errorSpy.mock.calls.map((c) => JSON.parse(String(c[0])).msg),
+			).toContain("archive.payload_missing");
+		} finally {
+			errorSpy.mockRestore();
+		}
+	});
+
+	it("nests every delivery with its attempts in order, and lists an event without deliveries", async () => {
+		const p = await seedPipeline(deps);
+		const first = await seedDelivery(deps, p, {
+			status: "dead",
+			event: { receivedAt: DAY_START + 1 },
+		});
+		const second = await seedDelivery(deps, p, {
+			status: "delivered",
+			eventId: first.eventId,
+		});
+		for (const n of [1, 2])
+			await deps.db.insert(deliveryAttempts).values({
+				id: `att_part_${n}`,
+				deliveryId: first.deliveryId,
+				attemptNo: n,
+				startedAt: DAY_START + n,
+				durationMs: 5,
+				httpStatus: 500,
+			});
+		const lonely = await seedDelivery(deps, p, {
+			status: "delivered",
+			event: { receivedAt: DAY_START + 2 },
+		});
+		await deps.db
+			.delete(deliveries)
+			.where(eq(deliveries.id, lonely.deliveryId));
+
+		const batch = await seedBatch(deps, { day: DAY });
+		expect((await buildEventPart(deps, batch.id, 1, cut)).itemCount).toBe(2);
+		const { lines } = await readPart(batch.id, 1);
+		const byId = Object.fromEntries(lines.map((l) => [l.event.id, l]));
+		const ds = byId[first.eventId].deliveries;
+		expect(ds.map((d: { id: string }) => d.id).sort()).toEqual(
+			[first.deliveryId, second.deliveryId].sort(),
+		);
+		const failed = ds.find((d: { id: string }) => d.id === first.deliveryId);
+		expect(
+			failed.attempts.map((a: { attempt_no: number }) => a.attempt_no),
+		).toEqual([1, 2]);
+		const ok = ds.find((d: { id: string }) => d.id === second.deliveryId);
+		expect(ok.attempts).toEqual([]);
+		expect(byId[lonely.eventId].deliveries).toEqual([]);
+	});
+
+	it("writes a null payload for an event a replay unmarks while its page is read", async () => {
+		const p = await seedPipeline(deps);
+		const { eventId } = await seedDelivery(deps, p, {
+			status: "delivered",
+			event: { receivedAt: DAY_START + 1 },
+		});
+		const batch = await seedBatch(deps, { day: DAY });
+		// The page's event list is read; then a replay clears the mark before
+		// the bodies are loaded, so the body query no longer sees the event.
+		const racing = {
+			...deps,
+			db: drizzle(
+				d1Before(/"body_inline" from "webhook_events"/, () =>
+					deps.db.run(
+						sql`UPDATE webhook_events SET archive_batch_id = NULL, archive_part = NULL WHERE id = ${eventId}`,
+					),
+				),
+				{ schema },
+			),
+		};
+		expect((await buildEventPart(racing, batch.id, 1, cut)).itemCount).toBe(1);
+		const { lines } = await readPart(batch.id, 1);
+		expect(lines).toHaveLength(1);
+		expect(lines[0].event.id).toBe(eventId);
+		expect(lines[0].payload_b64).toBeNull();
+		// Unmarked, so purge keeps it in D1.
+		expect(await markOf(eventId)).toEqual({ batch: null, part: null });
+	});
 });
 
 describe("buildAuditPart", () => {
@@ -145,5 +334,95 @@ describe("buildAuditPart", () => {
 		expect(lines.filter((l) => l.audit.actor === "archive@test")).toHaveLength(
 			3,
 		);
+	});
+
+	const AUDIT_ACTOR = "archive-parts@test";
+	const clearAudit = () =>
+		deps.db.delete(auditLogs).where(eq(auditLogs.actor, AUDIT_ACTOR));
+	// Other tests may leave audit rows on this day; keep this day ours.
+	const AUDIT_DAY = "2025-03-04";
+	const AUDIT_DAY_START = Date.UTC(2025, 2, 4);
+	async function seedDayAudit(ids: string[]) {
+		for (const [i, id] of ids.entries())
+			await deps.db.insert(auditLogs).values({
+				id,
+				actor: AUDIT_ACTOR,
+				action: "settings.updated",
+				resourceType: "settings",
+				resourceId: "x",
+				at: AUDIT_DAY_START + i,
+			});
+	}
+
+	it("returns nothing for a batch that is no longer building, or a day without rows", async () => {
+		await clearAudit();
+		const verified = await seedBatch(deps, {
+			kind: "audit",
+			day: AUDIT_DAY,
+			status: "verified",
+		});
+		await seedDayAudit(["aud_day_a"]);
+		try {
+			expect(await buildAuditPart(deps, verified.id, 1)).toEqual({
+				itemCount: 0,
+				bytes: 0,
+			});
+			const empty = await seedBatch(deps, { kind: "audit", day: "2025-03-05" });
+			expect(await buildAuditPart(deps, empty.id, 1)).toEqual({
+				itemCount: 0,
+				bytes: 0,
+			});
+			expect(await partRows(verified.id)).toEqual([]);
+			expect(await partRows(empty.id)).toEqual([]);
+		} finally {
+			await clearAudit();
+		}
+	});
+
+	it("a later part starts after the previous one, and a rebuilt part keeps its range", async () => {
+		await clearAudit();
+		await seedDayAudit(["aud_day_1", "aud_day_2"]);
+		try {
+			const batch = await seedBatch(deps, {
+				kind: "audit",
+				day: AUDIT_DAY,
+				withFiles: false,
+			});
+			// Part 1 was built from the first row only (a smaller earlier cap).
+			await deps.db.insert(archiveParts).values({
+				batchId: batch.id,
+				partNo: 1,
+				r2Key: null,
+				itemCount: 1,
+				bytes: 0,
+				sha256: null,
+				firstId: "aud_day_1",
+				lastId: "aud_day_1",
+			});
+			// A retry of part 1 stays within its recorded last ID.
+			expect(await buildAuditPart(deps, batch.id, 1)).toEqual({
+				itemCount: 1,
+				bytes: 0,
+			});
+			expect(await buildAuditPart(deps, batch.id, 2)).toEqual({
+				itemCount: 1,
+				bytes: 0,
+			});
+			const parts = await partRows(batch.id);
+			expect(
+				parts
+					.sort((a, b) => a.partNo - b.partNo)
+					.map((r) => [r.partNo, r.firstId, r.lastId, r.r2Key]),
+			).toEqual([
+				[1, "aud_day_1", "aud_day_1", null],
+				[2, "aud_day_2", "aud_day_2", null],
+			]);
+			expect(await buildAuditPart(deps, batch.id, 3)).toEqual({
+				itemCount: 0,
+				bytes: 0,
+			});
+		} finally {
+			await clearAudit();
+		}
 	});
 });

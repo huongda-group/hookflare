@@ -15,6 +15,6 @@ export const Route = createFileRoute("/alerts/")({
 				search={search}
 				setSearch={(s) => navigate({ search: (prev) => ({ ...prev, ...s }) })}
 			/>
-		) : null;
+		) : /* istanbul ignore next -- @preserve unreachable: AppShell renders project-scoped outlets only once a project is active */ null;
 	},
 });

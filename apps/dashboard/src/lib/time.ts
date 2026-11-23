@@ -17,6 +17,7 @@ export function formatRelative(ms: number, now = Date.now()): string {
 		if (Math.abs(diff) >= size || unit === "second")
 			return rtf.format(Math.round(diff / size), unit);
 	}
+	/* istanbul ignore next -- @preserve unreachable: the "second" unit always returns */
 	return "";
 }
 

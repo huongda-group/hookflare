@@ -10,6 +10,6 @@ export const Route = createFileRoute("/events/$eventId")({
 		const { projectId } = useActiveProject();
 		return projectId ? (
 			<EventDetailPage key={eventId} eventId={eventId} projectId={projectId} />
-		) : null;
+		) : /* istanbul ignore next -- @preserve unreachable: AppShell renders project-scoped outlets only once a project is active */ null;
 	},
 });

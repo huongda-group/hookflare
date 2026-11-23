@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ID_PREFIXES, idTimestamp, isId, newId } from "../../src/core/ids";
 
 const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -86,5 +86,52 @@ describe("ids", () => {
 
 	it("accepts the tst prefix", () => {
 		expect(isId(newId("tst"), "tst")).toBe(true);
+	});
+
+	it("rejects timestamps outside the 48-bit ULID range", () => {
+		for (const bad of [-1, 1.5, Number.NaN, 2 ** 48]) {
+			expect(() => newId("evt", bad)).toThrow(/48-bit range/);
+		}
+	});
+
+	describe("random-part overflow within one millisecond", () => {
+		// The generator keeps per-isolate state, so each case gets a fresh
+		// module instance and forces the random part to all-ones.
+		async function freshIds() {
+			vi.resetModules();
+			return import("../../src/core/ids");
+		}
+		function saturateRandom() {
+			return vi
+				.spyOn(crypto, "getRandomValues")
+				.mockImplementation(((a: Uint8Array) => a.fill(0xff)) as never);
+		}
+
+		it("steps the clock forward 1 ms so ids stay strictly increasing", async () => {
+			const ids = await freshIds();
+			const spy = saturateRandom();
+			try {
+				const t = 1_700_000_000_000;
+				const a = ids.newId("evt", t);
+				const b = ids.newId("evt", t);
+				expect(b > a).toBe(true);
+				expect(ids.idTimestamp(a)).toBe(t);
+				expect(ids.idTimestamp(b)).toBe(t + 1);
+			} finally {
+				spy.mockRestore();
+			}
+		});
+
+		it("throws instead of wrapping past the maximum timestamp", async () => {
+			const ids = await freshIds();
+			const spy = saturateRandom();
+			try {
+				const max = 2 ** 48 - 1;
+				expect(ids.idTimestamp(ids.newId("evt", max))).toBe(max);
+				expect(() => ids.newId("evt", max)).toThrow(/48-bit range/);
+			} finally {
+				spy.mockRestore();
+			}
+		});
 	});
 });

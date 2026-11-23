@@ -58,6 +58,10 @@ function isDenied(name: string, value: string): boolean {
 		isDroppedHeader(name) ||
 		CREDENTIAL_HEADERS.includes(name) ||
 		name.startsWith("webhook-") ||
+		// Gateway-owned markers (x-hookflare-test, x-webhook-event-id) must not be
+		// spoofable by the original sender.
+		name.startsWith("x-hookflare-") ||
+		name === "x-webhook-event-id" ||
 		value === REDACTED ||
 		name === "content-type"
 	);

@@ -33,6 +33,12 @@ export function meRoutes() {
 		if (!body.ok) return body.response;
 		const { db, now } = c.var.deps;
 		const { current_password, new_password } = body.value;
+		// PBKDF2 is expensive: bound guesses per account before verifying, with
+		// the login route's 429 shape (spec §6.5).
+		const { success } = await c.env.LOGIN_LIMITER.limit({
+			key: `password:${actor.username}`,
+		});
+		if (!success) return c.json({ error: "too_many_attempts" }, 429);
 		const existing = await getUser(db, actor.username);
 		// A wrong current password writes nothing (not even an audit row).
 		if (

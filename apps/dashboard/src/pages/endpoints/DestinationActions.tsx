@@ -35,6 +35,7 @@ export function DestinationActions({
 	const [secret, setSecret] = useState<string | null>(null);
 	if (!canConfig && !canOperate) return null;
 	const close = (o: boolean) => {
+		/* istanbul ignore else -- @preserve unreachable: these dialogs have no trigger, so Radix only reports closes */
 		if (!o) setOpen(null);
 	};
 	const refresh = () =>

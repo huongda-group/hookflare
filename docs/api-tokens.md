@@ -6,7 +6,7 @@
 
 An API token authenticates automation as its owning user, with that user's current role. Admins create, list, and revoke tokens. Plaintext `hf_…` is shown once; only the hash is stored. A token can expire or be revoked, and a disabled or password-less owner cannot authenticate.
 
-Use `Authorization: Bearer <token>`. A request carrying both a session cookie and a Bearer token is rejected with 400. Admin password reset revokes tokens; self-service password change leaves them active.
+Use `Authorization: Bearer <token>`. A request carrying both a session cookie and a Bearer token is rejected with 400. Admin password reset revokes tokens; self-service password change leaves them active. Disabling a user revokes all of their live tokens in the same batch, with an `api_token.revoked` audit entry on the user that lists the revoked token IDs; re-enabling does not restore them.
 
 ## Design and interaction
 

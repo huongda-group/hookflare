@@ -60,7 +60,11 @@ export function failureRoutes() {
 			}),
 			next_cursor:
 				rows.length > q.value.limit && last
-					? encodeCursor(last.completedAt ?? 0, last.id)
+					? encodeCursor(
+							last.completedAt ??
+								/* istanbul ignore next -- @preserve unreachable: listFailures filters completed_at IS NOT NULL */ 0,
+							last.id,
+						)
 					: null,
 		});
 	});
@@ -106,7 +110,7 @@ export function failureRoutes() {
 			return c.json({ error: "unavailable" }, 503);
 		}
 		const allSkipped = [...skipped, ...checked.skipped];
-		const replayed = await writeReplays(c, {
+		const { replayed, lost } = await writeReplays(c, {
 			ready: checked.ready,
 			skipped: allSkipped,
 			reason: body.value.reason,
@@ -119,7 +123,7 @@ export function failureRoutes() {
 				new_delivery_id: r.new_delivery_id,
 				enqueued: r.enqueued,
 			})),
-			skipped: allSkipped,
+			skipped: [...allSkipped, ...lost],
 		} satisfies BulkReplayResult);
 	});
 

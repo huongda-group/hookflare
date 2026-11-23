@@ -238,6 +238,7 @@ export function UsersTab() {
 			<ConfirmDialog
 				open={pending !== null}
 				onOpenChange={(o) => {
+					/* istanbul ignore else -- @preserve unreachable: Radix calls onOpenChange(true) only from a Dialog.Trigger, and this dialog has none */
 					if (!o) setPending(null);
 				}}
 				title={pending?.title ?? ""}
@@ -245,6 +246,7 @@ export function UsersTab() {
 				confirmLabel={pending?.label ?? "Confirm"}
 				destructive={pending?.body.disabled === true}
 				onConfirm={async (reason) => {
+					/* istanbul ignore if -- @preserve unreachable: the dialog is open, so it can confirm, only while pending is set */
 					if (!pending) return;
 					await api.patch(`/users/${encodeURIComponent(pending.username)}`, {
 						...pending.body,
@@ -256,6 +258,7 @@ export function UsersTab() {
 			<ResetPasswordDialog
 				username={resetUser}
 				onOpenChange={(o) => {
+					/* istanbul ignore else -- @preserve unreachable: ResetPasswordDialog only reports closes (close() passes false) */
 					if (!o) setResetUser(null);
 				}}
 			/>
@@ -264,6 +267,7 @@ export function UsersTab() {
 					username={tokensUser}
 					open
 					onOpenChange={(o) => {
+						/* istanbul ignore else -- @preserve unreachable: Radix calls onOpenChange(true) only from a Dialog.Trigger, and this dialog has none */
 						if (!o) setTokensUser(null);
 					}}
 				/>
@@ -294,6 +298,7 @@ function ResetPasswordDialog({
 		onOpenChange(false);
 	};
 	const reset = async () => {
+		/* istanbul ignore if -- @preserve unreachable: the dialog, and so its Reset button, is open only while username is set */
 		if (!username) return;
 		setBusy(true);
 		setError(null);
@@ -314,48 +319,49 @@ function ResetPasswordDialog({
 				<Dialog
 					open={username !== null}
 					onOpenChange={(o) => {
+						/* istanbul ignore else -- @preserve unreachable: Radix calls onOpenChange(true) only from a Dialog.Trigger, and this dialog has none */
 						if (!o) requestClose(close);
 					}}
 				>
 					<DialogContent>
-				<DialogHeader>
-					<DialogTitle>Reset password for {username}</DialogTitle>
-				</DialogHeader>
-				{saved ? (
-					<>
-						<p className="text-sm">
-							The password was reset. {username} was signed out everywhere; hand
-							over the new password out of band.
-						</p>
-						<DialogFooter>
-							<Button onClick={close}>Close</Button>
-						</DialogFooter>
-					</>
-				) : (
-					<>
-						<FormField htmlFor="reset-password" label="New password">
-							<Input
-								id="reset-password"
-								type="password"
-								autoComplete="new-password"
-								value={password}
-								onChange={(e) => setPassword(e.target.value)}
-							/>
-						</FormField>
-						{error && <p className="text-sm text-failure">{error}</p>}
-						<DialogFooter>
-							<Button
-								variant="outline"
-								onClick={() => requestClose(close)}
-							>
-								Cancel
-							</Button>
-							<Button disabled={busy || !password} onClick={() => void reset()}>
-								Reset password
-							</Button>
-						</DialogFooter>
-					</>
-				)}
+						<DialogHeader>
+							<DialogTitle>Reset password for {username}</DialogTitle>
+						</DialogHeader>
+						{saved ? (
+							<>
+								<p className="text-sm">
+									The password was reset. {username} was signed out everywhere;
+									hand over the new password out of band.
+								</p>
+								<DialogFooter>
+									<Button onClick={close}>Close</Button>
+								</DialogFooter>
+							</>
+						) : (
+							<>
+								<FormField htmlFor="reset-password" label="New password">
+									<Input
+										id="reset-password"
+										type="password"
+										autoComplete="new-password"
+										value={password}
+										onChange={(e) => setPassword(e.target.value)}
+									/>
+								</FormField>
+								{error && <p className="text-sm text-failure">{error}</p>}
+								<DialogFooter>
+									<Button variant="outline" onClick={() => requestClose(close)}>
+										Cancel
+									</Button>
+									<Button
+										disabled={busy || !password}
+										onClick={() => void reset()}
+									>
+										Reset password
+									</Button>
+								</DialogFooter>
+							</>
+						)}
 					</DialogContent>
 				</Dialog>
 			)}

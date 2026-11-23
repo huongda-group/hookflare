@@ -24,6 +24,7 @@ import {
 import { countEligible, cutoffsFor } from "../../core/db/archive";
 import { archiveBatches, archiveParts } from "../../core/db/schema";
 import { newId } from "../../core/ids";
+import { can } from "../../core/rbac";
 import { readSetting, STORAGE_SETTING } from "../../core/settings";
 import { requirePermission } from "../auth/permission";
 import { decodeCursor, encodeCursor } from "../cursor";
@@ -76,7 +77,12 @@ export function archiveRoutes() {
 		if (to_day) where.push(lte(archiveBatches.day, to_day));
 		if (cursor) {
 			const cur = decodeCursor(cursor);
-			if (cur === "invalid" || cur === null) return badCursor(c);
+			if (
+				cur === "invalid" ||
+				/* istanbul ignore next -- @preserve unreachable: decodeCursor returns null only for an undefined cursor */ cur ===
+					null
+			)
+				return badCursor(c);
 			where.push(
 				or(
 					lt(archiveBatches.createdAt, cur.at),
@@ -184,6 +190,13 @@ export function archiveRoutes() {
 				!DOWNLOADABLE.has(batch.status)
 			) {
 				return c.json({ error: "not_found" }, 404);
+			}
+			// Audit archives are audit-log dumps: payload.read alone is not enough.
+			const role =
+				c.var.actor?.role ??
+				/* istanbul ignore next -- @preserve unreachable: requirePermission already rejected a request without an actor */ "viewer";
+			if (batch.kind === "audit" && !can(role, "audit.read")) {
+				return c.json({ error: "forbidden", required: "audit.read" }, 403);
 			}
 			const part = await db
 				.select()

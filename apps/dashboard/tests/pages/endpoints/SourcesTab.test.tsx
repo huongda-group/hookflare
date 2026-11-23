@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it, vi } from "vitest";
 import { destination, project, source } from "../../helpers/fixtures";
@@ -123,5 +123,55 @@ describe("Sources tab", () => {
 		expect(
 			within(table).getByRole("button", { name: "New source" }),
 		).toBeInTheDocument();
+	});
+
+	it("creates from the empty state and forgets the secret after Done", async () => {
+		server.use(
+			...base(),
+			http.post(apiUrl("/sources"), () =>
+				HttpResponse.json(
+					{ ...source(), secret: "shh_empty" },
+					{ status: 201 },
+				),
+			),
+		);
+		const { user } = renderApp("/endpoints?tab=sources");
+		await screen.findByText("No sources yet.");
+		await user.click(
+			within(screen.getByRole("table")).getByRole("button", {
+				name: "New source",
+			}),
+		);
+		await user.click(screen.getByLabelText("Destination"));
+		await user.click(
+			await screen.findByRole("option", { name: "Billing API" }),
+		);
+		await user.type(screen.getByLabelText("Name"), "Stripe");
+		await user.click(screen.getByRole("button", { name: "Create" }));
+		expect(await screen.findByText("shh_empty")).toBeInTheDocument();
+		await user.click(screen.getByLabelText("I have stored this secret"));
+		await user.click(screen.getByRole("button", { name: "Done" }));
+		await waitFor(() =>
+			expect(screen.queryByText("shh_empty")).not.toBeInTheDocument(),
+		);
+	});
+
+	it("opens the detail page when any part of the row is clicked", async () => {
+		server.use(
+			...base(),
+			http.get(apiUrl("/sources"), () =>
+				HttpResponse.json({ data: [source()], next_cursor: null }),
+			),
+			http.get(apiUrl("/sources/src_1"), () => HttpResponse.json(source())),
+		);
+		const { user, router } = renderApp("/endpoints?tab=sources");
+		const row = (await screen.findByRole("link", { name: "Stripe" })).closest(
+			"tr",
+		) as HTMLElement;
+		await user.click(row);
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe("/endpoints/sources/src_1"),
+		);
+		expect(router.state.location.search).toEqual({ project_id: "prj_1" });
 	});
 });

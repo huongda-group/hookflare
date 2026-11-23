@@ -1,5 +1,7 @@
 import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as schema from "../../src/core/db/schema";
 import { deliveries, destinations, settings } from "../../src/core/db/schema";
 import { DnsError } from "../../src/core/dns";
 import {
@@ -24,6 +26,48 @@ type Dest = {
 	signing_secret?: string;
 	signing_secret_fingerprint: string;
 };
+
+/**
+ * A D1 whose `nth` execution of a statement matching `match` first runs
+ * `hook`, so a test can change a row between two reads of one request.
+ */
+function d1WithHook(
+	db: D1Database,
+	match: RegExp,
+	nth: number,
+	hook: () => Promise<unknown>,
+): D1Database {
+	let seen = 0;
+	const wrap = (
+		stmt: D1PreparedStatement,
+		query: string,
+	): D1PreparedStatement =>
+		new Proxy(stmt, {
+			get(target, prop) {
+				if (prop === "bind")
+					return (...args: unknown[]) => wrap(target.bind(...args), query);
+				const value = Reflect.get(target, prop, target);
+				if (typeof value !== "function") return value;
+				if (!["all", "first", "raw", "run"].includes(String(prop)))
+					return value.bind(target);
+				return async (...args: unknown[]) => {
+					if (match.test(query) && ++seen === nth) await hook();
+					return value.apply(target, args);
+				};
+			},
+		});
+	return new Proxy(db, {
+		get(target, prop) {
+			if (prop === "prepare")
+				return (query: string) => wrap(target.prepare(query), query);
+			const value = Reflect.get(target, prop, target);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
+}
+
+const SELECT_DESTINATION =
+	/^select .* from "destinations" where "destinations"\."id" = \?/;
 
 describe("admin destinations", () => {
 	beforeEach(() => {
@@ -60,6 +104,71 @@ describe("admin destinations", () => {
 		).json<{ data: Dest[] }>();
 		expect(list.data.map((d) => d.id)).toContain(created.id);
 		expect(list.data.every((d) => d.signing_secret === undefined)).toBe(true);
+	});
+
+	it("masks destination urls for actors without config.write", async () => {
+		const deps = testDeps({ queue: recordingQueue() });
+		const { project, destination } = await seedPipeline(deps, {
+			destination: { url: "https://api.example.com/v1/hooks?token=abc#frag" },
+		});
+		const admin = await adminApp(deps);
+		const root = await (
+			await admin.request("POST", "/destinations", {
+				project_id: project.id,
+				name: "Root",
+				url: "https://root.example.com/",
+			})
+		).json<Dest>();
+		const query = await (
+			await admin.request("POST", "/destinations", {
+				project_id: project.id,
+				name: "Query",
+				url: "https://q.example.com/?k=v",
+			})
+		).json<Dest>();
+		const full = "https://api.example.com/v1/hooks?token=abc#frag";
+		const masked: Record<string, string> = {
+			[destination.id]: "https://api.example.com/…",
+			[root.id]: "https://root.example.com",
+			[query.id]: "https://q.example.com/…",
+		};
+
+		// Admins keep the full url (the edit form needs it).
+		const adminGot = await (
+			await admin.request("GET", `/destinations/${destination.id}`)
+		).json<Dest>();
+		expect(adminGot.url).toBe(full);
+
+		for (const role of ["viewer", "operator"] as const) {
+			const api = await adminApp(deps, { role });
+			const list = await (
+				await api.request("GET", `/destinations?project_id=${project.id}`)
+			).json<{ data: Dest[] }>();
+			expect(Object.fromEntries(list.data.map((d) => [d.id, d.url]))).toEqual(
+				masked,
+			);
+			const one = await (
+				await api.request("GET", `/destinations/${destination.id}`)
+			).json<Dest>();
+			expect(one.url).toBe(masked[destination.id]);
+		}
+
+		// Operators can pause and resume; those responses are masked too.
+		const operator = await adminApp(deps, { role: "operator" });
+		const paused = await (
+			await operator.request("POST", `/destinations/${destination.id}/pause`)
+		).json<Dest>();
+		expect(paused.url).toBe(masked[destination.id]);
+		const resumed = await (
+			await operator.request("POST", `/destinations/${destination.id}/resume`)
+		).json<{ destination: Dest }>();
+		expect(resumed.destination.url).toBe(masked[destination.id]);
+		// A repeat (no-op) pause answers through the settled path.
+		await operator.request("POST", `/destinations/${destination.id}/pause`);
+		const again = await (
+			await operator.request("POST", `/destinations/${destination.id}/pause`)
+		).json<Dest>();
+		expect(again.url).toBe(masked[destination.id]);
 	});
 
 	it("never stores the signing secret or a full url in audit rows", async () => {
@@ -201,6 +310,111 @@ describe("admin destinations", () => {
 		);
 		expect(res.status).toBe(200);
 		expect(await auditRows(deps, destination.id)).toEqual([]);
+	});
+
+	it("pause answers 404 when the destination disappears before the transition", async () => {
+		const deps = testDeps();
+		const { project } = await seedPipeline(deps);
+		const api = await adminApp(deps);
+		const created = await (
+			await api.request("POST", "/destinations", {
+				project_id: project.id,
+				name: "gone",
+				url: "https://api.example.com/hooks",
+			})
+		).json<Dest>();
+		beforeNextBatch(deps, () =>
+			deps.db.delete(destinations).where(eq(destinations.id, created.id)),
+		);
+		const res = await api.request("POST", `/destinations/${created.id}/pause`);
+		expect(res.status).toBe(404);
+		expect(await res.json()).toEqual({ error: "not_found" });
+		expect((await auditRows(deps, created.id)).map((a) => a.action)).toEqual([
+			"destination.created",
+		]);
+	});
+
+	it("a repeat pause answers 409 conflict when the destination is resumed meanwhile", async () => {
+		const base = testDeps();
+		const { destination } = await seedPipeline(base, {
+			destination: { status: "paused" },
+		});
+		// The second read of the row is the re-check after the no-op pause.
+		const deps = {
+			...base,
+			db: drizzle(
+				d1WithHook(base.env.DB, SELECT_DESTINATION, 2, () =>
+					base.db
+						.update(destinations)
+						.set({ status: "active" })
+						.where(eq(destinations.id, destination.id)),
+				),
+				{ schema },
+			),
+		};
+		const api = await adminApp(deps);
+		const res = await api.request(
+			"POST",
+			`/destinations/${destination.id}/pause`,
+		);
+		expect(res.status).toBe(409);
+		expect(await res.json()).toEqual({ error: "conflict" });
+		expect(await auditRows(base, destination.id)).toEqual([]);
+	});
+
+	it("rejects invalid list, stats, and operation requests with 400 and changes nothing", async () => {
+		const deps = testDeps();
+		const { destination } = await seedPipeline(deps);
+		const api = await adminApp(deps);
+		for (const path of [
+			"/destinations?limit=0",
+			"/destinations/stats?range=1y",
+			`/destinations/${destination.id}?project_id=nope`,
+		]) {
+			const res = await api.request("GET", path);
+			expect.soft(res.status, path).toBe(400);
+			expect.soft(await res.json()).toMatchObject({ error: "invalid_request" });
+		}
+		for (const op of ["rotate-secret", "pause", "resume"]) {
+			const res = await api.request(
+				"POST",
+				`/destinations/${destination.id}/${op}`,
+				{ unknown: true },
+			);
+			expect.soft(res.status, op).toBe(400);
+			expect.soft(await res.json()).toMatchObject({ error: "invalid_request" });
+		}
+		const [row] = await deps.db
+			.select()
+			.from(destinations)
+			.where(eq(destinations.id, destination.id));
+		expect(row).toMatchObject({
+			status: "active",
+			signingSecretEnc: destination.signingSecretEnc,
+		});
+		expect(await auditRows(deps, destination.id)).toEqual([]);
+	});
+
+	it("answers 500 when the resolver fails unexpectedly on save", async () => {
+		const deps = testDeps({
+			resolveDns: async () => {
+				throw new Error("resolver bug");
+			},
+		});
+		const { project } = await seedPipeline(deps);
+		const api = await adminApp(deps);
+		const res = await api.request("POST", "/destinations", {
+			project_id: project.id,
+			name: "x",
+			url: "https://api.example.com/",
+		});
+		expect(res.status).toBe(500);
+		expect(await res.json()).toMatchObject({ error: "internal_error" });
+		const rows = await deps.db
+			.select()
+			.from(destinations)
+			.where(eq(destinations.projectId, project.id));
+		expect(rows.map((r) => r.name)).not.toContain("x");
 	});
 
 	it("rejects unsafe urls with 422 and resolver failures with 503", async () => {
@@ -526,6 +740,15 @@ describe("admin destinations", () => {
 		const audits = await auditRows(deps, dst.id);
 		const update = audits.find((a) => a.action === "destination.updated");
 		expect(update?.diffJson).toMatchObject({ max_in_flight: null });
+
+		const rate = await api.request("PATCH", `/destinations/${dst.id}`, {
+			rate_limit_per_s: 25,
+		});
+		expect(rate.status).toBe(200);
+		expect(await rate.json<Dest>()).toMatchObject({
+			max_in_flight: null,
+			rate_limit_per_s: 25,
+		});
 	});
 
 	it("rejects out-of-range limits", async () => {

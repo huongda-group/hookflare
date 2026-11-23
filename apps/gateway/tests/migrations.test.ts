@@ -21,7 +21,9 @@ async function indexNames(table: string) {
 
 describe("baseline migration", () => {
 	it("initializes a fresh database with a single baseline migration", () => {
-		expect(env.TEST_MIGRATIONS.map((m) => m.name)).toEqual(["0000_baseline.sql"]);
+		expect(env.TEST_MIGRATIONS.map((m) => m.name)).toEqual([
+			"0000_baseline.sql",
+		]);
 	});
 
 	it("creates projects without a slug column", async () => {

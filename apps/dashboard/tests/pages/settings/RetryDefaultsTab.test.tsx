@@ -1,6 +1,6 @@
 import { screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { qk } from "@/lib/queries/keys";
 import { renderApp } from "../../helpers/render";
 import { apiUrl, server } from "../../helpers/server";
@@ -95,5 +95,37 @@ describe("Settings › Retry defaults tab", () => {
 		await user.type(max, "8");
 		await queryClient.refetchQueries({ queryKey: qk.settings });
 		expect(await screen.findByLabelText("Max attempts")).toHaveValue(8);
+	});
+	it("omits the reason when blank and shows a write conflict inline", async () => {
+		const sent: unknown[] = [];
+		server.use(
+			http.patch(apiUrl("/settings"), async ({ request }) => {
+				sent.push(await request.json());
+				return HttpResponse.json({ error: "conflict" }, { status: 409 });
+			}),
+		);
+		const { user } = renderApp("/settings");
+		const max = await screen.findByLabelText("Max attempts");
+		await user.clear(max);
+		await user.type(max, "12");
+		await user.click(screen.getByRole("button", { name: "Save" }));
+		expect(
+			await screen.findByText("conflict", {
+				selector: "[data-field-error]",
+			}),
+		).toBeInTheDocument();
+		expect(sent).toEqual([
+			{
+				retry_defaults: {
+					timeout_ms: 10_000,
+					max_attempts: 12,
+					backoff_base_s: 30,
+					backoff_max_s: 21_600,
+				},
+			},
+		]);
+		expect(
+			screen.queryByText(/applies to new attempts/i),
+		).not.toBeInTheDocument();
 	});
 });

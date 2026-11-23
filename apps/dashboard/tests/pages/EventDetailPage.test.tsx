@@ -457,4 +457,78 @@ describe("Event Detail", () => {
 		).toBeInTheDocument();
 		expect(loads).toBe(2);
 	});
+	it("reports a missing event", async () => {
+		server.use(
+			http.get(
+				apiUrl("/events/evt_gone"),
+				() => new HttpResponse(null, { status: 404 }),
+			),
+		);
+		renderApp("/events/evt_gone");
+		expect(
+			await screen.findByText("Event evt_gone was not found."),
+		).toBeInTheDocument();
+	});
+
+	it("explains an event that has no deliveries yet", async () => {
+		server.use(detail({ deliveries: [] }));
+		renderApp("/events/evt_1");
+		expect(
+			await screen.findByText("No deliveries yet for this event."),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByRole("region", { name: /^delivery /i }),
+		).not.toBeInTheDocument();
+	});
+
+	it("inspects the highest-numbered attempt by default", async () => {
+		server.use(
+			detail({
+				deliveries: [
+					delivery({
+						attempt_count: 3,
+						attempts: [
+							attempt({ id: "a1", attempt_no: 1, response_snippet: "first" }),
+							attempt({ id: "a3", attempt_no: 3, response_snippet: "third" }),
+							attempt({ id: "a2", attempt_no: 2, response_snippet: "second" }),
+						],
+					}),
+				],
+			}),
+		);
+		renderApp("/events/evt_1");
+		await waitFor(() =>
+			expect(screen.getByRole("tabpanel")).toHaveTextContent("third"),
+		);
+	});
+
+	it("replays the event with a reason and refreshes it afterwards", async () => {
+		let loads = 0;
+		let sent: { url: URL; body: unknown } | undefined;
+		server.use(
+			http.get(apiUrl("/events/evt_1"), () => {
+				loads++;
+				return HttpResponse.json(webhookEvent());
+			}),
+			http.post(apiUrl("/events/evt_1/replay"), async ({ request }) => {
+				sent = { url: new URL(request.url), body: await request.json() };
+				return HttpResponse.json(
+					{ delivery_id: "dlv_new", status: "pending", enqueued: true },
+					{ status: 201 },
+				);
+			}),
+		);
+		const { user } = renderApp("/events/evt_1?project_id=prj_1", {
+			role: "operator",
+		});
+		await user.click(await screen.findByRole("button", { name: "Replay" }));
+		const dialog = await screen.findByRole("dialog");
+		await user.type(within(dialog).getByLabelText("Reason"), "backend fixed");
+		const before = loads;
+		await user.click(within(dialog).getByRole("button", { name: "Replay 1" }));
+		expect(await within(dialog).findByText("dlv_new")).toBeInTheDocument();
+		expect(sent?.body).toEqual({ reason: "backend fixed" });
+		expect(sent?.url.searchParams.get("project_id")).toBe("prj_1");
+		await waitFor(() => expect(loads).toBeGreaterThan(before));
+	});
 });

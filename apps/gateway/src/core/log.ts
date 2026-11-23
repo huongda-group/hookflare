@@ -79,6 +79,7 @@ export function redactValue(
 	if (depth > MAX_DEPTH) {
 		return "[TRUNCATED]";
 	}
+	/* istanbul ignore if -- @preserve unreachable: every other typeof result returned above; kept as a type guard */
 	if (typeof value !== "object") {
 		return value;
 	}

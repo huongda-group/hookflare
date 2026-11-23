@@ -208,4 +208,27 @@ describe("Projects", () => {
 			screen.queryByRole("heading", { name: /discard/i }),
 		).not.toBeInTheDocument();
 	});
+	it("opens the create form from the empty state", async () => {
+		const { user } = renderApp("/projects");
+		const table = await screen.findByRole("table");
+		await user.click(
+			within(table).getByRole("button", { name: "New project" }),
+		);
+		const dialog = await screen.findByRole("dialog");
+		expect(within(dialog).getByLabelText("Name")).toHaveValue("");
+	});
+
+	it("opens a project's detail page when its row is clicked", async () => {
+		server.use(
+			http.get(apiUrl("/projects"), () =>
+				HttpResponse.json({ data: [project()], next_cursor: null }),
+			),
+		);
+		const { user, router } = renderApp("/projects");
+		const row = await screen.findByRole("row", { name: /Payments/ });
+		await user.click(within(row).getByText("prj_1"));
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe("/projects/prj_1"),
+		);
+	});
 });

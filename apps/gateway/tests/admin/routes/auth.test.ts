@@ -220,6 +220,68 @@ describe("POST /auth/setup", () => {
 		expect(limit).toHaveBeenCalledTimes(1);
 	});
 
+	it("rejects a cross-origin setup with 403 before touching the limiter", async () => {
+		const { limit, limiter } = recordingLimiter();
+		const deps = testDeps({ env: testEnv({ LOGIN_LIMITER: limiter }) });
+		const res = await request(deps, "POST", "/auth/setup", {
+			body: { username: "admin", password: PASSWORD },
+			origin: "https://evil.example",
+		});
+		expect(res.status).toBe(403);
+		expect(await res.json()).toEqual({ error: "bad_origin" });
+		expect(limit).not.toHaveBeenCalled();
+		expect(await getUser(deps.db, "admin")).toBeUndefined();
+	});
+
+	it("returns 429 when the limiter rejects, without hashing or creating a user", async () => {
+		const deps = testDeps({ env: testEnv({ LOGIN_LIMITER: denyAllLimiter }) });
+		const res = await request(deps, "POST", "/auth/setup", {
+			body: { username: "admin", password: PASSWORD },
+		});
+		expect(res.status).toBe(429);
+		expect(await res.json()).toEqual({ error: "too_many_attempts" });
+		expect(deriveSpy).not.toHaveBeenCalled();
+		expect(await getUser(deps.db, "admin")).toBeUndefined();
+	});
+
+	it("verifies the body's Turnstile token before onboarding", async () => {
+		const fetchMock = vi.fn(
+			async (_url: RequestInfo | URL, _init?: RequestInit) =>
+				new Response(JSON.stringify({ success: true }), { status: 200 }),
+		);
+		const deps = testDeps({
+			env: testEnv({
+				TURNSTILE_SITE_KEY: "site",
+				TURNSTILE_SECRET_KEY: TURNSTILE_TEST_SECRET,
+			}),
+			fetch: fetchMock as unknown as typeof fetch,
+		});
+		const res = await request(deps, "POST", "/auth/setup", {
+			body: { username: "admin", password: PASSWORD, turnstile_token: "tok-1" },
+		});
+		expect(res.status).toBe(201);
+		const form = fetchMock.mock.calls[0]?.[1]?.body as FormData;
+		expect(form.get("response")).toBe("tok-1");
+	});
+
+	it("fails Turnstile for a body that is not a JSON object, before validation or hashing", async () => {
+		const fetchMock = vi.fn();
+		const deps = testDeps({
+			env: testEnv({
+				TURNSTILE_SITE_KEY: "site",
+				TURNSTILE_SECRET_KEY: TURNSTILE_TEST_SECRET,
+			}),
+			fetch: fetchMock as unknown as typeof fetch,
+		});
+		for (const rawBody of ["42", "null"]) {
+			const res = await request(deps, "POST", "/auth/setup", { rawBody });
+			expect(res.status).toBe(403);
+			expect(await res.json()).toEqual({ error: "turnstile_failed" });
+		}
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(deriveSpy).not.toHaveBeenCalled();
+	});
+
 	it("returns 500 when Turnstile is misconfigured", async () => {
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 		const deps = testDeps({ env: testEnv({ TURNSTILE_SITE_KEY: "site" }) });
@@ -316,6 +378,21 @@ describe("POST /auth/login", () => {
 			body: { username: "admin", password: exact.trim() },
 		});
 		expect(trimmed.status).toBe(401);
+	});
+
+	it("rejects a body missing the password with 400, without hashing", async () => {
+		const deps = testDeps();
+		await seedAdmin(deps);
+		deriveSpy.mockClear();
+		const res = await request(deps, "POST", "/auth/login", {
+			body: { username: "admin" },
+		});
+		expect(res.status).toBe(400);
+		expect(await res.json()).toMatchObject({
+			error: "invalid_request",
+			issues: [expect.objectContaining({ path: "password" })],
+		});
+		expect(deriveSpy).not.toHaveBeenCalled();
 	});
 
 	it("maps malformed and oversized bodies to 400 and still counts the limiter", async () => {
@@ -463,6 +540,29 @@ describe("POST /auth/logout", () => {
 		expect(after.status).toBe(401);
 	});
 
+	it("ends the previous session when signing in again with its cookie", async () => {
+		const deps = testDeps();
+		await seedAdmin(deps);
+		const first = await request(deps, "POST", "/auth/login", {
+			body: { username: "admin", password: PASSWORD },
+		});
+		const old = cookieOf(first);
+		const second = await request(deps, "POST", "/auth/login", {
+			body: { username: "admin", password: PASSWORD },
+			headers: { cookie: old },
+		});
+		expect(second.status).toBe(204);
+		const fresh = cookieOf(second);
+		expect(fresh).not.toBe(old);
+		expect(
+			(await request(deps, "GET", "/me", { headers: { cookie: old } })).status,
+		).toBe(401);
+		expect(
+			(await request(deps, "GET", "/me", { headers: { cookie: fresh } }))
+				.status,
+		).toBe(200);
+	});
+
 	it("requires a same-origin request", async () => {
 		const deps = testDeps();
 		const res = await request(deps, "POST", "/auth/logout", {
@@ -470,6 +570,20 @@ describe("POST /auth/logout", () => {
 		});
 		expect(res.status).toBe(403);
 		expect(await res.json()).toEqual({ error: "bad_origin" });
+	});
+	it("clears the cookie and deletes nothing when no session cookie is sent", async () => {
+		const deps = testDeps();
+		await seedAdmin(deps);
+		const login = await request(deps, "POST", "/auth/login", {
+			body: { username: "admin", password: PASSWORD },
+		});
+		const cookie = cookieOf(login);
+		const logout = await request(deps, "POST", "/auth/logout");
+		expect(logout.status).toBe(204);
+		expect(logout.headers.get("set-cookie")).toMatch(/Max-Age=0/i);
+		// The other browser's session survives.
+		const me = await request(deps, "GET", "/me", { headers: { cookie } });
+		expect(me.status).toBe(200);
 	});
 });
 

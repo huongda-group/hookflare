@@ -3,20 +3,25 @@ import {
 	type StorageSettings,
 } from "@hookflare/shared";
 import { eq, getTableColumns, sql } from "drizzle-orm";
-import { beforeEach, describe, expect, it } from "vitest";
-import { DAY_MS } from "../../src/core/db/archive";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cutoffsFor, DAY_MS } from "../../src/core/db/archive";
 import {
 	archiveBatches,
+	archiveParts,
+	auditLogs,
 	settings,
 	webhookEvents,
 } from "../../src/core/db/schema";
 import { createLogger } from "../../src/core/log";
 import { batchPrefix, dayOf } from "../../src/jobs/archive/keys";
 import {
+	buildEventPart,
 	EVENT_LINE_COLUMNS,
 	EVENT_LINE_EXCLUDED,
 } from "../../src/jobs/archive/part";
+import { PURGE_CHUNK } from "../../src/jobs/archive/purge";
 import { runArchive, type StepFn } from "../../src/jobs/archive/run";
+import { verifyBatch } from "../../src/jobs/archive/verify";
 import { isolateArchive, listKeys, seedBatch } from "../helpers/archive";
 import { testDeps } from "../helpers/deps";
 import { seedDelivery, seedPipeline } from "../helpers/seed";
@@ -194,6 +199,214 @@ describe("runArchive", () => {
 		await runArchive(plain, () => deps, "inst-m5-b", logger);
 		expect(await exists(left.eventId)).toBe(false);
 		expect(await exists(gone.eventId)).toBe(true);
+	});
+
+	it("archives past a part whose events all lack their R2 payload, and keeps them in D1", async () => {
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			await setStorage({ archive_retention_days: null });
+			const p = await seedPipeline(deps);
+			const receivedAt = NOW - 40 * DAY_MS;
+			const day = dayOf(receivedAt);
+			// Payload lost (a D1 restore to before a purge), and big enough to
+			// fill the whole first part on its own.
+			const lost = await seedDelivery(deps, p, {
+				status: "delivered",
+				body: big(),
+				event: { receivedAt },
+			});
+			const [ev] = await deps.db
+				.select({ r2Key: webhookEvents.r2Key })
+				.from(webhookEvents)
+				.where(eq(webhookEvents.id, lost.eventId));
+			await deps.payloads.delete(ev.r2Key as string);
+			await deps.db
+				.update(webhookEvents)
+				.set({ sizeBytes: 32 * MiB })
+				.where(eq(webhookEvents.id, lost.eventId));
+			const fine = await seedDelivery(deps, p, {
+				status: "delivered",
+				event: { receivedAt: receivedAt + 1 },
+			});
+
+			await runArchive(plain, () => deps, "inst-lost", logger);
+			expect(await exists(fine.eventId)).toBe(false);
+			expect(await exists(lost.eventId)).toBe(true);
+			const [b] = await batchesOf(day);
+			expect(b).toMatchObject({ status: "purged", itemCount: 1 });
+			const parts = await deps.db
+				.select()
+				.from(archiveParts)
+				.where(eq(archiveParts.batchId, b.id));
+			expect(parts.map((x) => [x.firstId, x.itemCount])).toEqual([
+				[fine.eventId, 1],
+			]);
+			expect(
+				errorSpy.mock.calls.map((c) => JSON.parse(String(c[0])).msg),
+			).toContain("archive.payload_missing");
+
+			// The next run does not pick the lost event up again.
+			await runArchive(plain, () => deps, "inst-lost-b", logger);
+			expect(await batchesOf(day)).toHaveLength(1);
+			expect(await exists(lost.eventId)).toBe(true);
+		} finally {
+			errorSpy.mockRestore();
+		}
+	});
+
+	/** Records step names, then runs them. */
+	function recorder() {
+		const names: string[] = [];
+		const step: StepFn = (name, fn) => {
+			names.push(name);
+			return fn();
+		};
+		return { names, step };
+	}
+
+	it("stops after the plan step when the storage setting is corrupt", async () => {
+		await deps.db.insert(settings).values({
+			key: "storage",
+			valueJson: "{not json",
+			updatedAt: 1,
+		});
+		const p = await seedPipeline(deps);
+		const { eventId } = await seedDelivery(deps, p, {
+			status: "delivered",
+			event: { receivedAt: NOW - 100 * DAY_MS },
+		});
+		const { names, step } = recorder();
+		expect(await runArchive(step, () => deps, "inst-corrupt", logger)).toEqual({
+			batches: 0,
+		});
+		expect(names).toEqual(["plan"]);
+		expect(await exists(eventId)).toBe(true);
+	});
+
+	it("purges a resumed verified batch without rebuilding or re-verifying it", async () => {
+		const p = await seedPipeline(deps);
+		const receivedAt = NOW - 40 * DAY_MS;
+		const { eventId } = await seedDelivery(deps, p, {
+			status: "delivered",
+			event: { receivedAt },
+		});
+		const batch = await seedBatch(deps, {
+			day: dayOf(receivedAt),
+			workflowInstanceId: "inst-v",
+		});
+		const cut = cutoffsFor(DEFAULT_STORAGE_SETTINGS, NOW);
+		await buildEventPart(deps, batch.id, 1, cut);
+		expect(await verifyBatch(deps, batch.id)).toEqual({ ok: true });
+
+		const { names, step } = recorder();
+		await runArchive(step, () => deps, "inst-v", logger);
+		expect(names.filter((n) => n.includes(batch.id))).toEqual([
+			`parts:${batch.id}`,
+			`purge-select:${batch.id}:1:0`,
+			`purge:${batch.id}:1:0`,
+			`finish:${batch.id}`,
+		]);
+		expect(await exists(eventId)).toBe(false);
+		expect((await batchesOf(dayOf(receivedAt)))[0].status).toBe("purged");
+	});
+
+	it("archives and purges audit rows past audit_retention_days", async () => {
+		const at = NOW - 400 * DAY_MS;
+		await deps.db.insert(auditLogs).values({
+			id: "aud_run_1",
+			actor: "run@test",
+			action: "settings.updated",
+			resourceType: "settings",
+			resourceId: "x",
+			at,
+		});
+		try {
+			const { names, step } = recorder();
+			await runArchive(step, () => deps, "inst-audit", logger);
+			const [b] = (await deps.db.select().from(archiveBatches)).filter(
+				(r) => r.kind === "audit" && r.day === dayOf(at),
+			);
+			expect(b).toMatchObject({ status: "purged" });
+			expect(names).toContain(`part:${b.id}:1`);
+			expect(names).toContain(`purge:${b.id}:1`);
+			expect(
+				await deps.db
+					.select()
+					.from(auditLogs)
+					.where(eq(auditLogs.id, "aud_run_1")),
+			).toEqual([]);
+			expect(
+				await listKeys(deps.payloads, batchPrefix("audit", b.day, b.id)),
+			).toHaveLength(2); // part + manifest
+		} finally {
+			await deps.db.delete(auditLogs).where(eq(auditLogs.id, "aud_run_1"));
+		}
+	});
+
+	it("logs a failed verify, purges nothing of that batch, and carries on", async () => {
+		const p = await seedPipeline(deps);
+		const receivedAt = NOW - 40 * DAY_MS;
+		const { eventId } = await seedDelivery(deps, p, {
+			status: "delivered",
+			event: { receivedAt },
+		});
+		const { names, step: inner } = recorder();
+		// The part file is lost between build and verify.
+		const step: StepFn = async (name, fn) => {
+			if (name.startsWith("verify:")) {
+				const parts = await deps.db.select().from(archiveParts);
+				for (const part of parts)
+					if (part.r2Key) await deps.payloads.delete(part.r2Key);
+			}
+			return inner(name, fn);
+		};
+		const err = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			await runArchive(step, () => deps, "inst-vf", logger);
+			const msgs = err.mock.calls.map((c) => JSON.parse(String(c[0])));
+			expect(msgs).toContainEqual(
+				expect.objectContaining({
+					msg: "archive.verify_failed",
+					error: "part 1: object missing",
+				}),
+			);
+		} finally {
+			err.mockRestore();
+		}
+		const [b] = await batchesOf(dayOf(receivedAt));
+		expect(b.status).toBe("failed");
+		expect(names.some((n) => n.startsWith(`parts:${b.id}`))).toBe(false);
+		expect(names).not.toContain(`finish:${b.id}`);
+		expect(names.at(-1)).toBe("retention");
+		expect(await exists(eventId)).toBe(true);
+	});
+
+	it("purges a part of more than one chunk, following the select cursor", async () => {
+		const p = await seedPipeline(deps);
+		const receivedAt = NOW - 40 * DAY_MS;
+		// Exactly one full chunk: the second select comes back empty and done.
+		await deps.db.run(sql`INSERT INTO webhook_events
+			(id, project_id, source_id, received_at, headers_json, content_type, size_bytes, payload_sha256, body_inline)
+			WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM c WHERE n < ${PURGE_CHUNK})
+			SELECT 'evt_bulk_' || printf('%04d', n), ${p.project.id}, ${p.source.id}, ${receivedAt} + n,
+				'{}', 'application/json', 2, ${"0".repeat(64)}, X'7B7D' FROM c`);
+		await deps.db.run(sql`INSERT INTO deliveries
+			(id, event_id, destination_id, project_id, kind, status, attempt_count, enqueued_at, created_at)
+			SELECT 'dlv_bulk_' || substr(id, 10), id, ${p.destination.id}, ${p.project.id}, 'initial', 'delivered', 1, ${receivedAt}, ${receivedAt}
+			FROM webhook_events WHERE id LIKE 'evt_bulk_%'`);
+		const { names, step } = recorder();
+		await runArchive(step, () => deps, "inst-bulk", logger);
+		const [b] = await batchesOf(dayOf(receivedAt));
+		expect(b).toMatchObject({ status: "purged", itemCount: PURGE_CHUNK });
+		expect(names.filter((n) => n.startsWith(`purge-select:${b.id}:`))).toEqual([
+			`purge-select:${b.id}:1:0`,
+			`purge-select:${b.id}:1:1`,
+		]);
+		expect(names).not.toContain(`purge:${b.id}:1:1`);
+		const [left] = await deps.db.all<{ n: number }>(
+			sql`SELECT COUNT(*) AS n FROM webhook_events WHERE id LIKE 'evt_bulk_%'`,
+		);
+		expect(left.n).toBe(0);
 	});
 });
 

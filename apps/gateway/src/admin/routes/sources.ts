@@ -134,7 +134,10 @@ export function sourceRoutes() {
 			secretPrevExpiresAt: null,
 			eventIdFrom: req.event_id_from,
 			eventIdSelector:
-				req.event_id_from === "none" ? null : (req.event_id_selector ?? null),
+				req.event_id_from === "none"
+					? null
+					: (req.event_id_selector ??
+						/* istanbul ignore next -- @preserve unreachable: createSourceRequest requires a selector unless event_id_from is none */ null),
 			maxBodyBytes: req.max_body_bytes ?? null,
 			createdAt: ts,
 			updatedAt: ts,
@@ -306,7 +309,9 @@ export function sourceRoutes() {
 					)
 					.returning(),
 				auditInsertIfChanged(db, {
-					actor: c.var.actor?.username ?? "",
+					actor:
+						c.var.actor?.username ??
+						/* istanbul ignore next -- @preserve unreachable: requirePermission already rejected a request without an actor */ "",
 					at: ts,
 					action: "source.secret_rotated",
 					resourceType: "source",

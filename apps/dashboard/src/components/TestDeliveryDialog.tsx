@@ -14,6 +14,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { api, projectScopedPath } from "@/lib/api";
 import { errorText } from "@/lib/forms";
+import { useCan } from "@/lib/permissions";
 import { qk } from "@/lib/queries/keys";
 
 const MAX = 64 * 1024;
@@ -30,6 +31,8 @@ export function TestDeliveryDialog({
 	projectId: string;
 }) {
 	const qc = useQueryClient();
+	// The gateway accepts a custom payload only from config.write holders.
+	const canCustomize = useCan("config.write");
 	const [text, setText] = useState("");
 	const [invalid, setInvalid] = useState<string | null>(null);
 	const m = useMutation({
@@ -61,6 +64,7 @@ export function TestDeliveryDialog({
 		<Dialog
 			open={open}
 			onOpenChange={(o) => {
+				/* istanbul ignore else -- @preserve unreachable: Radix calls onOpenChange(true) only from a Trigger, and this dialog has none */
 				if (!o) m.reset();
 				onOpenChange(o);
 			}}
@@ -69,19 +73,23 @@ export function TestDeliveryDialog({
 				<DialogHeader>
 					<DialogTitle>Send test delivery</DialogTitle>
 					<DialogDescription>
-						Signed like a real delivery. Leave empty for the default test event.
+						{canCustomize
+							? "Signed like a real delivery. Leave empty for the default test event."
+							: "Sends the default test event, signed like a real delivery."}
 					</DialogDescription>
 				</DialogHeader>
-				<FormField htmlFor="test-payload" label="JSON payload (optional)">
-					<Textarea
-						id="test-payload"
-						className="font-mono"
-						rows={8}
-						value={text}
-						onChange={(e) => setText(e.target.value)}
-					/>
-					{invalid && <p className="text-sm text-failure">{invalid}</p>}
-				</FormField>
+				{canCustomize && (
+					<FormField htmlFor="test-payload" label="JSON payload (optional)">
+						<Textarea
+							id="test-payload"
+							className="font-mono"
+							rows={8}
+							value={text}
+							onChange={(e) => setText(e.target.value)}
+						/>
+						{invalid && <p className="text-sm text-failure">{invalid}</p>}
+					</FormField>
+				)}
 				{m.error && (
 					<p className="text-sm text-failure">{errorText(m.error)}</p>
 				)}

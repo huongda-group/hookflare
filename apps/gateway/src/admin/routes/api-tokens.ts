@@ -100,7 +100,9 @@ export function apiTokenRoutes() {
 		const [rows] = await db.batch([
 			revokeApiTokenStmt(db, username, id, at),
 			auditInsertIfChanged(db, {
-				actor: c.var.actor?.username ?? "",
+				actor:
+					c.var.actor?.username ??
+					/* istanbul ignore next -- @preserve unreachable: requirePermission already rejected a request without an actor */ "",
 				action: "api_token.revoked",
 				resourceType: "api_token",
 				resourceId: id,

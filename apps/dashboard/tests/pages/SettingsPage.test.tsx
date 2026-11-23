@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it, vi } from "vitest";
 import { renderApp } from "../helpers/render";
@@ -118,5 +118,35 @@ describe("Settings", () => {
 		await vi.waitFor(() =>
 			expect(patched).toHaveBeenCalledWith({ disabled: true }),
 		);
+	});
+	it("switches tabs through the URL search", async () => {
+		const { user, router } = renderApp("/settings");
+		await screen.findByLabelText("Max attempts");
+		await user.click(screen.getByRole("tab", { name: "Storage" }));
+		await waitFor(() =>
+			expect(router.state.location.search).toEqual({ tab: "storage" }),
+		);
+		expect(screen.getByRole("tab", { name: "Storage" })).toHaveAttribute(
+			"aria-selected",
+			"true",
+		);
+	});
+
+	it("falls back to retry defaults for an unknown or forbidden tab", async () => {
+		renderApp("/settings?tab=users", { role: "operator" });
+		expect(await screen.findByLabelText("Max attempts")).toBeInTheDocument();
+		expect(screen.getByRole("tab", { name: "Retry defaults" })).toHaveAttribute(
+			"aria-selected",
+			"true",
+		);
+		expect(
+			screen.queryByRole("tab", { name: "Storage" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("treats a malformed tab parameter as retry defaults", async () => {
+		const { router } = renderApp("/settings?tab=bogus");
+		expect(await screen.findByLabelText("Max attempts")).toBeInTheDocument();
+		expect(router.state.location.search).toEqual({ tab: "retry" });
 	});
 });

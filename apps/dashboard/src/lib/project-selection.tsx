@@ -110,10 +110,12 @@ export function useProjectSelection(enabled: boolean) {
 		const opts = { hash: true, replace: true, resetScroll: false } as const;
 		switch (route) {
 			case "/endpoints/sources/$sourceId":
+				/* istanbul ignore else -- @preserve unreachable: the matched route always has this param */
 				if (sourceId)
 					void navigate({ ...opts, to: route, params: { sourceId }, search });
 				break;
 			case "/endpoints/destinations/$destinationId":
+				/* istanbul ignore else -- @preserve unreachable: the matched route always has this param */
 				if (destinationId)
 					void navigate({
 						...opts,
@@ -123,9 +125,11 @@ export function useProjectSelection(enabled: boolean) {
 					});
 				break;
 			case "/events/$eventId":
+				/* istanbul ignore else -- @preserve unreachable: the matched route always has this param */
 				if (eventId)
 					void navigate({ ...opts, to: route, params: { eventId }, search });
 				break;
+			/* istanbul ignore next -- @preserve unreachable: validateSearch drops any scope but "deployment", so this route never lacks project_id while project-scoped */
 			case "/alerts/$alertId":
 				if (alertId)
 					void navigate({ ...opts, to: route, params: { alertId }, search });
@@ -147,6 +151,7 @@ export function useProjectSelection(enabled: boolean) {
 	]);
 
 	const selectProject = (id: string) => {
+		/* istanbul ignore if -- @preserve unreachable: the picker offers only loaded projects and Radix Select reports changes only */
 		if (id === projectId || !hasProject(id)) return;
 		if (!projectScoped) {
 			setRemembered(id);

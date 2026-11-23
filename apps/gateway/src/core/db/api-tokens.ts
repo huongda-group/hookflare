@@ -1,6 +1,13 @@
-import { and, desc, eq, gt, isNotNull, isNull, or } from "drizzle-orm";
+import { and, desc, eq, gt, isNotNull, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "../../deps";
-import { type ApiTokenRow, apiTokens, type Role, users } from "./schema";
+import { newId } from "../ids";
+import {
+	type ApiTokenRow,
+	apiTokens,
+	auditLogs,
+	type Role,
+	users,
+} from "./schema";
 
 export type TokenActor = {
 	username: string;
@@ -93,4 +100,46 @@ export function revokeUserApiTokensStmt(db: Db, username: string, now: number) {
 		.update(apiTokens)
 		.set({ revokedAt: now })
 		.where(and(eq(apiTokens.username, username), isNull(apiTokens.revokedAt)));
+}
+
+/**
+ * Unexecuted pair for a user disable, in the same batch as (and after) the
+ * user update that sets `disabled_at = now`: the revoke applies only if that
+ * update did, and the audit row — written only when a token was revoked —
+ * lists the IDs read back from the rows it revoked (never a token or hash).
+ */
+export function revokeDisabledUserApiTokensStmts(
+	db: Db,
+	a: { username: string; now: number; actor: string; reason: string | null },
+) {
+	return [
+		db
+			.update(apiTokens)
+			.set({ revokedAt: a.now })
+			.where(
+				and(
+					eq(apiTokens.username, a.username),
+					isNull(apiTokens.revokedAt),
+					sql`EXISTS (SELECT 1 FROM users WHERE username = ${a.username} AND disabled_at = ${a.now})`,
+				),
+			),
+		db.insert(auditLogs).select(
+			db
+				.select({
+					id: sql<string>`${newId("aud", a.now)}`.as("id"),
+					actor: sql<string>`${a.actor}`.as("actor"),
+					action: sql<string>`'api_token.revoked'`.as("action"),
+					resourceType: sql<string>`'user'`.as("resource_type"),
+					resourceId: sql<string>`${a.username}`.as("resource_id"),
+					reason: sql<string | null>`${a.reason}`.as("reason"),
+					diffJson:
+						sql<string>`json_object('revoked_ids', (SELECT json_group_array(id) FROM (SELECT id FROM api_tokens WHERE username = ${a.username} AND revoked_at = ${a.now} ORDER BY id)), 'cause', 'user.disabled')`.as(
+							"diff_json",
+						),
+					at: sql<number>`${a.now}`.as("at"),
+				})
+				.from(sql`(SELECT 1)`)
+				.where(sql`changes() > 0`),
+		),
+	] as const;
 }

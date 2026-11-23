@@ -6,7 +6,7 @@
 
 An event has one initial delivery and may gain replay deliveries. Each delivery tracks its own attempts and state in D1. Terminal states are `delivered`, `failed_final`, and `dead`; active states include `pending`, `queued`, `in_flight`, `retrying`, and `paused`.
 
-Only an actual outbound request consumes an attempt. Infrastructure errors, limiter rejection, and a paused destination do not. Retry budget is the D1 attempt count, not the queue message attempt counter. The native DLQ is a safety net.
+Only an actual outbound request consumes an attempt. Infrastructure errors (including a missing or malformed `SECRETS_KEY`), limiter rejection, and a paused destination do not. A retrying delivery is leased only once `next_attempt_at` is due, so a duplicate message never cuts a backoff short. Retry budget is the D1 attempt count, not the queue message attempt counter. The native DLQ is a safety net.
 
 ## Design and interaction
 

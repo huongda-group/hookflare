@@ -222,6 +222,23 @@ describe("POST /in/:sourceId", () => {
 		expect(await res.json()).toEqual({ error: "rate_limited" });
 	});
 
+	it("returns 503 and stores nothing when the limiter itself fails", async () => {
+		const deps = testDeps({
+			env: testEnv({
+				INGRESS_LIMITER: {
+					limit: async () => {
+						throw new Error("limiter unavailable");
+					},
+				} as unknown as RateLimit,
+			}),
+		});
+		const p = await seedPipeline(deps);
+		const res = await post(deps, `/in/${p.source.id}`, "{}");
+		expect(res.status).toBe(503);
+		expect(await res.json()).toEqual({ error: "unavailable" });
+		expect(await eventsOf(deps, p.source.id)).toHaveLength(0);
+	});
+
 	it("returns 413 above max_body_bytes and stores nothing", async () => {
 		const deps = testDeps();
 		const p = await seedPipeline(deps, { source: { maxBodyBytes: 10 } });
@@ -377,6 +394,55 @@ describe("POST /in/:sourceId", () => {
 		expect(await deps.payloads.head(put?.slice(4) as string)).toBeNull();
 	});
 
+	it("keeps the R2 object when D1 throws after the event was committed", async () => {
+		const base = testDeps({ queue: recordingQueue() });
+		const p = await seedPipeline(base);
+		// The batch commits, then the call reports an error (e.g. a lost connection).
+		const deps = {
+			...base,
+			db: new Proxy(base.db, {
+				get(target, prop, receiver) {
+					const value = Reflect.get(target, prop, receiver);
+					if (prop !== "batch") return value;
+					return async (...args: unknown[]) => {
+						await (value as (...a: unknown[]) => Promise<unknown>).apply(
+							target,
+							args,
+						);
+						throw new Error("Network connection lost");
+					};
+				},
+			}),
+		} as typeof base;
+		const res = await post(
+			deps,
+			`/in/${p.source.id}`,
+			new Uint8Array(100_000).fill(0x61),
+		);
+		expect(res.status).toBe(503);
+		const [event] = await eventsOf(base, p.source.id);
+		expect(event?.r2Key).toBeTruthy();
+		expect(await base.payloads.head(event.r2Key as string)).not.toBeNull();
+	});
+
+	it("keeps the R2 object when the D1 write fails and its outcome cannot be checked", async () => {
+		const base = testDeps();
+		const p = await seedPipeline(base);
+		const deps = faultyDeps(base, {
+			d1: [
+				{ match: /insert into "webhook_events"/ },
+				{ match: /from "webhook_events" where "webhook_events"."id"/ },
+			],
+		});
+		const res = await post(
+			deps,
+			`/in/${p.source.id}`,
+			new Uint8Array(100_000).fill(0x61),
+		);
+		expect(res.status).toBe(503);
+		expect(deps.r2Log.some((l) => l.startsWith("delete "))).toBe(false);
+	});
+
 	it("returns 200 duplicate for a known provider event id and creates nothing", async () => {
 		const queue = recordingQueue();
 		const deps = testDeps({ queue });
@@ -512,6 +578,20 @@ describe("previous source secret", () => {
 		).toBe(true);
 	});
 
+	it("rejects with 401 when neither the current nor the in-grace previous secret matches", async () => {
+		const deps = testDeps({ queue: recordingQueue() });
+		const p = await seedWithPrev(deps, deps.now() + 3_600_000);
+		const body = new TextEncoder().encode('{"a":1}');
+		const res = await post(deps, `/in/${p.source.id}`, body, {
+			"x-sig": await hmacHex(body, "some-other-secret-0123456789"),
+		});
+		expect(res.status).toBe(401);
+		expect(await eventsOf(deps, p.source.id)).toHaveLength(0);
+		expect(
+			loggedLines().some((l) => l.msg === "ingress.verified_with_prev_secret"),
+		).toBe(false);
+	});
+
 	it("rejects it after grace", async () => {
 		const deps = testDeps({ queue: recordingQueue() });
 		const p = await seedWithPrev(deps, deps.now() - 1);
@@ -535,5 +615,84 @@ describe("previous source secret", () => {
 		expect(
 			loggedLines().some((l) => l.msg === "ingress.verified_with_prev_secret"),
 		).toBe(false);
+	});
+});
+
+describe("ingress best-effort and lookup failures", () => {
+	let spies: MockInstance<typeof console.log>[] = [];
+	beforeEach(() => {
+		clearSourceCache();
+		spies = (["log", "warn", "error"] as const).map((m) =>
+			vi.spyOn(console, m).mockImplementation(() => {}),
+		);
+	});
+	const logged = (msg: string) =>
+		spies.some((s) =>
+			s.mock.calls.some((c) => JSON.parse(c[0] as string).msg === msg),
+		);
+
+	const withEventId = {
+		eventIdFrom: "header" as const,
+		eventIdSelector: "x-event-id",
+	};
+
+	it("returns 503 and stores nothing when the duplicate lookup fails", async () => {
+		const base = testDeps({ queue: recordingQueue() });
+		const p = await seedPipeline(base, { source: withEventId });
+		const deps = faultyDeps(base, {
+			d1: [{ match: /^select .*"provider_event_id" = \?/ }],
+		});
+		const res = await post(deps, `/in/${p.source.id}`, "{}", {
+			"x-event-id": "e-lookup",
+		});
+		expect(res.status).toBe(503);
+		expect(await res.json()).toEqual({ error: "unavailable" });
+		expect(await eventsOf(base, p.source.id)).toHaveLength(0);
+		expect((base.queue as RecordingQueue).sent).toHaveLength(0);
+		expect(logged("ingress.lookup_failed")).toBe(true);
+	});
+
+	it("still returns 503 when the D1 write fails and the R2 cleanup fails too, leaving a harmless orphan", async () => {
+		const base = testDeps({ queue: recordingQueue() });
+		const p = await seedPipeline(base);
+		const deps = faultyDeps(base, {
+			d1: [{ match: /insert into "webhook_events"/ }],
+			r2: [{ match: /^delete / }],
+		});
+		const res = await post(
+			deps,
+			`/in/${p.source.id}`,
+			new Uint8Array(100_000).fill(0x61),
+		);
+		expect(res.status).toBe(503);
+		expect(await eventsOf(base, p.source.id)).toHaveLength(0);
+		expect((base.queue as RecordingQueue).sent).toHaveLength(0);
+		const put = deps.r2Log.find((l) => l.startsWith("put "));
+		const key = put?.slice(4) as string;
+		expect(deps.r2Log).toContain(`delete ${key}`);
+		expect(await base.payloads.head(key)).not.toBeNull();
+		expect(logged("ingress.r2_cleanup_failed")).toBe(true);
+	});
+
+	it("returns 202 after the enqueue even when marking the delivery queued fails", async () => {
+		const base = testDeps({ queue: recordingQueue() });
+		const p = await seedPipeline(base);
+		const deps = faultyDeps(base, {
+			d1: [{ match: /^update "deliveries" set "status"/ }],
+		});
+		const res = await post(deps, `/in/${p.source.id}`, "{}");
+		expect(res.status).toBe(202);
+		const [event] = await eventsOf(base, p.source.id);
+		const [delivery] = await base.db
+			.select()
+			.from(deliveries)
+			.where(eq(deliveries.eventId, event.id));
+		// The message is already on the queue; the consumer accepts pending deliveries.
+		expect((base.queue as RecordingQueue).sent).toEqual([
+			{ deliveryId: delivery.id },
+		]);
+		expect(delivery.status).toBe("pending");
+		expect(delivery.enqueuedAt).toBeNull();
+		expect(logged("ingress.mark_queued_failed")).toBe(true);
 	});
 });

@@ -144,6 +144,8 @@ export async function* readPartRows(path) {
 	let rest = "";
 	for await (const chunk of gunzip) {
 		const lines = (rest + chunk).split("\n");
+		// split() always returns at least one element, so pop() is defined.
+		/* node:coverage ignore next */
 		rest = lines.pop() ?? "";
 		for (const line of lines) {
 			if (line.length > 0) {
@@ -254,6 +256,8 @@ async function generateSql(manifest, outDir, maxFileBytes) {
 	/** @type {Record<string, unknown>} */
 	const orphans = {};
 	for (const [name, entry] of Object.entries(filter.report())) {
+		// Every orphaned row creates orphanBlobs[name], so it is always set.
+		/* node:coverage ignore next */
 		orphans[name] = { ...entry, blob_bytes: orphanBlobs[name] ?? {} };
 	}
 	writeFileSync(

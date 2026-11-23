@@ -13,8 +13,10 @@ export type AlertKey = {
 export type ActiveAlert = AlertKey & {
 	projectId: string | null;
 	details: Record<string, unknown>;
-	/** new_dead only: kept active by the quiet period, with no fresh dead deliveries this run. */
+	/** Kept active by a quiet period (new_dead, consecutive_failures) although the condition is clear this run. */
 	carryOver?: boolean;
+	/** consecutive_failures only: write `details` onto the open incident (its cleared_at changed). */
+	updateDetails?: boolean;
 };
 export type OpenAlertRow = typeof alerts.$inferSelect;
 export type ChannelRoute = {

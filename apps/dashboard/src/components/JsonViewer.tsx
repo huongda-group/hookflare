@@ -68,7 +68,9 @@ export function JsonViewer(props: Props) {
 	const parsed = parse(props);
 	const [raw, setRaw] = useState(false);
 	if (!("text" in props)) {
-		return parsed.ok ? <Tree value={parsed.value} size={0} /> : null;
+		return parsed.ok ? (
+			<Tree value={parsed.value} size={0} />
+		) : /* istanbul ignore next -- @preserve unreachable: a `value` prop always parses */ null;
 	}
 	const name = props.filename || "payload.txt";
 	const looksJson = /[/+]json\b/i.test(props.contentType ?? "");
@@ -107,8 +109,8 @@ export function JsonViewer(props: Props) {
 			)}
 			{bounded && !raw && (
 				<p className="mb-2 text-xs text-muted-foreground">
-					Large payload — showing a collapsed tree. Expand nodes to inspect,
-					or switch to Raw for the full text.
+					Large payload — showing a collapsed tree. Expand nodes to inspect, or
+					switch to Raw for the full text.
 				</p>
 			)}
 			{parsed.ok && !raw ? (

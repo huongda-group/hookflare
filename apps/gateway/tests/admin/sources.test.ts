@@ -282,4 +282,88 @@ describe("admin sources", () => {
 		});
 		expect(tooBig.status).toBe(400);
 	});
+	it("returns 422 invalid_reference for an unknown project", async () => {
+		const deps = testDeps();
+		const { destination } = await seedPipeline(deps);
+		const api = await adminApp(deps);
+		const res = await api.request("POST", "/sources", {
+			project_id: "prj_01J00000000000000000000000",
+			destination_id: destination.id,
+			name: "orphan",
+			auth_type: "none",
+			auth_config: {},
+		});
+		expect(res.status).toBe(422);
+		expect(await res.json()).toEqual({
+			error: "invalid_reference",
+			field: "project_id",
+		});
+	});
+
+	it("patches status and max_body_bytes", async () => {
+		const deps = testDeps();
+		const { source } = await seedPipeline(deps);
+		const api = await adminApp(deps);
+		const res = await api.request("PATCH", `/sources/${source.id}`, {
+			status: "disabled",
+			max_body_bytes: 1024,
+		});
+		expect(res.status).toBe(200);
+		expect(await res.json()).toMatchObject({
+			status: "disabled",
+			max_body_bytes: 1024,
+		});
+		const cleared = await api.request("PATCH", `/sources/${source.id}`, {
+			max_body_bytes: null,
+		});
+		expect(await cleared.json()).toMatchObject({
+			status: "disabled",
+			max_body_bytes: null,
+		});
+	});
+
+	it("rejects an invalid list query or rotate body with 400", async () => {
+		const deps = testDeps();
+		const { source } = await seedPipeline(deps, {
+			source: {
+				authType: "token",
+				authConfig: { in: "header", name: "x-token" },
+			},
+		});
+		const api = await adminApp(deps);
+		const list = await api.request("GET", "/sources?limit=0");
+		expect(list.status).toBe(400);
+		const rotate = await api.request(
+			"POST",
+			`/sources/${source.id}/rotate-secret`,
+			{ grace_hours: -1 },
+		);
+		expect(rotate.status).toBe(400);
+		expect(await rotate.json()).toMatchObject({ error: "invalid_request" });
+		const got = await (
+			await api.request("GET", `/sources/${source.id}`)
+		).json<Src>();
+		expect(got.secret_fingerprint).not.toBeNull();
+	});
+	it("moves a source to another destination of the same project", async () => {
+		const deps = testDeps();
+		const { project, source } = await seedPipeline(deps);
+		const api = await adminApp(deps);
+		const other = await (
+			await api.request("POST", "/destinations", {
+				project_id: project.id,
+				name: "second",
+				url: "https://second.example.com/hooks",
+			})
+		).json<{ id: string }>();
+		const res = await api.request("PATCH", `/sources/${source.id}`, {
+			destination_id: other.id,
+		});
+		expect(res.status).toBe(200);
+		expect(await res.json()).toMatchObject({ destination_id: other.id });
+		const got = await (
+			await api.request("GET", `/sources/${source.id}`)
+		).json<Src>();
+		expect(got.destination_id).toBe(other.id);
+	});
 });

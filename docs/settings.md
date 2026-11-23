@@ -12,7 +12,7 @@ Stored groups are `retry_defaults`, `storage`, and `alert_rules`. Destination po
 
 Content sections in all four Settings tabs span the same content width as other dashboard pages.
 
-API GET/PATCH `/api/admin/v1/settings` uses validated section objects. Each section is a separate versioned settings row; the route compares its read version during writes and returns 409 on a concurrent conflict. A multi-section conflict can occur after another section was written: reload server state before retrying.
+API GET/PATCH `/api/admin/v1/settings` uses validated section objects. Each section is a separate versioned settings row; the route compares its read version during writes and returns 409 on a concurrent conflict. A PATCH is all-or-nothing: if any of its sections conflicts, no section and no audit row is written. Reload server state before retrying.
 
 Keep save states and server validation visible. Retention forms must explain that disabling archive files does not disable deletion. Surface archive/backup run state separately from the settings save result. Rules/channels are covered by [alerts](alerts.md), storage by [archives](archives.md) and [backup](backup-restore.md).
 

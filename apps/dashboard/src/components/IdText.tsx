@@ -8,13 +8,7 @@ import { cn } from "@/lib/utils";
  * identifier stays usable without the clipboard API (spec §7: a rejected
  * clipboard write produces an actionable explanation, never a false “Copied”).
  */
-export function IdText({
-	id,
-	className,
-}: {
-	id: string;
-	className?: string;
-}) {
+export function IdText({ id, className }: { id: string; className?: string }) {
 	const [copyFailed, setCopyFailed] = useState(false);
 
 	async function copy() {

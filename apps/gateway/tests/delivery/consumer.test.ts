@@ -1,5 +1,13 @@
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	type MockInstance,
+	vi,
+} from "vitest";
 import { encryptSecret } from "../../src/core/crypto";
 import {
 	deliveries,
@@ -232,6 +240,20 @@ describe("processDelivery", () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
+	it("retries as infra, without failing the delivery, when SECRETS_KEY is missing", async () => {
+		const fetchMock = fetchReturning(() => new Response("ok"));
+		const deps = testDeps({ fetch: fetchMock });
+		const p = await seedPipeline(deps);
+		const { deliveryId } = await seedDelivery(deps, p);
+		const broken = { ...deps, env: { ...deps.env, SECRETS_KEY: "" } };
+		const result = await processDelivery(broken, deliveryId, logger);
+		expect(result).toMatchObject({ action: "retry" });
+		const { delivery, attempts } = await state(deps, deliveryId);
+		expect(delivery).toMatchObject({ status: "queued", attemptCount: 0 });
+		expect(attempts).toHaveLength(0);
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
 	it("calls the backend once for a duplicate message", async () => {
 		const fetchMock = fetchReturning(() => new Response("ok"));
 		const deps = testDeps({ fetch: fetchMock });
@@ -367,10 +389,11 @@ function clocked(overrides: Partial<Deps> = {}) {
 }
 
 describe("processDelivery retries (M2)", () => {
+	let errors: MockInstance<typeof console.error>;
 	beforeEach(() => {
 		clearSsrfCache();
 		vi.spyOn(console, "log").mockImplementation(() => {});
-		vi.spyOn(console, "error").mockImplementation(() => {});
+		errors = vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.spyOn(Math, "random").mockReturnValue(0.5);
 	});
 	afterEach(() => vi.restoreAllMocks());
@@ -654,6 +677,120 @@ describe("processDelivery retries (M2)", () => {
 		expect(delivery).toMatchObject({ status: "in_flight", attemptCount: 0 });
 	});
 
+	function infraStages(): string[] {
+		return errors.mock.calls
+			.map((c) => JSON.parse(c[0] as string))
+			.filter((l) => l.msg === "delivery.infra_retry")
+			.map((l) => l.stage);
+	}
+
+	it.each([
+		[
+			"paused",
+			/^update "deliveries" set "status" = \?, "next_attempt_at" = \?, "lease_until" = \? where .*\)\)\)$/,
+		],
+		["disabled", /"last_error" = \?, "completed_at" = \? where/],
+	] as const)(
+		"D1 failure while settling a %s destination → infra retry, no attempt, row untouched",
+		async (status, match) => {
+			const fetchMock = fetchReturning(() => new Response("ok"));
+			const { deps: base } = clocked({ fetch: fetchMock });
+			const p = await seedPipeline(base, { destination: { status } });
+			const { deliveryId } = await seedDelivery(base, p);
+			const deps = faultyDeps(base, { d1: [{ match }] });
+			expect(await processDelivery(deps, deliveryId, logger)).toEqual({
+				action: "retry",
+				delaySeconds: 60,
+			});
+			expect(infraStages()).toEqual(["d1"]);
+			const { delivery, attempts } = await state(base, deliveryId);
+			expect(delivery).toMatchObject({ status: "queued", attemptCount: 0 });
+			expect(attempts).toHaveLength(0);
+			expect(fetchMock).not.toHaveBeenCalled();
+		},
+	);
+
+	it.each([
+		// The blocked verdict is settled inside the SSRF try block, so the log says "ssrf".
+		[
+			"an SSRF-blocked destination",
+			"ssrf",
+			{ resolveDns: vi.fn(async () => ["10.0.0.1"]) },
+			{},
+		],
+		[
+			"a missing R2 payload",
+			"d1",
+			{},
+			{ r2Key: "events/2026/10/15/evt_gone", bodyInline: new Uint8Array() },
+		],
+	] as const)(
+		"D1 failure while failing %s without an attempt → infra retry (%s), no attempt",
+		async (_label, stage, overrides, event) => {
+			const fetchMock = fetchReturning(() => new Response("ok"));
+			const { deps: base } = clocked({ fetch: fetchMock, ...overrides });
+			const p = await seedPipeline(base);
+			const { deliveryId } = await seedDelivery(base, p, { event });
+			const deps = faultyDeps(base, {
+				d1: [{ match: /"last_error" = \?, "completed_at" = \? where/ }],
+			});
+			expect(await processDelivery(deps, deliveryId, logger)).toMatchObject({
+				action: "retry",
+			});
+			expect(infraStages()).toEqual([stage]);
+			const { delivery, attempts } = await state(base, deliveryId);
+			expect(delivery).toMatchObject({ status: "queued", attemptCount: 0 });
+			expect(attempts).toHaveLength(0);
+			expect(fetchMock).not.toHaveBeenCalled();
+		},
+	);
+
+	it("a non-DNS error from the SSRF check → infra retry at the ssrf stage, no attempt", async () => {
+		const fetchMock = fetchReturning(() => new Response("ok"));
+		const { deps } = clocked({
+			fetch: fetchMock,
+			resolveDns: vi.fn(async () => Promise.reject(new Error("resolver bug"))),
+		});
+		const p = await seedPipeline(deps);
+		const { deliveryId } = await seedDelivery(deps, p);
+		expect(await processDelivery(deps, deliveryId, logger)).toMatchObject({
+			action: "retry",
+		});
+		expect(infraStages()).toEqual(["ssrf"]);
+		expect((await state(deps, deliveryId)).delivery).toMatchObject({
+			status: "queued",
+			attemptCount: 0,
+		});
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("lease acquisition failure → infra retry before any request, no attempt", async () => {
+		const fetchMock = fetchReturning(() => new Response("ok"));
+		const { deps: base } = clocked({ fetch: fetchMock });
+		const p = await seedPipeline(base);
+		const { deliveryId } = await seedDelivery(base, p);
+		const deps = faultyDeps(base, {
+			d1: [
+				{
+					match:
+						/^update "deliveries" set "status".* returning "attempt_count"$/,
+				},
+			],
+		});
+		expect(await processDelivery(deps, deliveryId, logger)).toMatchObject({
+			action: "retry",
+		});
+		expect(infraStages()).toEqual(["lease"]);
+		const { delivery, attempts } = await state(base, deliveryId);
+		expect(delivery).toMatchObject({
+			status: "queued",
+			attemptCount: 0,
+			leaseUntil: null,
+		});
+		expect(attempts).toHaveLength(0);
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
 	it("reschedule failure → msg.retry with the backoff delay", async () => {
 		const { deps: base } = clocked({
 			fetch: fetchReturning(() => new Response("", { status: 503 })),
@@ -694,23 +831,28 @@ describe("handleDeliveryBatch", () => {
 
 	it("retries only the message whose processing throws unexpectedly", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
-		vi.spyOn(console, "error").mockImplementation(() => {});
-		const { deps: base } = clocked();
-		const p = await seedPipeline(base);
-		const { deliveryId } = await seedDelivery(base, p);
-		const deps: Deps = {
-			...base,
-			now: () => {
+		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+		// A throw outside every guarded stage: the not-found log line itself.
+		vi.spyOn(console, "warn").mockImplementation((line: string) => {
+			if (JSON.parse(line).msg === "delivery.not_found")
 				throw new Error("boom");
-			},
-		};
-		const broken = fakeMessage({ deliveryId }, 3);
+		});
+		const { deps } = clocked();
+		const broken = fakeMessage(
+			{ deliveryId: "dlv_01JAAAAAAAAAAAAAAAAAAAAAAA" },
+			3,
+		);
 		const bad = fakeMessage({ nope: 1 });
 		await handleDeliveryBatch(
 			fakeBatch("hookflare-deliveries", [broken, bad]),
 			deps,
 		);
 		expect(broken.retry).toHaveBeenCalledWith({ delaySeconds: 240 });
+		expect(broken.ack).not.toHaveBeenCalled();
 		expect(bad.ack).toHaveBeenCalled();
+		const infra = errors.mock.calls
+			.map((c) => JSON.parse(c[0] as string))
+			.find((l) => l.msg === "delivery.infra_retry");
+		expect(infra).toMatchObject({ stage: "unexpected", msg_attempts: 3 });
 	});
 });

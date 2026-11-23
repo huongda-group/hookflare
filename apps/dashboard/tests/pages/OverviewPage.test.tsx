@@ -420,4 +420,123 @@ describe("Overview redesign (spec §8.3)", () => {
 		});
 		expect(tile.queryByText("111")).toBeNull();
 	});
+	it("switches the reporting period through the URL", async () => {
+		const ranges: (string | null)[] = [];
+		server.use(
+			http.get(apiUrl("/overview"), ({ request }) => {
+				ranges.push(new URL(request.url).searchParams.get("range"));
+				return HttpResponse.json(overview());
+			}),
+		);
+		const { user, router } = renderApp("/?project_id=prj_1");
+		await screen.findByText("Events received");
+		await user.click(screen.getByRole("tab", { name: "7d" }));
+		await waitFor(() =>
+			expect(router.state.location.search).toEqual({
+				project_id: "prj_1",
+				range: "7d",
+			}),
+		);
+		await waitFor(() => expect(ranges.at(-1)).toBe("7d"));
+		expect(screen.getByRole("tab", { name: "7d" })).toHaveAttribute(
+			"aria-selected",
+			"true",
+		);
+	});
+
+	it("refreshes the overview and recent events together", async () => {
+		let overviewLoads = 0;
+		let eventLoads = 0;
+		let release = () => {};
+		server.use(
+			http.get(apiUrl("/overview"), async () => {
+				overviewLoads++;
+				if (overviewLoads > 1)
+					await new Promise<void>((r) => {
+						release = r;
+					});
+				return HttpResponse.json(overview());
+			}),
+			http.get(apiUrl("/events"), () => {
+				eventLoads++;
+				return HttpResponse.json({ data: [], next_cursor: null });
+			}),
+		);
+		const { user } = renderApp("/?project_id=prj_1");
+		await screen.findByText("Events received");
+		await screen.findByText("No events received yet.");
+		await user.click(screen.getByRole("button", { name: "Refresh" }));
+		expect(
+			await screen.findByRole("button", { name: "Refreshing…" }),
+		).toBeDisabled();
+		await waitFor(() => expect(overviewLoads).toBe(2));
+		release();
+		expect(
+			await screen.findByRole("button", { name: "Refresh" }),
+		).toBeEnabled();
+		expect(eventLoads).toBe(2);
+	});
+
+	it("retries a failed overview and a failed recent-events list independently", async () => {
+		let overviewFails = true;
+		let eventsFail = true;
+		server.use(
+			http.get(apiUrl("/overview"), () =>
+				overviewFails
+					? HttpResponse.json({ error: "internal" }, { status: 500 })
+					: HttpResponse.json(overview()),
+			),
+			http.get(apiUrl("/events"), () =>
+				eventsFail
+					? HttpResponse.json({ error: "internal" }, { status: 500 })
+					: HttpResponse.json({ data: [eventSummary()], next_cursor: null }),
+			),
+		);
+		const { user } = renderApp("/?project_id=prj_1");
+		await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(2));
+		const [overviewError, recentError] = screen.getAllByRole("alert");
+		expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled();
+
+		overviewFails = false;
+		await user.click(
+			within(overviewError).getByRole("button", { name: "Retry" }),
+		);
+		expect(await screen.findByText("Events received")).toBeInTheDocument();
+		expect(screen.getAllByRole("alert")).toHaveLength(1);
+
+		eventsFail = false;
+		await user.click(
+			within(recentError).getByRole("button", { name: "Retry" }),
+		);
+		expect((await screen.findAllByText("evt_1")).length).toBeGreaterThan(0);
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+	});
+
+	it("draws the chart when only the trend shows completed deliveries", async () => {
+		const zero = {
+			received: 0,
+			delivered: 0,
+			failed_final: 0,
+			dead: 0,
+			attempts: 0,
+			success_rate: null,
+		};
+		server.use(
+			http.get(apiUrl("/overview"), () =>
+				HttpResponse.json(
+					overview({
+						totals: zero,
+						trend: [{ hour: T, received: 0, delivered: 3, failed: 0 }],
+					}),
+				),
+			),
+		);
+		renderApp("/?project_id=prj_1");
+		expect(
+			await screen.findByRole("table", { name: /traffic trend/i }),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByText(/No events received in this reporting range/),
+		).toBeNull();
+	});
 });

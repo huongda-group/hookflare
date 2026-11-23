@@ -9,7 +9,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import type { ReactNode } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SourceFormDialog } from "@/components/SourceFormDialog";
 import { createQueryClient } from "@/router";
 import { destination, project, source } from "../helpers/fixtures";
@@ -292,5 +292,63 @@ describe("SourceFormDialog", () => {
 		expect(
 			screen.queryByRole("heading", { name: /discard/i }),
 		).not.toBeInTheDocument();
+	});
+	it("sends a token config and keeps a server issue on its field", async () => {
+		let body: Record<string, unknown> | undefined;
+		server.use(
+			http.get(apiUrl("/destinations"), () =>
+				HttpResponse.json({ data: [destination()], next_cursor: null }),
+			),
+			http.post(apiUrl("/sources"), async ({ request }) => {
+				body = (await request.json()) as Record<string, unknown>;
+				return HttpResponse.json(
+					{
+						error: "validation_failed",
+						issues: [{ path: "name", code: "custom", message: "Name taken" }],
+					},
+					{ status: 422 },
+				);
+			}),
+		);
+		const onOpenChange = vi.fn();
+		const { user } = await wrap(
+			<SourceFormDialog open projectId="prj_1" onOpenChange={onOpenChange} />,
+		);
+		await user.click(screen.getByRole("combobox", { name: "Destination" }));
+		await user.click(
+			await screen.findByRole("option", { name: "Billing API" }),
+		);
+		await user.type(screen.getByLabelText("Name"), "Shopify");
+		await user.click(screen.getByRole("combobox", { name: "Auth type" }));
+		await user.click(
+			await screen.findByRole("option", { name: "Shared token" }),
+		);
+		await user.click(screen.getByRole("combobox", { name: "Token in" }));
+		await user.click(
+			await screen.findByRole("option", { name: "Query parameter" }),
+		);
+		// The token's own "Name" field follows the source name.
+		await user.type(screen.getAllByLabelText("Name")[1], "token");
+		await user.type(
+			screen.getByLabelText(/^Secret/),
+			"a-very-long-shared-secret-value",
+		);
+		await user.click(screen.getByRole("button", { name: "Create" }));
+		expect(await screen.findByText("Name taken")).toBeInTheDocument();
+		expect(body).toMatchObject({
+			auth_type: "token",
+			auth_config: { in: "query", name: "token" },
+		});
+		expect(onOpenChange).not.toHaveBeenCalled();
+	});
+
+	it("closes a clean form on Escape without a prompt", async () => {
+		const onOpenChange = vi.fn();
+		const { user } = await wrap(
+			<SourceFormDialog open projectId="prj_1" onOpenChange={onOpenChange} />,
+		);
+		await screen.findByRole("dialog");
+		await user.keyboard("{Escape}");
+		expect(onOpenChange).toHaveBeenCalledWith(false);
 	});
 });

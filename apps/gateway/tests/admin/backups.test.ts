@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { backups } from "../../src/core/db/schema";
 import { adminApp, auditRows, seedAdminProject } from "../helpers/admin";
 import { fakeBackup, testDeps } from "../helpers/deps";
@@ -91,6 +91,37 @@ describe("backups API", () => {
 		expect(res.status).toBe(500);
 		expect(await base.db.select().from(backups)).toHaveLength(0);
 		expect(backup.created).toHaveLength(0);
+	});
+
+	it("marks the row failed when the Workflow does not start, so the next run is not blocked", async () => {
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		const backup = fakeBackup("running");
+		backup.create = async () => {
+			throw new Error("workflows unavailable");
+		};
+		const deps = testDeps({ backup });
+		await cleanBackups(deps);
+		try {
+			const app = await adminApp(deps);
+			const res = await app.request("POST", "/backups/run", {});
+			expect(res.status).toBe(500);
+			expect(await res.json()).toMatchObject({ error: "internal_error" });
+			const rows = await deps.db.select().from(backups);
+			expect(rows).toHaveLength(1);
+			expect(rows[0]).toMatchObject({
+				status: "failed",
+				error: "start failed: Error: workflows unavailable",
+			});
+			// The run was requested, so its audit row stays.
+			expect((await auditRows(deps, rows[0].id)).map((a) => a.action)).toEqual([
+				"backup.run",
+			]);
+			// A failed row does not hold the one-running slot.
+			backup.create = fakeBackup("running").create;
+			expect((await app.request("POST", "/backups/run", {})).status).toBe(202);
+		} finally {
+			errorSpy.mockRestore();
+		}
 	});
 
 	it("summary returns last_verified from the newest verified row", async () => {

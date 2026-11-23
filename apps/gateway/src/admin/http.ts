@@ -127,13 +127,12 @@ export function paginate<R extends { id: string }>(
 	const page = rows.slice(0, limit);
 	return {
 		rows: page,
-		nextCursor: rows.length > limit ? (page.at(-1)?.id ?? null) : null,
+		nextCursor:
+			rows.length > limit
+				? (page.at(-1)?.id ??
+					/* istanbul ignore next -- @preserve unreachable: every list schema has limit >= 1, so a page past the limit is never empty */ null)
+				: null,
 	};
-}
-
-/** Destination URLs may carry credentials in the path or query, so audit diffs keep only the origin. */
-export function auditUrl(url: string): string {
-	return new URL(url).origin;
 }
 
 /** Unexecuted audit insert for the request's actor; batch it with the mutation (M3-7). */

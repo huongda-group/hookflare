@@ -3,6 +3,7 @@ import {
 	type Cutoffs,
 	countMarked,
 	DAY_MS,
+	MISSING_PART,
 	markPart,
 } from "../../core/db/archive";
 import {
@@ -41,7 +42,12 @@ const EVENT_COLUMNS = sql.raw(
 	EVENT_LINE_COLUMNS.map((c) => `e.${c}`).join(", "),
 );
 
-export type PartResult = { itemCount: number; bytes: number };
+/**
+ * `parked`: set when the part wrote nothing because every marked event's
+ * payload was gone; those events moved to MISSING_PART, so the run loop goes
+ * on to the next part instead of stopping.
+ */
+export type PartResult = { itemCount: number; bytes: number; parked?: number };
 type Batch = typeof archiveBatches.$inferSelect;
 
 async function loadBatch(deps: Deps, batchId: string): Promise<Batch> {
@@ -65,8 +71,9 @@ type LineTally = {
 /**
  * Spec §7.4 `part`. Reuses an existing mark, otherwise marks the next slice;
  * the R2 key is deterministic and the put overwrites, so a retry is safe.
- * An event whose R2 payload is gone is left out of the file and unmarked, so
- * it stays in D1 instead of being purged without its body.
+ * An event whose R2 payload is gone is left out of the file and parked under
+ * MISSING_PART, so it stays in D1 instead of being purged without its body,
+ * and no later part or run marks it again.
  */
 export async function buildEventPart(
 	deps: Deps,
@@ -103,18 +110,19 @@ export async function buildEventPart(
 			missing: [],
 		};
 		const gz = await gzipLines(eventLines(deps, batchId, partNo, tally));
-		// Unmark before the put: a retry then rebuilds the same file without them.
-		await unmarkPartEvents(deps, batchId, partNo, tally.missing);
+		// Park before the put: a retry then rebuilds the same file without them.
+		await parkMissing(deps, batchId, partNo, tally.missing);
 		for (const id of tally.missing)
 			logger.error("archive.payload_missing", {
 				batch_id: batchId,
 				part_no: partNo,
 				event_id: id,
 			});
-		// The run loop stops at an empty part, and verify needs no row for it.
+		// Verify needs no row for an empty part. The run loop stops at one
+		// unless it parked events: the day may go on past them.
 		const { first, last, written } = tally;
 		if (written === 0 || first === null || last === null)
-			return { itemCount: 0, bytes: 0 };
+			return { itemCount: 0, bytes: 0, parked: tally.missing.length };
 		range = { first, last, n: written };
 		key = partKey(batchPrefix("events", batch.day, batchId), partNo);
 		sha = await sha256Hex(gz);
@@ -149,8 +157,8 @@ export async function buildEventPart(
 	return { itemCount: range.n, bytes };
 }
 
-/** Clears this part's mark on the given events; 90 IDs + 2 = 92 params. */
-async function unmarkPartEvents(
+/** Moves the given events of this part to MISSING_PART; 90 IDs + 3 = 93 params. */
+async function parkMissing(
 	deps: Deps,
 	batchId: string,
 	partNo: number,
@@ -162,7 +170,7 @@ async function unmarkPartEvents(
 		stmts.push(
 			deps.db
 				.update(webhookEvents)
-				.set({ archiveBatchId: null, archivePart: null })
+				.set({ archivePart: MISSING_PART })
 				.where(
 					and(
 						inArray(webhookEvents.id, ids.slice(i, i + PAGE)),
@@ -217,6 +225,8 @@ async function* eventLines(
 				SELECT a.* FROM delivery_attempts a JOIN deliveries d ON d.id = a.delivery_id
 				JOIN webhook_events e ON e.id = d.event_id WHERE ${scope} ORDER BY a.delivery_id, a.attempt_no`),
 		]);
+		// esbuild drops expression-level comments, so the hint covers the statement.
+		/* istanbul ignore next -- @preserve unreachable: body_inline is NOT NULL in the schema, so the null branch never runs */
 		const bodyOf = new Map(
 			bodies.map((b) => [
 				b.id,

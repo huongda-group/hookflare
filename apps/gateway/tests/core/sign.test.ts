@@ -34,6 +34,20 @@ describe("signWebhook", () => {
 		});
 		expect(a).not.toBe(b);
 	});
+
+	it("accepts a bare base64 secret without the whsec_ prefix as the same key", async () => {
+		const input = {
+			id: "msg_p5jXN8AQM9LWM0D4loKWxJek",
+			timestampSec: 1614265330,
+			body: enc('{"test": 2432232314}'),
+		};
+		expect(
+			await signWebhook({
+				...input,
+				secret: "MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+			}),
+		).toBe("v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE=");
+	});
 });
 
 describe("buildOutboundHeaders", () => {
@@ -69,6 +83,25 @@ describe("buildOutboundHeaders", () => {
 			"x-webhook-event-id": "evt_1",
 			"user-agent": "Hookflare/1",
 		});
+	});
+
+	it("never forwards gateway-owned marker headers from the sender", () => {
+		const h = buildOutboundHeaders({
+			storedHeaders: {
+				"x-hookflare-test": "1",
+				"x-hookflare-anything": "x",
+				"x-webhook-event-id": "evt_spoofed",
+				"x-github-event": "push",
+			},
+			contentType: null,
+			deliveryId: "dlv_1",
+			timestampSec: 1,
+			signature: "v1,x",
+		});
+		expect(h.has("x-hookflare-test")).toBe(false);
+		expect(h.has("x-hookflare-anything")).toBe(false);
+		expect(h.has("x-webhook-event-id")).toBe(false);
+		expect(h.get("x-github-event")).toBe("push");
 	});
 
 	it("omits content-type when none was stored", () => {

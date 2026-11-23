@@ -3,7 +3,9 @@ import {
 	formatBytes,
 	formatDuration,
 	formatRelative,
+	fromLocalInput,
 	groupByDay,
+	toLocalInput,
 } from "@/lib/time";
 
 const H = 3_600_000;
@@ -44,5 +46,19 @@ describe("time", () => {
 		expect(formatDuration(12 * 60_000)).toBe("12 min");
 		expect(formatDuration(185 * 60_000)).toBe("3 h 5 min");
 		expect(formatDuration(52 * 3_600_000)).toBe("2 d 4 h");
+		expect(formatDuration(-5_000)).toBe("0 s");
+	});
+
+	it("drops a zero remainder from whole hours and days", () => {
+		expect(formatDuration(2 * H)).toBe("2 h");
+		expect(formatDuration(48 * H)).toBe("2 d");
+	});
+
+	it("round-trips datetime-local values in local time", () => {
+		// 10:00 local (UTC+7) on Oct 16.
+		const ms = MIDNIGHT + 10 * H;
+		expect(toLocalInput(ms)).toBe("2026-10-16T10:00");
+		expect(fromLocalInput("2026-10-16T10:00")).toBe(ms);
+		expect(fromLocalInput("")).toBeUndefined();
 	});
 });

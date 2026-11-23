@@ -22,7 +22,7 @@ import { ident, listTables } from "../../src/jobs/backup/tables";
 import { BACKUP_CRON, runScheduled } from "../../src/jobs/scheduled";
 import { listKeys } from "../helpers/archive";
 import { fakeBackup, testDeps } from "../helpers/deps";
-import { faultyR2 } from "../helpers/faults";
+import { faultyDeps, faultyR2 } from "../helpers/faults";
 import { seedDelivery, seedPipeline } from "../helpers/seed";
 
 const logger = createLogger({ LOG_LEVEL: "error" });
@@ -86,6 +86,40 @@ async function readManifest(deps: Deps, backupId: string) {
 	return JSON.parse(await (obj as R2ObjectBody).text()) as {
 		tables: { name: string; rows: number; parts: unknown[] }[];
 	};
+}
+
+/** `deps` with the backups bucket's methods replaced by `over`. */
+function bucketWith(
+	base: Deps,
+	over: (target: R2Bucket) => Partial<Record<keyof R2Bucket, unknown>>,
+): Deps {
+	return {
+		...base,
+		backups: new Proxy(base.backups, {
+			get(target, prop) {
+				const o = over(target) as Record<string | symbol, unknown>;
+				if (prop in o) return o[prop];
+				const v = Reflect.get(target, prop);
+				return typeof v === "function" ? v.bind(target) : v;
+			},
+		}),
+	};
+}
+
+async function rowOf(deps: Deps, id: string) {
+	const [row] = await deps.db.select().from(backups).where(eq(backups.id, id));
+	return row;
+}
+
+/** 251 BLOB rows: two pages of BLOB_PAGE_SIZE (250); "aaa_" sorts first. */
+async function createBlobPages() {
+	const d = testDeps();
+	await d.db.run(
+		sql`CREATE TABLE aaa_blob_pages (id INTEGER PRIMARY KEY, data BLOB)`,
+	);
+	await d.db.run(sql`INSERT INTO aaa_blob_pages (id, data)
+		WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM c WHERE n < 251)
+		SELECT n, X'00' FROM c`);
 }
 
 describe("runBackup", () => {
@@ -321,6 +355,176 @@ describe("runBackup", () => {
 		expect(row.status).toBe("failed");
 		expect(row.error).toContain("R2 error");
 	});
+
+	it("a continuation that runs out of budget mid-table chains -cont-2 and resumes at the next page", async () => {
+		await createBlobPages();
+		try {
+			const backup = recordingBackup();
+			const d = testDeps({ backup });
+			const base = `bk-chain-${Date.now()}`;
+			await startBackupRun(d, { instanceId: base, trigger: "manual" }, logger);
+			const first = await runBackup(
+				plain,
+				() => d,
+				{ backupId: base, trigger: "manual" },
+				base,
+				logger,
+				{ stepBudget: 5 },
+			);
+			expect(first.continued).toBe(true);
+			const cont1 = backup.created.find((c) => c.id === `${base}-cont-1`)
+				?.params as BackupParams;
+			expect(cont1.resume).toEqual({
+				tableName: "aaa_blob_pages",
+				cursor: 250,
+				partNo: 2,
+			});
+
+			const second = await runBackup(
+				plain,
+				() => d,
+				cont1,
+				`${base}-cont-1`,
+				logger,
+				{ stepBudget: 5 },
+			);
+			expect(second).toEqual({ parts: 1, continued: true });
+			const cont2 = backup.created.find((c) => c.id === `${base}-cont-2`)
+				?.params as BackupParams;
+			const names = cont1.tables as string[];
+			expect(cont2.resume).toEqual({
+				tableName: names[names.indexOf("aaa_blob_pages") + 1],
+				cursor: null,
+				partNo: 1,
+			});
+			expect((await rowOf(d, base)).instanceId).toBe(`${base}-cont-2`);
+
+			const third = await runBackup(
+				plain,
+				() => d,
+				cont2,
+				`${base}-cont-2`,
+				logger,
+			);
+			expect(third.continued).toBe(false);
+			expect((await rowOf(d, base)).status).toBe("verified");
+			const manifest = await readManifest(d, base);
+			expect(
+				manifest.tables.find((t) => t.name === "aaa_blob_pages"),
+			).toMatchObject({ rows: 251, parts: [{ rows: 250 }, { rows: 1 }] });
+		} finally {
+			await deps.db.run(sql`DROP TABLE aaa_blob_pages`);
+		}
+	});
+
+	it("one run pages through a multi-part table, and the manifest lists every sidecar even when R2 pages the listing", async () => {
+		await createBlobPages();
+		try {
+			const id = `bk-paged-${Date.now()}`;
+			await startBackupRun(deps, { instanceId: id, trigger: "manual" }, logger);
+			const paged = bucketWith(deps, (t) => ({
+				list: (o: R2ListOptions) => t.list({ ...o, limit: 1 }),
+			}));
+			const out = await runBackup(
+				plain,
+				() => paged,
+				{ backupId: id, trigger: "manual" },
+				id,
+				logger,
+			);
+			expect(out.continued).toBe(false);
+			expect((await rowOf(deps, id)).status).toBe("verified");
+			const manifest = await readManifest(deps, id);
+			expect(manifest.tables.flatMap((t) => t.parts)).toHaveLength(out.parts);
+			expect(
+				manifest.tables.find((t) => t.name === "aaa_blob_pages"),
+			).toMatchObject({ rows: 251, parts: [{ rows: 250 }, { rows: 1 }] });
+		} finally {
+			await deps.db.run(sql`DROP TABLE aaa_blob_pages`);
+		}
+	});
+
+	it("a part sidecar that disappears before the manifest step fails the backup", async () => {
+		const id = `bk-sidecar-${Date.now()}`;
+		await startBackupRun(deps, { instanceId: id, trigger: "manual" }, logger);
+		const lossy = bucketWith(deps, (t) => ({
+			get: (key: string) => (key.includes("/parts/") ? null : t.get(key)),
+		}));
+		await expect(
+			runBackup(
+				plain,
+				() => lossy,
+				{ backupId: id, trigger: "manual" },
+				id,
+				logger,
+			),
+		).rejects.toThrow(/part sidecar .*parts\/.*: object missing/);
+		expect(await rowOf(deps, id)).toMatchObject({ status: "failed" });
+		expect((await rowOf(deps, id)).error).toMatch(/object missing/);
+	});
+
+	it("a backup ID without a row fails at the start step and creates no row", async () => {
+		await expect(
+			runBackup(
+				plain,
+				() => deps,
+				{ backupId: "bk-ghost", trigger: "manual" },
+				"bk-ghost",
+				logger,
+			),
+		).rejects.toThrow("backup bk-ghost not found");
+		expect(await deps.db.select().from(backups)).toEqual([]);
+	});
+
+	it("a resume naming a table outside the pinned list fails the backup", async () => {
+		const id = `bk-badresume-${Date.now()}`;
+		await startBackupRun(deps, { instanceId: id, trigger: "manual" }, logger);
+		await expect(
+			runBackup(
+				plain,
+				() => deps,
+				{
+					backupId: id,
+					trigger: "manual",
+					resume: { tableName: "no_such_table", cursor: null, partNo: 1 },
+				},
+				`${id}-cont-1`,
+				logger,
+			),
+		).rejects.toThrow(
+			"resume table no_such_table is not in the backup's table list",
+		);
+		expect((await rowOf(deps, id)).status).toBe("failed");
+	});
+
+	it("a failed verify fails the run and skips retention", async () => {
+		const id = `bk-badverify-${Date.now()}`;
+		await startBackupRun(deps, { instanceId: id, trigger: "manual" }, logger);
+		const blind = bucketWith(deps, (t) => ({
+			head: (key: string) =>
+				key.endsWith("manifest.json") ? null : t.head(key),
+		}));
+		const steps: string[] = [];
+		const tracking: StepFn = (name, fn) => {
+			steps.push(name);
+			return fn();
+		};
+		await expect(
+			runBackup(
+				tracking,
+				() => blind,
+				{ backupId: id, trigger: "manual" },
+				id,
+				logger,
+			),
+		).rejects.toThrow("manifest: object missing");
+		expect(steps).toContain("verify");
+		expect(steps).not.toContain("retention");
+		expect(await rowOf(deps, id)).toMatchObject({
+			status: "failed",
+			error: "Error: manifest: object missing",
+		});
+	});
 });
 
 describe("backup cron", () => {
@@ -436,6 +640,67 @@ describe("backup cron", () => {
 			.from(backups)
 			.where(eq(backups.id, "bk-c"));
 		expect(row.instanceId).toBe("bk-c-cont-1");
+	});
+
+	it("a D1 error other than a unique violation on the row insert is thrown", async () => {
+		const backup = recordingBackup();
+		const deps = faultyDeps(testDeps({ backup }), {
+			d1: [{ match: /insert into "backups"/i }],
+		});
+		await expect(
+			startBackupRun(deps, { instanceId: "bk-d1", trigger: "cron" }, logger),
+		).rejects.toThrow(/Failed query: insert into "backups"/);
+		expect(backup.created).toEqual([]);
+		expect(await deps.db.select().from(backups)).toEqual([]);
+	});
+
+	it("a first start whose instance already exists returns duplicate and keeps the running row", async () => {
+		const backup = recordingBackup();
+		const deps = testDeps({ backup });
+		await cleanBackups(deps);
+		await backup.create({ id: "bk-pre", params: {} });
+		expect(
+			await startBackupRun(
+				deps,
+				{ instanceId: "bk-pre", trigger: "cron" },
+				logger,
+			),
+		).toBe("duplicate");
+		expect(await rowOf(deps, "bk-pre")).toMatchObject({
+			status: "running",
+			instanceId: "bk-pre",
+		});
+	});
+
+	it("a continuation whose create fails throws and leaves the row running on its old instance", async () => {
+		const good = recordingBackup();
+		const deps = testDeps({ backup: good });
+		await cleanBackups(deps);
+		await startBackupRun(deps, { instanceId: "bk-k", trigger: "cron" }, logger);
+		const broken = testDeps({
+			backup: {
+				async create() {
+					throw new Error("workflows unavailable");
+				},
+			} as unknown as Workflow,
+		});
+		await expect(
+			startBackupRun(
+				broken,
+				{
+					instanceId: "bk-k-cont-1",
+					trigger: "cron",
+					backupId: "bk-k",
+					resume: { tableName: "backups", cursor: null, partNo: 1 },
+				},
+				logger,
+			),
+		).rejects.toThrow("workflows unavailable");
+		expect(await rowOf(deps, "bk-k")).toMatchObject({
+			status: "running",
+			instanceId: "bk-k",
+			error: null,
+		});
 	});
 
 	it("cron skips (and logs) while a backup is still running", async () => {
@@ -566,6 +831,52 @@ describe("backup liveness", () => {
 			error: "boom",
 		});
 		expect(summary.running).toBeNull();
+	});
+
+	it("isBackupRunning treats a Workflows error other than not-found as running", async () => {
+		const flaky = testDeps({
+			backup: {
+				async get() {
+					throw new Error("workflows: internal error");
+				},
+			} as unknown as Workflow,
+		});
+		await flaky.db
+			.insert(backups)
+			.values(newBackupRow(Date.now(), "bk-flaky", "cron"));
+		expect(await isBackupRunning(flaky)).toBe(true);
+		expect(await rowOf(flaky, "bk-flaky")).toMatchObject({
+			status: "running",
+			error: null,
+		});
+	});
+
+	it("readBackupSummary falls back to started_at and reports the running backup", async () => {
+		const now = Date.now();
+		expect((await readBackupSummary(deps)).last_verified).toBeNull();
+		await deps.db.insert(backups).values({
+			...newBackupRow(now - 10, "bk-sum-old", "cron"),
+			status: "verified",
+			rowCountsJson: JSON.stringify({ a: 1 }),
+		});
+		await deps.db.insert(backups).values({
+			...newBackupRow(now, "bk-sum-run", "manual"),
+			instanceId: "bk-sum-run-cont-1",
+		});
+		const summary = await readBackupSummary(deps);
+		expect(summary.last_verified).toEqual({
+			id: "bk-sum-old",
+			started_at: now - 10,
+			finished_at: now - 10,
+			bytes: 0,
+			rows: 1,
+		});
+		expect(summary.last_failed).toBeNull();
+		expect(summary.running).toEqual({
+			id: "bk-sum-run",
+			instance_id: "bk-sum-run-cont-1",
+			started_at: now,
+		});
 	});
 });
 

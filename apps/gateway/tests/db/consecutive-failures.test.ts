@@ -40,11 +40,11 @@ async function attempt(
 	attemptNo: number,
 	leaseOverride?: number,
 ) {
-	const leaseUntil = Date.now() + 60_000 + attemptNo;
+	const leaseUntil = deps.now() + 60_000 + attemptNo;
 	await acquireLease(deps, deliveryId, leaseUntil);
 	return recordLeasedAttempt(deps, deliveryId, {
 		attemptNo,
-		startedAt: Date.now(),
+		startedAt: deps.now(),
 		durationMs: 5,
 		outcome,
 		snippet: null,
@@ -54,12 +54,15 @@ async function attempt(
 
 describe("destinations.consecutive_failures (M5-12)", () => {
 	it("increments on each failure and resets on delivered", async () => {
-		const deps = testDeps();
+		let t = Date.now();
+		const deps = testDeps({ now: () => t });
 		const p = await seedPipeline(deps);
 		const { deliveryId } = await seedDelivery(deps, p, { status: "queued" });
 		await attempt(deps, deliveryId, failed, 1);
+		t += 30_000; // each retry is leased once it is due
 		await attempt(deps, deliveryId, failed, 2);
 		expect(await counter(deps, p.destination.id)).toBe(2);
+		t += 30_000;
 		await attempt(deps, deliveryId, ok, 3);
 		expect(await counter(deps, p.destination.id)).toBe(0);
 	});

@@ -85,6 +85,7 @@ export function OverviewContent({
 	});
 	const [refreshing, setRefreshing] = useState(false);
 	const refresh = async () => {
+		/* istanbul ignore if -- @preserve unreachable: the Refresh button is disabled while refreshing, so it cannot call refresh() again */
 		if (refreshing) return;
 		setRefreshing(true);
 		try {

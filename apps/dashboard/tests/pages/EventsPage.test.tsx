@@ -1,9 +1,15 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
-import { eventSummary, project, T } from "../helpers/fixtures";
+import { eventSummary, project, T, webhookEvent } from "../helpers/fixtures";
 import { chooseProject, renderApp } from "../helpers/render";
 import { apiUrl, server } from "../helpers/server";
+
+/** The cell of `row` under the column header named `header`. */
+function cellIn(row: HTMLElement, header: string) {
+	const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
+	return within(row).getAllByRole("cell")[headers.indexOf(header)];
+}
 
 describe("Events", () => {
 	it("sends URL filters to the API, repeating status", async () => {
@@ -295,5 +301,98 @@ describe("Events", () => {
 		expect(seen.get("http_status")).toBe("503");
 		expect(seen.get("from")).toBe(String(from));
 		expect(seen.get("to")).toBe(String(T));
+	});
+	it("clears every filter but the project from the empty state", async () => {
+		const seen: URLSearchParams[] = [];
+		server.use(
+			http.get(apiUrl("/events"), ({ request }) => {
+				seen.push(new URL(request.url).searchParams);
+				return HttpResponse.json({ data: [], next_cursor: null });
+			}),
+		);
+		const { user, router } = renderApp(
+			"/events?project_id=prj_1&source_id=src_1&http_status=503",
+		);
+		expect(
+			await screen.findByText("No events match these filters."),
+		).toBeInTheDocument();
+		const emptyCell = screen
+			.getByText("No events match these filters.")
+			.closest("td") as HTMLElement;
+		await user.click(
+			within(emptyCell).getByRole("button", { name: "Clear filters" }),
+		);
+		await waitFor(() =>
+			expect(router.state.location.search).toEqual({ project_id: "prj_1" }),
+		);
+		await waitFor(() => expect(seen.at(-1)?.has("source_id")).toBe(false));
+		expect(seen.at(-1)?.has("http_status")).toBe(false);
+		expect(seen.at(-1)?.get("project_id")).toBe("prj_1");
+	});
+
+	it("shows dashes for an event without a provider ID or delivery, and opens it on row click", async () => {
+		server.use(
+			http.get(apiUrl("/events"), () =>
+				HttpResponse.json({
+					data: [
+						eventSummary({
+							id: "evt_bare",
+							provider_event_id: null,
+							latest_delivery: null,
+							size_bytes: 2048,
+						}),
+					],
+					next_cursor: null,
+				}),
+			),
+			http.get(apiUrl("/events/evt_bare"), () =>
+				HttpResponse.json(webhookEvent({ id: "evt_bare", deliveries: [] })),
+			),
+		);
+		const { user, router } = renderApp("/events?project_id=prj_1");
+		const row = (await screen.findByRole("link", { name: "evt_bare" })).closest(
+			"tr",
+		) as HTMLElement;
+		for (const header of [
+			"Provider ID",
+			"Latest destination",
+			"Latest delivery status",
+			"HTTP",
+		])
+			expect(cellIn(row, header)).toHaveTextContent(/^—$/);
+		expect(cellIn(row, "Attempts")).toHaveTextContent(/^0$/);
+		await user.click(within(row).getByText("2.0 KB"));
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe("/events/evt_bare"),
+		);
+		expect(router.state.location.search).toEqual({ project_id: "prj_1" });
+	});
+
+	it("shows a dash when the latest delivery has no HTTP status", async () => {
+		server.use(
+			http.get(apiUrl("/events"), () =>
+				HttpResponse.json({
+					data: [
+						eventSummary({
+							latest_delivery: {
+								id: "dlv_1",
+								destination_id: "dst_1",
+								kind: "initial",
+								next_attempt_at: null,
+								status: "pending",
+								last_http_status: null,
+								attempt_count: 0,
+							},
+						}),
+					],
+					next_cursor: null,
+				}),
+			),
+		);
+		renderApp("/events?project_id=prj_1");
+		const row = (await screen.findByRole("link", { name: "evt_1" })).closest(
+			"tr",
+		) as HTMLElement;
+		expect(cellIn(row, "HTTP")).toHaveTextContent(/^—$/);
 	});
 });

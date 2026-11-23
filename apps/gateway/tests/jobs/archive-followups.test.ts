@@ -1,7 +1,7 @@
 import { DEFAULT_STORAGE_SETTINGS } from "@hookflare/shared";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
-import { isArchiveRunning } from "../../src/core/archive-run";
+import { isArchiveRunning, startArchiveRun } from "../../src/core/archive-run";
 import { DAY_MS } from "../../src/core/db/archive";
 import {
 	archiveBatches,
@@ -11,6 +11,7 @@ import {
 	webhookEvents,
 } from "../../src/core/db/schema";
 import { createLogger } from "../../src/core/log";
+import { ARCHIVE_LAST_RUN_KEY } from "../../src/core/settings";
 import { buildEventPart } from "../../src/jobs/archive/part";
 import { estimateSteps, planRun } from "../../src/jobs/archive/plan";
 import { expireArchives } from "../../src/jobs/archive/retention";
@@ -232,5 +233,30 @@ describe("isArchiveRunning (Minor 8)", () => {
 	it("treats an instance in status unknown as running", async () => {
 		const unknown = testDeps({ archive: fakeArchive("unknown") });
 		expect(await isArchiveRunning(unknown, "x")).toBe(true);
+	});
+});
+
+describe("startArchiveRun", () => {
+	it("rethrows a Workflows error that is not a duplicate and records no last run", async () => {
+		await deps.db
+			.delete(settings)
+			.where(eq(settings.key, ARCHIVE_LAST_RUN_KEY));
+		const broken = testDeps({
+			now: () => NOW,
+			archive: {
+				create: async () => {
+					throw new Error("workflows unavailable");
+				},
+			} as unknown as Workflow,
+		});
+		await expect(
+			startArchiveRun(broken, "archive-x", "manual", logger),
+		).rejects.toThrow("workflows unavailable");
+		expect(
+			await deps.db
+				.select()
+				.from(settings)
+				.where(eq(settings.key, ARCHIVE_LAST_RUN_KEY)),
+		).toEqual([]);
 	});
 });

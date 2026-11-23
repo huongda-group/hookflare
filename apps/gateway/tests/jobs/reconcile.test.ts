@@ -209,6 +209,30 @@ describe("reconcile", () => {
 		expect(queue.sent).toHaveLength(500);
 	});
 
+	it("leaves later rules for the next run once the first rule spends the budget", async () => {
+		const { deps, queue } = setup();
+		const p = await seedPipeline(deps);
+		await seedMany(deps, p, 501, { status: "pending", enqueuedAt: null });
+		const { deliveryId: lost } = await seedDelivery(deps, p, {
+			status: "retrying",
+			delivery: {
+				nextAttemptAt: T0 - 20 * MIN,
+				enqueuedAt: T0 - 20 * MIN,
+				createdAt: T0 - 30 * MIN,
+			},
+		});
+		const report = await reconcile(deps);
+		expect(report).toMatchObject({
+			pending: 500,
+			expired_leases: 0,
+			overdue_retries: 0,
+			stale_queued: 0,
+		});
+		expect(queue.sent).toHaveLength(500);
+		expect(queue.sent.map((m) => m.deliveryId)).not.toContain(lost);
+		expect((await status(deps, lost)).enqueuedAt).toBe(T0 - 20 * MIN);
+	});
+
 	it("re-sends next run when the update after a send fails", async () => {
 		const { deps: base } = setup();
 		const p = await seedPipeline(base);

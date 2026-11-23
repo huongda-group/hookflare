@@ -59,6 +59,28 @@ describe("extractEventId", () => {
 		expect(extractEventId("json_path", "$.id", new Headers(), body)).toBeNull();
 	});
 
+	it("returns null for an unparseable JSON path selector", () => {
+		expect(
+			extractEventId(
+				"json_path",
+				"not a path",
+				new Headers(),
+				enc({ id: "a" }),
+			),
+		).toBeNull();
+	});
+
+	it("returns null when an index segment meets a non-array", () => {
+		expect(
+			extractEventId(
+				"json_path",
+				"$.data[0]",
+				new Headers(),
+				enc({ data: { "0": "a" } }),
+			),
+		).toBeNull();
+	});
+
 	it("does not read inherited properties", () => {
 		expect(
 			extractEventId("json_path", "$.constructor", new Headers(), enc({})),

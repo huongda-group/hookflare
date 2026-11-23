@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppBindings } from "../app";
 import { readCappedBody } from "../core/body";
 import {
+	eventExists,
 	findEventIdByProviderId,
 	insertEventWithDelivery,
 	markQueued,
@@ -75,7 +76,17 @@ export function ingressRoutes() {
 		const { source, secret } = bundle;
 
 		// 2. Rate limit per source.
-		const { success } = await deps.env.INGRESS_LIMITER.limit({ key: sourceId });
+		let success: boolean;
+		try {
+			({ success } = await deps.env.INGRESS_LIMITER.limit({ key: sourceId }));
+		} catch (err) {
+			// A limiter outage is ours, not the sender's: 503 so the provider retries.
+			logger.error("ingress.limiter_failed", {
+				source_id: sourceId,
+				error: String(err),
+			});
+			return c.json({ error: "unavailable" }, 503);
+		}
 		if (!success) {
 			return reject(429, "rate_limited");
 		}
@@ -224,7 +235,15 @@ export function ingressRoutes() {
 				},
 			});
 		} catch (err) {
-			await dropPayload();
+			// D1 can throw after the batch committed. Delete the payload only when
+			// the event is known to be absent; otherwise a stored event would lose
+			// its body (the reconciler still enqueues it). An orphan R2 object is
+			// harmless by comparison.
+			try {
+				if (!(await eventExists(deps.db, eventId))) await dropPayload();
+			} catch {
+				// Unknown: keep the payload.
+			}
 			// A concurrent request with the same provider event id won (spec §6.1).
 			try {
 				const existing = await findDuplicate();

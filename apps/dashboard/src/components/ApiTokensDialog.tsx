@@ -67,18 +67,19 @@ export function ApiTokensDialog({
 	return (
 		<>
 			<Dialog
-		open={open}
-		onOpenChange={(o) => {
-			// The parent unmounts on close, which drops every local state;
-			// clearing the disclosure here too keeps the one-time token and
-			// the last server error out of any remount.
-			if (!o) {
-				setSecret(null);
-				setCreateError(null);
-			}
-			onOpenChange(o);
-		}}
-	>
+				open={open}
+				onOpenChange={(o) => {
+					// The parent unmounts on close, which drops every local state;
+					// clearing the disclosure here too keeps the one-time token and
+					// the last server error out of any remount.
+					/* istanbul ignore else -- @preserve unreachable: Radix calls onOpenChange(true) only from a Trigger, and this dialog has none */
+					if (!o) {
+						setSecret(null);
+						setCreateError(null);
+					}
+					onOpenChange(o);
+				}}
+			>
 				<DialogContent className="max-w-lg">
 					<DialogHeader>
 						<DialogTitle>API tokens for {username}</DialogTitle>
@@ -89,7 +90,9 @@ export function ApiTokensDialog({
 					</DialogHeader>
 					{tokens.data ? (
 						tokens.data.data.length === 0 ? (
-							<p className="text-sm text-muted-foreground">No API tokens yet.</p>
+							<p className="text-sm text-muted-foreground">
+								No API tokens yet.
+							</p>
 						) : (
 							<ul className="space-y-2">
 								{tokens.data.data.map((t) => (
@@ -165,18 +168,19 @@ export function ApiTokensDialog({
 			<ConfirmDialog
 				open={revoking !== null}
 				onOpenChange={(o) => {
+					/* istanbul ignore else -- @preserve unreachable: Radix calls onOpenChange(true) only from a Trigger, and this dialog has none */
 					if (!o) setRevoking(null);
 				}}
 				title={revoking ? `Revoke token ${revoking.name}?` : ""}
 				description="Automation using this token stops working immediately."
 				confirmLabel="Revoke"
 				destructive
-				onConfirm={async (reason) => {
+				// The revoke route does not read a body, so do not ask for a reason.
+				showReason={false}
+				onConfirm={async () => {
+					/* istanbul ignore if -- @preserve unreachable: the confirm dialog is only open while a token is being revoked */
 					if (!revoking) return;
-					await api.postVoid(
-						`${path(username)}/tokens/${revoking.id}/revoke`,
-						...(reason ? [{ reason }] : []),
-					);
+					await api.postVoid(`${path(username)}/tokens/${revoking.id}/revoke`);
 					await refresh();
 				}}
 			/>

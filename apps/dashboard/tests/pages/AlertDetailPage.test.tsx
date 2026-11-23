@@ -1,4 +1,4 @@
-import type { Alert } from "@hookflare/shared";
+import type { Alert, AlertNotification } from "@hookflare/shared";
 import { screen, waitFor, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
@@ -8,7 +8,7 @@ import { apiUrl, server } from "../helpers/server";
 
 function detail(
 	o: Partial<Alert> = {},
-	notifications = [
+	notifications: AlertNotification[] = [
 		{
 			id: "ant_1",
 			channel_id: "ach_1",
@@ -216,5 +216,64 @@ describe("Alert detail", () => {
 		);
 		renderApp("/alerts/alr_nope");
 		expect(await screen.findByText(/was not found/i)).toBeInTheDocument();
+	});
+	it("offers Retry after a failed load and shows the alert once it succeeds", async () => {
+		let fail = true;
+		server.use(
+			http.get(apiUrl("/alerts/alr_9"), () =>
+				fail
+					? HttpResponse.json({ error: "internal" }, { status: 500 })
+					: HttpResponse.json(detail()),
+			),
+		);
+		const { user } = renderApp("/alerts/alr_9?project_id=prj_1");
+		const panel = await screen.findByRole("alert");
+		expect(panel).toHaveTextContent("Could not load alert alr_9");
+		fail = false;
+		await user.click(within(panel).getByRole("button", { name: "Retry" }));
+		expect(await screen.findByText("Billing API")).toBeInTheDocument();
+	});
+
+	it("shows a resolved deployment-wide alert with unnamed channels and no errors", async () => {
+		server.use(
+			http.get(apiUrl("/alerts/alr_done"), () =>
+				HttpResponse.json(
+					detail(
+						{
+							id: "alr_done",
+							status: "resolved",
+							resolved_at: T,
+							project_id: null,
+							details: { new_dead: 1, delivery_ids: ["dlv_z"] },
+						},
+						[
+							{
+								id: "ant_2",
+								channel_id: "ach_unnamed",
+								channel_name: null,
+								kind: "resolved",
+								status: "sent",
+								tries: 1,
+								last_error: null,
+								created_at: T,
+								sent_at: T,
+							},
+						],
+					),
+				),
+			),
+		);
+		renderApp("/alerts/alr_done?scope=deployment");
+		expect(
+			await screen.findByText("resolved", { selector: "span" }),
+		).toBeVisible();
+		expect(screen.getByText("Deployment-wide")).toBeInTheDocument();
+		const resolved = screen.getByText("Resolved").nextElementSibling;
+		expect(resolved).not.toHaveTextContent("—");
+		const link = screen.getByRole("link", { name: "dlv_z" });
+		expect(link.getAttribute("href")).not.toContain("project_id");
+		const log = screen.getByRole("table", { name: /notifications/i });
+		expect(within(log).getByText("ach_unnamed")).toBeInTheDocument();
+		expect(within(log).getByText("—")).toBeInTheDocument();
 	});
 });

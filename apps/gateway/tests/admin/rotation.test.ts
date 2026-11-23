@@ -1,6 +1,7 @@
 import type { Destination, Source } from "@hookflare/shared";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
+import { toDestination } from "../../src/admin/routes/destinations";
 import {
 	decryptSecret,
 	encryptSecret,
@@ -111,6 +112,26 @@ describe("POST /destinations/:id/rotate-secret", () => {
 				)
 			).status,
 		).toBe(403);
+	});
+	it("toDestination defaults to the current time when deciding if the previous secret is live", async () => {
+		const deps = testDeps();
+		const { destination } = await seedPipeline(deps);
+		const api = await adminApp(deps);
+		await api.request("POST", `/destinations/${destination.id}/rotate-secret`, {
+			grace_hours: 1,
+		});
+		const [row] = await deps.db
+			.select()
+			.from(destinations)
+			.where(eq(destinations.id, destination.id));
+		const live = await toDestination(deps.env, row);
+		expect(live.previous_secret_fingerprint).toBe(
+			await secretFingerprint(TEST_SIGNING_SECRET),
+		);
+		const expiresAt = row.signingSecretPrevExpiresAt as number;
+		const expired = await toDestination(deps.env, row, expiresAt);
+		expect(expired.previous_secret_fingerprint).toBeNull();
+		expect(expired.previous_secret_expires_at).toBeNull();
 	});
 });
 

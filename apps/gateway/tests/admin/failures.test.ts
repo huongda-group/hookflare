@@ -1,4 +1,5 @@
 import type { Failure } from "@hookflare/shared";
+import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { deliveries } from "../../src/core/db/schema";
 import { newId } from "../../src/core/ids";
@@ -158,5 +159,39 @@ describe("GET /failures", () => {
 			final.deliveryId,
 		]);
 		expect(second.next_cursor).toBeNull();
+	});
+	it("rejects an invalid query or cursor with 400", async () => {
+		const { api } = await fixture();
+		for (const qs of ["status=delivered", "cursor=@@"]) {
+			const res = await api.request("GET", `/failures?${qs}`);
+			expect.soft(res.status, qs).toBe(400);
+			expect.soft(await res.json()).toMatchObject({ error: "invalid_request" });
+		}
+	});
+});
+
+describe("POST /failures/replay validation", () => {
+	it("rejects an invalid body or project scope with 400 and replays nothing", async () => {
+		const { deps, dead } = await fixture();
+		const api = await adminApp(deps, { role: "operator" });
+		const badBody = await api.request("POST", "/failures/replay", {
+			delivery_ids: [],
+			reason: "x",
+		});
+		expect(badBody.status).toBe(400);
+		const badScope = await api.request(
+			"POST",
+			"/failures/replay?project_id=nope",
+			{ delivery_ids: [dead.deliveryId], reason: "retry" },
+		);
+		expect(badScope.status).toBe(400);
+		expect(await badScope.json()).toMatchObject({
+			issues: [expect.objectContaining({ path: "project_id" })],
+		});
+		const rows = await deps.db
+			.select()
+			.from(deliveries)
+			.where(eq(deliveries.eventId, dead.eventId));
+		expect(rows).toHaveLength(1);
 	});
 });

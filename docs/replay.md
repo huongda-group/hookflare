@@ -6,6 +6,8 @@
 
 Operators recover failed work by creating a new delivery for an existing event. Replay requires a reason, preserves old deliveries/attempts, checks payload and destination eligibility, and records the new delivery ID in audit history. Missing payload returns a conflict rather than creating unrecoverable work.
 
+At most one non-terminal replay exists per event and destination. The insert itself checks this, so of two concurrent replays of the same failure only one creates a delivery; the other reports `replay_in_progress` (409 on event replay, a `skipped` entry on bulk replay) and is neither enqueued nor listed as replayed in the audit entry.
+
 Bulk replay is bounded at 100 selected deliveries. A bulk response can contain distinct outcomes; the UI must report what happened for each selection. A created replay may still await enqueue and is never immediately described as delivered.
 
 ## Design and interaction

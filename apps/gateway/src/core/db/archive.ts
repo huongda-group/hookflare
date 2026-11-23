@@ -8,6 +8,14 @@ export const DAY_MS = 86_400_000;
 const TERMINAL = sql.raw("('delivered', 'failed_final', 'dead')");
 const FAILED = sql.raw("('failed_final', 'dead')");
 
+/**
+ * `archive_part` of an event whose R2 payload was gone when its part was
+ * built. It keeps the batch's mark, so later parts and runs skip it, but no
+ * part row ever has this number, so purge never deletes it: the event stays
+ * in D1 (spec §7.3) until an operator clears the mark.
+ */
+export const MISSING_PART = 0;
+
 export type Cutoffs = { hotBefore: number; failedBefore: number };
 
 export function cutoffsFor(
@@ -36,7 +44,10 @@ export async function countEligible(db: Db, c: Cutoffs): Promise<number> {
 	const [r] = await db.all<{ n: number }>(
 		sql`SELECT COUNT(*) AS n FROM webhook_events e WHERE ${eligibleSql(c, "e")}`,
 	);
-	return r?.n ?? 0;
+	return (
+		r?.n ??
+		/* istanbul ignore next -- @preserve unreachable: COUNT(*) without GROUP BY always returns one row */ 0
+	);
 }
 
 /** UTC days with unmarked eligible events, oldest first. */
@@ -91,7 +102,10 @@ export async function countMarked(
 ): Promise<number> {
 	const [r] = await db.all<{ n: number }>(sql`
 		SELECT COUNT(*) AS n FROM webhook_events WHERE archive_batch_id = ${batchId} AND archive_part = ${partNo}`);
-	return r?.n ?? 0;
+	return (
+		r?.n ??
+		/* istanbul ignore next -- @preserve unreachable: COUNT(*) without GROUP BY always returns one row */ 0
+	);
 }
 
 /** Replay (spec §7.4): the event is skipped by purge and archived again later. */

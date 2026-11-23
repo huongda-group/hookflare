@@ -264,7 +264,9 @@ export function AppShell() {
 											value={p.id}
 											className="wrap-anywhere"
 										>
-											{(nameCounts.get(p.name) ?? 0) > 1
+											{(nameCounts.get(p.name) ??
+												/* istanbul ignore next -- @preserve unreachable: nameCounts is built from this same list */ 0) >
+											1
 												? `${p.name} (${p.id})`
 												: p.name}
 										</SelectItem>

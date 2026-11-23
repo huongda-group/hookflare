@@ -109,6 +109,19 @@ describe("StatusBadge", () => {
 	});
 });
 
+describe("StatusBadge fallback", () => {
+	it("humanizes an unknown status and never renders a blank badge", () => {
+		render(
+			<>
+				<StatusBadge status="needs_review" />
+				<StatusBadge status="_" />
+			</>,
+		);
+		expect(screen.getByText("Needs review")).toBeInTheDocument();
+		expect(screen.getByText("Unknown")).toBeInTheDocument();
+	});
+});
+
 describe("IdText", () => {
 	it("surfaces an actionable explanation instead of a false success", async () => {
 		const success = vi.spyOn(toast, "success");
@@ -130,6 +143,21 @@ describe("IdText", () => {
 		// The value stays on screen and selectable, so the user can copy it
 		// without the clipboard API.
 		expect(screen.getByText("dlv_1")).toBeInTheDocument();
+	});
+
+	it("explains the failure when the clipboard API is missing", async () => {
+		const user = userEvent.setup();
+		Object.defineProperty(navigator, "clipboard", {
+			configurable: true,
+			value: undefined,
+		});
+		render(<IdText id="dlv_2" />);
+
+		await user.click(screen.getByRole("button", { name: "Copy dlv_2" }));
+
+		expect(
+			await screen.findByText(/could not copy automatically/i),
+		).toBeInTheDocument();
 	});
 
 	it("confirms a successful copy", async () => {
@@ -198,6 +226,35 @@ describe("TimeText", () => {
 		).toBeInTheDocument();
 	});
 
+	it("hides the detail again on mouse leave and on blur", async () => {
+		const user = userEvent.setup();
+		render(
+			<TooltipProvider>
+				<TimeText ms={T} />
+				<button type="button">Elsewhere</button>
+			</TooltipProvider>,
+		);
+		const trigger = screen
+			.getByText(formatRelative(T))
+			.closest("button") as HTMLElement;
+		const utcText = new RegExp(escapeRe(utc));
+
+		await user.hover(trigger);
+		expect(await screen.findByText(utcText)).toBeInTheDocument();
+		await user.unhover(trigger);
+		await waitFor(() =>
+			expect(screen.queryByText(utcText)).not.toBeInTheDocument(),
+		);
+
+		await user.tab();
+		expect(await screen.findByText(utcText)).toBeInTheDocument();
+		await user.tab();
+		await waitFor(() =>
+			expect(screen.queryByText(utcText)).not.toBeInTheDocument(),
+		);
+		expect(trigger).toHaveAttribute("aria-expanded", "false");
+	});
+
 	it("keeps the placeholder for a missing time", () => {
 		render(<TimeText ms={null} />);
 		expect(screen.getByText("—")).toBeInTheDocument();
@@ -224,6 +281,17 @@ describe("PageHeader", () => {
 	});
 });
 
+describe("PageHeader minimal", () => {
+	it("renders only the title when nothing else is given", () => {
+		const { container } = render(<PageHeader title="Audit" />);
+		expect(
+			screen.getByRole("heading", { level: 1, name: "Audit" }),
+		).toBeInTheDocument();
+		expect(container.querySelector("header p")).toBeNull();
+		expect(screen.queryByRole("button")).not.toBeInTheDocument();
+	});
+});
+
 describe("EmptyState", () => {
 	it("shows the title, explanation, and next step", () => {
 		render(
@@ -240,6 +308,14 @@ describe("EmptyState", () => {
 		expect(
 			screen.getByRole("button", { name: "Create source" }),
 		).toBeInTheDocument();
+	});
+});
+
+describe("EmptyState without a next step", () => {
+	it("omits the action row", () => {
+		render(<EmptyState title="Nothing here" description="All caught up." />);
+		expect(screen.getByText("Nothing here")).toBeInTheDocument();
+		expect(screen.queryByRole("button")).not.toBeInTheDocument();
 	});
 });
 
@@ -338,6 +414,36 @@ describe("DirtyFormGuard", () => {
 		unmount();
 
 		expect(unloadBlocked()).toBe(false);
+	});
+
+	it("closes at once when a clean form requests close", async () => {
+		const user = userEvent.setup();
+		renderNavHarness({ initialDirty: false });
+		await screen.findByText("Editor");
+
+		await user.click(screen.getByRole("button", { name: "Request close" }));
+
+		expect(await screen.findByText("Editor closed")).toBeInTheDocument();
+		expect(
+			screen.queryByText("Discard unsaved changes?"),
+		).not.toBeInTheDocument();
+	});
+
+	it("keeps editing when the prompt is dismissed with Escape", async () => {
+		const user = userEvent.setup();
+		renderNavHarness({ initialDirty: true });
+		await screen.findByText("Editor");
+
+		await user.click(screen.getByRole("button", { name: "Request close" }));
+		await screen.findByText("Discard unsaved changes?");
+		await user.keyboard("{Escape}");
+
+		await waitFor(() =>
+			expect(
+				screen.queryByText("Discard unsaved changes?"),
+			).not.toBeInTheDocument(),
+		);
+		expect(screen.queryByText("Editor closed")).not.toBeInTheDocument();
 	});
 
 	it("settles a parked navigation when dirty clears without a prompt", async () => {

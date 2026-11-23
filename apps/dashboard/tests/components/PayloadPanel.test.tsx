@@ -6,7 +6,10 @@ import { describe, expect, it, vi } from "vitest";
 import { PayloadPanel } from "@/components/PayloadPanel";
 import { apiUrl, server } from "../helpers/server";
 
-function renderPanel(props?: { onMissing?: () => void }) {
+function renderPanel(props?: {
+	onMissing?: () => void;
+	contentType?: string | null;
+}) {
 	// Plain client: framework defaults apply, so the component itself must
 	// disable background retries for the audited payload read.
 	const queryClient = new QueryClient();
@@ -16,7 +19,11 @@ function renderPanel(props?: { onMissing?: () => void }) {
 			<PayloadPanel
 				projectId="prj_1"
 				eventId="evt_1"
-				contentType="application/json"
+				contentType={
+					props && "contentType" in props
+						? (props.contentType ?? null)
+						: "application/json"
+				}
 				size={17}
 				onMissing={props?.onMissing}
 			/>
@@ -111,4 +118,47 @@ describe("PayloadPanel request lifecycle", () => {
 		).toBeInTheDocument();
 		expect(loads).toBe(2);
 	});
+});
+
+describe("PayloadPanel content type", () => {
+	it.each([
+		["the event's stored type", "text/plain", "text/plain"],
+		["no type at all", null, ""],
+	])(
+		"types a download with %s when the response has none",
+		async (_label, stored, expected) => {
+			const blobs: Blob[] = [];
+			const create = vi
+				.spyOn(URL, "createObjectURL")
+				.mockImplementation((b) => {
+					blobs.push(b as Blob);
+					return "blob:test";
+				});
+			const revoke = vi
+				.spyOn(URL, "revokeObjectURL")
+				.mockImplementation(() => {});
+			const click = vi
+				.spyOn(HTMLAnchorElement.prototype, "click")
+				.mockImplementation(() => {});
+			try {
+				server.use(
+					http.get(
+						apiUrl("/events/evt_1/payload"),
+						() => new HttpResponse(new TextEncoder().encode("a=1")),
+					),
+				);
+				const { user } = renderPanel({ contentType: stored });
+				await user.click(screen.getByRole("button", { name: "Show payload" }));
+				expect(await screen.findByText("a=1")).toBeInTheDocument();
+				await user.click(screen.getByRole("button", { name: "Download" }));
+				expect(blobs).toHaveLength(1);
+				expect(blobs[0].type).toBe(expected);
+				expect(await blobs[0].text()).toBe("a=1");
+			} finally {
+				create.mockRestore();
+				revoke.mockRestore();
+				click.mockRestore();
+			}
+		},
+	);
 });

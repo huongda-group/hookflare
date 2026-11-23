@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	hashPassword,
 	PBKDF2_ITERATIONS,
@@ -118,6 +118,8 @@ describe("password hashing", () => {
 			"pbkdf2-sha256$-1$AAAA$BBBB",
 			"pbkdf2-sha256$1000$!!!$BBBB",
 			"pbkdf2-sha256$1000$AAAA$!!!!",
+			// A base64 length of 4n+1 can never decode.
+			"pbkdf2-sha256$1000$AAAAA$BBBB",
 			"pbkdf2-sha256$999999999$AAAA$BBBB",
 		];
 		for (const stored of malformed) {
@@ -131,5 +133,17 @@ describe("password hashing", () => {
 			new Uint8Array(32),
 		)}`;
 		await expect(verifyPassword("whatever", stored)).resolves.toBe(false);
+	});
+	it("returns false instead of throwing when the runtime's PBKDF2 fails", async () => {
+		const stored = await hashPassword("right");
+		const spy = vi
+			.spyOn(crypto.subtle, "deriveBits")
+			.mockRejectedValueOnce(new Error("OperationError"));
+		try {
+			await expect(verifyPassword("right", stored)).resolves.toBe(false);
+			expect(spy).toHaveBeenCalledTimes(1);
+		} finally {
+			spy.mockRestore();
+		}
 	});
 });

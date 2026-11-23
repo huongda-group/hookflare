@@ -6,7 +6,7 @@ import {
 } from "@hookflare/shared";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import type { z } from "zod";
 import { DirtyFormGuard } from "@/components/DirtyFormGuard";
@@ -53,6 +53,9 @@ function StorageForm({ initial }: { initial: StorageSettings }) {
 		archiveOff: boolean;
 	} | null>(null);
 	const [saved, setSaved] = useState(false);
+	const [writing, setWriting] = useState(false);
+	// Blocks a second confirm click that lands before the disabled state renders.
+	const writeInFlight = useRef(false);
 	type StorageFormValues = z.input<typeof storageSettingsSchema>;
 	const form = useForm<StorageFormValues>({
 		resolver: zodResolver(storageSettingsSchema),
@@ -67,13 +70,21 @@ function StorageForm({ initial }: { initial: StorageSettings }) {
 	}, [form]);
 
 	async function write(storage: StorageSettings) {
+		/* istanbul ignore if -- @preserve unreachable: React commits the disabled state synchronously after a discrete click, so a second click never reaches this handler; the ref is defense in depth */
+		if (writeInFlight.current) return;
+		writeInFlight.current = true;
+		setWriting(true);
 		try {
 			await api.patch("/settings", { storage });
 			await qc.invalidateQueries({ queryKey: qk.settings });
+			form.reset(storage);
 			setConfirm(null);
 			setSaved(true);
 		} catch (err) {
 			applyServerIssues(form, err);
+		} finally {
+			writeInFlight.current = false;
+			setWriting(false);
 		}
 	}
 
@@ -135,7 +146,8 @@ function StorageForm({ initial }: { initial: StorageSettings }) {
 									id="st-archive_retention_days"
 									type="number"
 									{...form.register("archive_retention_days", {
-										setValueAs: (v) => (v === "" || v === null ? null : Number(v)),
+										setValueAs: (v) =>
+											v === "" || v === null ? null : Number(v),
 									})}
 								/>
 								<FieldError message={e.archive_retention_days?.message} />
@@ -150,7 +162,9 @@ function StorageForm({ initial }: { initial: StorageSettings }) {
 							<Checkbox
 								id="st-archive_enabled"
 								checked={form.watch("archive_enabled")}
-								onCheckedChange={(v) => form.setValue("archive_enabled", v === true)}
+								onCheckedChange={(v) =>
+									form.setValue("archive_enabled", v === true)
+								}
 							/>
 							<Label htmlFor="st-archive_enabled">
 								Archive to R2 before deleting (off = delete without files)
@@ -165,7 +179,9 @@ function StorageForm({ initial }: { initial: StorageSettings }) {
 							<Checkbox
 								id="st-backup_enabled"
 								checked={backupEnabled}
-								onCheckedChange={(v) => form.setValue("backup_enabled", v === true)}
+								onCheckedChange={(v) =>
+									form.setValue("backup_enabled", v === true)
+								}
 							/>
 							<Label htmlFor="st-backup_enabled">Daily backup</Label>
 						</div>
@@ -186,7 +202,9 @@ function StorageForm({ initial }: { initial: StorageSettings }) {
 							<Input
 								id="st-backup_retention_days"
 								type="number"
-								{...form.register("backup_retention_days", { valueAsNumber: true })}
+								{...form.register("backup_retention_days", {
+									valueAsNumber: true,
+								})}
 							/>
 							<FieldError message={e.backup_retention_days?.message} />
 						</FormField>
@@ -211,7 +229,11 @@ function StorageForm({ initial }: { initial: StorageSettings }) {
 								</p>
 							)}
 							<div className="flex gap-2">
-								<Button type="button" onClick={() => write(confirm.value)}>
+								<Button
+									type="button"
+									disabled={writing}
+									onClick={() => write(confirm.value)}
+								>
 									Save anyway
 								</Button>
 								<Button
@@ -269,6 +291,10 @@ function BackupStatus() {
 			if (err instanceof ApiError && err.code === "backup_running") {
 				setError("A backup is already running");
 			} else {
+				// The non-Error fallback is unreachable (runBackupNow rejects only with
+				// ApiError or a JSON SyntaxError), and the transform drops inline
+				// branch hints, so the hint covers the statement; tests cover err.message.
+				/* istanbul ignore next -- @preserve unreachable: non-Error rejection */
 				setError(err instanceof Error ? err.message : "Failed to start backup");
 			}
 		} finally {
@@ -354,10 +380,31 @@ function LastRun({
 }) {
 	const qc = useQueryClient();
 	const [started, setStarted] = useState<string | null>(null);
+	const [error, setError] = useState<string | null>(null);
+	const [pending, setPending] = useState(false);
+	// Blocks a second click that lands before the disabled state renders.
+	const inFlight = useRef(false);
 	async function runNow() {
-		const r = await api.post<{ instance_id: string }>("/archives/run", {});
-		setStarted(r.instance_id);
-		await qc.invalidateQueries({ queryKey: qk.settings });
+		/* istanbul ignore if -- @preserve unreachable: React commits the disabled state synchronously after a discrete click, so a second click never reaches this handler; the ref is defense in depth */
+		if (inFlight.current) return;
+		inFlight.current = true;
+		setPending(true);
+		setError(null);
+		try {
+			const r = await api.post<{ instance_id: string }>("/archives/run", {});
+			setStarted(r.instance_id);
+			await qc.invalidateQueries({ queryKey: qk.settings });
+		} catch (err) {
+			// The non-Error fallback is unreachable: api.post rejects only with
+			// ApiError or a JSON SyntaxError.
+			/* istanbul ignore next -- @preserve unreachable: non-Error rejection */
+			setError(
+				err instanceof Error ? err.message : "Failed to start archive run",
+			);
+		} finally {
+			inFlight.current = false;
+			setPending(false);
+		}
 	}
 	return (
 		<FormSection
@@ -375,11 +422,12 @@ function LastRun({
 				)}
 			</p>
 			<Can permission="settings.manage">
-				<Button variant="outline" onClick={runNow}>
+				<Button variant="outline" onClick={runNow} disabled={pending}>
 					Run now
 				</Button>
 			</Can>
 			{started && <p className="text-sm text-success">Started {started}.</p>}
+			{error && <p className="text-sm text-failure">{error}</p>}
 		</FormSection>
 	);
 }

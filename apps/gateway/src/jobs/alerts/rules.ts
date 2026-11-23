@@ -14,20 +14,75 @@ const NEWEST_IDS = 5;
 export const DEAD_SCAN_LIMIT = 1_000;
 export const DEAD_MAX_DESTINATIONS = 100;
 
+/**
+ * Hysteresis for consecutive_failures: one success resets the destination's
+ * counter, so the incident resolves only once the counter has stayed under
+ * the threshold for this long. A new streak inside it keeps the same incident.
+ */
+export const FAILURES_QUIET_MS = 10 * 60_000;
+
+function parseDetails(json: string): Record<string, unknown> {
+	try {
+		const v: unknown = JSON.parse(json);
+		if (v && typeof v === "object" && !Array.isArray(v))
+			return v as Record<string, unknown>;
+	} catch {
+		// Corrupt stored details: treat as empty.
+	}
+	return {};
+}
+
+/**
+ * An open incident whose destination is under the threshold is carried over
+ * with `cleared_at` (the first run that saw it clear) in its details; it
+ * resolves once `cleared_at` is FAILURES_QUIET_MS old. Back over the
+ * threshold, `cleared_at` is dropped again. `updateDetails` marks either
+ * change, so the job writes details only on those transitions.
+ */
 export async function consecutiveFailures(
 	db: Db,
 	rules: AlertRules,
+	open: OpenAlertRow[],
+	now: number,
 ): Promise<ActiveAlert[]> {
 	const rows = await db.all<{ id: string; project_id: string; n: number }>(sql`
 		SELECT id, project_id, consecutive_failures AS n FROM destinations
 		WHERE consecutive_failures >= ${rules.failure_threshold} AND status = 'active'`);
-	return rows.map((r) => ({
-		rule: "consecutive_failures",
-		resourceType: "destination",
-		resourceId: r.id,
-		projectId: r.project_id,
-		details: { consecutive_failures: r.n },
-	}));
+	const openCf = new Map(
+		open
+			.filter((o) => o.rule === "consecutive_failures")
+			.map((o) => [o.resourceId, o]),
+	);
+	const active: ActiveAlert[] = rows.map((r) => {
+		const prev = openCf.get(r.id);
+		openCf.delete(r.id);
+		return {
+			rule: "consecutive_failures",
+			resourceType: "destination",
+			resourceId: r.id,
+			projectId: r.project_id,
+			details: { consecutive_failures: r.n },
+			...(prev && "cleared_at" in parseDetails(prev.detailsJson)
+				? { updateDetails: true }
+				: {}),
+		};
+	});
+	for (const o of openCf.values()) {
+		const details = parseDetails(o.detailsJson);
+		const clearedAt =
+			typeof details.cleared_at === "number" ? details.cleared_at : null;
+		if (clearedAt !== null && clearedAt <= now - FAILURES_QUIET_MS) continue;
+		active.push({
+			rule: "consecutive_failures",
+			resourceType: "destination",
+			resourceId: o.resourceId,
+			projectId: o.projectId,
+			details: clearedAt === null ? { ...details, cleared_at: now } : details,
+			carryOver: true,
+			...(clearedAt === null ? { updateDetails: true } : {}),
+		});
+	}
+	return active;
 }
 
 /** Paused destinations hold `paused` deliveries, so they never match (spec §6.2). */
@@ -320,7 +375,7 @@ export async function evaluateRules(
 ): Promise<Evaluation> {
 	const now = deps.now();
 	const [cf, stuck, dead, d1, stuckArchive, staleBackup] = await Promise.all([
-		consecutiveFailures(deps.db, rules),
+		consecutiveFailures(deps.db, rules, open, now),
 		stuckPending(deps.db, rules, now),
 		newDead(deps.db, rules, open, now),
 		d1Storage(deps.db, rules, open),

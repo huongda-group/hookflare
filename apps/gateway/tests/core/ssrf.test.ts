@@ -99,6 +99,28 @@ describe("checkUrl DNS checks", () => {
 	});
 });
 
+describe("checkUrl DNS cache bound", () => {
+	it("evicts the oldest hostname once 1,000 are cached", async () => {
+		for (let i = 0; i < 1000; i++) {
+			await checkUrl(`https://h${i}.example.com/`, deps([PUBLIC], 0));
+		}
+		await checkUrl("https://new.example.com/", deps([PUBLIC], 0));
+		// h0 was evicted: it resolves again and sees the new (private) answer.
+		const again = deps(["10.0.0.1"], 1);
+		await expect(checkUrl("https://h0.example.com/", again)).resolves.toEqual({
+			ok: false,
+			reason: "private_address",
+		});
+		expect(again.resolveDns).toHaveBeenCalledTimes(1);
+		// h2 is still cached.
+		const cached = deps(["10.0.0.1"], 1);
+		await expect(checkUrl("https://h2.example.com/", cached)).resolves.toEqual({
+			ok: true,
+		});
+		expect(cached.resolveDns).not.toHaveBeenCalled();
+	});
+});
+
 describe("isBlockedAddress", () => {
 	it.each([
 		"0.1.2.3",
@@ -132,9 +154,20 @@ describe("isBlockedAddress", () => {
 		"ff02::1",
 		"::ffff:127.0.0.1",
 		"::ffff:7f00:1",
+		"::ffff:0:7f00:1", // IPv4-translated loopback
+		"::ffff:0:a00:1", // IPv4-translated 10.0.0.1
+		"192.88.99.1", // 6to4 relay
 		"64:ff9b::a00:1", // NAT64 of 10.0.0.1
 		"fe80::1%eth0",
 		"not-an-ip",
+		// Unparseable IPv6 forms fail closed.
+		"::ffff:1.2.3", // bad embedded IPv4
+		"1::2::3", // two "::"
+		"::g", // non-hex group
+		"12345::1", // group wider than 16 bits
+		"1:2:3", // too few groups without "::"
+		"1:2:3:4:5:6:7:8:9", // too many groups
+		"1:2:3:4::5:6:7:8", // "::" with no room left to fill
 	])("blocks %s", (addr) => {
 		expect(isBlockedAddress(addr)).toBe(true);
 	});

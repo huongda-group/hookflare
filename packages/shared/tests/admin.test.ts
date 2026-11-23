@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
 	alertChannelConfigSchema,
 	alertRulesSchema,
+	alertScopeQuery,
+	alertsQuery,
+	authConfigSchemaFor,
 	bulkReplayRequest,
 	changePasswordRequest,
 	createApiTokenRequest,
@@ -13,14 +16,17 @@ import {
 	DEFAULT_STORAGE_SETTINGS,
 	eventIdConfigError,
 	eventSearchQuery,
+	failuresQuery,
 	isAllowedAlertUrl,
 	listQuery,
 	loginRequest,
+	overviewQuery,
 	PERMISSIONS,
 	password,
 	patchDestinationRequest,
 	patchSettingsRequest,
 	patchSourceRequest,
+	patchUserRequest,
 	RANGE_HOURS,
 	reasonSchema,
 	resetPasswordRequest,
@@ -600,5 +606,83 @@ describe("storage settings", () => {
 				backup_retention_days: 366,
 			}).success,
 		).toBe(false);
+	});
+});
+
+describe("authConfigSchemaFor", () => {
+	it("returns the schema matching each auth type", () => {
+		expect(authConfigSchemaFor("hmac").safeParse(hmac).success).toBe(true);
+		expect(authConfigSchemaFor("hmac").safeParse({}).success).toBe(false);
+		expect(authConfigSchemaFor("token").safeParse(hmac).success).toBe(false);
+		expect(authConfigSchemaFor("none").safeParse({}).success).toBe(true);
+		expect(authConfigSchemaFor("none").safeParse(hmac).success).toBe(false);
+	});
+});
+
+describe("eventSearchQuery", () => {
+	it("accepts provider_event_id together with source_id", () => {
+		expect(
+			eventSearchQuery.parse({
+				provider_event_id: "evt_x",
+				source_id: "src_1",
+			}),
+		).toMatchObject({ provider_event_id: "evt_x", source_id: "src_1" });
+	});
+});
+
+describe("failuresQuery", () => {
+	it("defaults unresolved to true and parses the string flags", () => {
+		expect(failuresQuery.parse({}).unresolved).toBe(true);
+		expect(failuresQuery.parse({ unresolved: "false" }).unresolved).toBe(false);
+		expect(failuresQuery.parse({ unresolved: "true" }).unresolved).toBe(true);
+		expect(failuresQuery.safeParse({ unresolved: "yes" }).success).toBe(false);
+	});
+});
+
+describe("patchUserRequest", () => {
+	it("requires role or disabled", () => {
+		expect(patchUserRequest.safeParse({}).success).toBe(false);
+		expect(patchUserRequest.parse({ role: "viewer" })).toEqual({
+			role: "viewer",
+		});
+		expect(patchUserRequest.parse({ disabled: true })).toEqual({
+			disabled: true,
+		});
+	});
+});
+
+describe("overviewQuery", () => {
+	it("requires a project for the project alert scope", () => {
+		expect(overviewQuery.safeParse({ alert_scope: "project" }).success).toBe(
+			false,
+		);
+		expect(
+			overviewQuery.parse({ alert_scope: "project", project_id: "prj_1" }),
+		).toMatchObject({ alert_scope: "project", project_id: "prj_1" });
+		expect(overviewQuery.parse({})).toMatchObject({ range: "24h" });
+	});
+});
+
+describe("deployment alert scope", () => {
+	for (const [name, schema] of [
+		["alertScopeQuery", alertScopeQuery],
+		["alertsQuery", alertsQuery],
+	] as const) {
+		it(`${name} rejects deployment scope combined with a project`, () => {
+			const bad = schema.safeParse({
+				scope: "deployment",
+				project_id: "prj_1",
+			});
+			expect(bad.success).toBe(false);
+			expect(bad.error?.issues[0]?.path).toEqual(["scope"]);
+			expect(schema.safeParse({ scope: "deployment" }).success).toBe(true);
+			expect(schema.safeParse({ project_id: "prj_1" }).success).toBe(true);
+		});
+	}
+});
+
+describe("isAllowedAlertUrl (malformed input)", () => {
+	it("rejects strings that are not URLs", () => {
+		expect(isAllowedAlertUrl("slack", "not a url")).toBe(false);
 	});
 });

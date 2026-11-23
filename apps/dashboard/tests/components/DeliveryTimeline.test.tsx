@@ -181,4 +181,37 @@ describe("DeliveryTimeline", () => {
 		expect(screen.queryByText("Attempt #1")).not.toBeInTheDocument();
 		expect(screen.queryByText("Attempt #2")).not.toBeInTheDocument();
 	});
+	it("shows a queued delivery as waiting in the queue", () => {
+		renderTimeline({
+			receivedAt: T,
+			delivery: delivery({
+				status: "queued",
+				attempts: [],
+				completed_at: null,
+			}),
+		});
+		expect(steps()).toEqual(["received", "pending"]);
+		expect(screen.getByText("Pending — waiting in queue")).toBeInTheDocument();
+	});
+
+	it("names a transport failure, or a generic error when its kind is unknown", () => {
+		renderTimeline({
+			receivedAt: T,
+			delivery: delivery({
+				attempts: [
+					attempt({ http_status: null, error_kind: "timeout" }),
+					attempt({
+						id: "att_2",
+						attempt_no: 2,
+						started_at: T + 3000,
+						http_status: null,
+						error_kind: null,
+					}),
+				],
+			}),
+		});
+		expect(screen.getByText("timeout")).toBeInTheDocument();
+		expect(screen.getByText("error")).toBeInTheDocument();
+		expect(screen.queryByText(/HTTP/)).not.toBeInTheDocument();
+	});
 });

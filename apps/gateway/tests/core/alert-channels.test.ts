@@ -96,6 +96,16 @@ describe("sendAlert", () => {
 		expect(f).not.toHaveBeenCalled();
 	});
 
+	it("never leaks a Discord/Slack webhook URL in a network error", async () => {
+		const f = vi.fn(async () => {
+			throw new Error(`connect failed for ${discord.url}`);
+		}) as unknown as typeof fetch;
+		expect(await sendAlert(f, discord, "x")).toEqual({
+			ok: false,
+			error: "Error: connect failed for [redacted]",
+		});
+	});
+
 	it("never leaks the Telegram token in an error", async () => {
 		const f = vi.fn(async () => {
 			throw new Error(
@@ -125,6 +135,20 @@ describe("formatAlertMessage", () => {
 		expect(text).toContain("Billing API");
 		expect(text).toContain("Shop");
 		expect(text).toContain("https://hf.example/alerts/alr_1");
+	});
+
+	it("prints string details verbatim and JSON-encodes the rest", () => {
+		const text = formatAlertMessage({
+			kind: "resolved",
+			rule: null,
+			resourceLabel: "Billing API",
+			projectLabel: null,
+			details: { reason: "recovered", count: 3, ids: ["a"] },
+			link: null,
+		});
+		expect(text).toBe(
+			'🟢 Resolved\nResource: Billing API\nreason: recovered\ncount: 3\nids: ["a"]',
+		);
 	});
 
 	it("cuts long messages to 1,800 characters and keeps the link (Review Focus 3)", () => {

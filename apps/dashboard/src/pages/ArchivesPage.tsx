@@ -97,9 +97,9 @@ export function ArchivesPage({ search }: { search: ArchivesSearch }) {
 						</p>
 					</div>
 				) : (
-					<div
-						role="region"
+					<section
 						aria-label="Archive batches"
+						// biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be keyboard-focusable (WCAG 2.1.1)
 						tabIndex={0}
 						className="overflow-x-auto rounded-lg border border-border bg-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
 					>
@@ -210,7 +210,7 @@ export function ArchivesPage({ search }: { search: ArchivesSearch }) {
 								})}
 							</TableBody>
 						</Table>
-					</div>
+					</section>
 				)}
 				{nextPageError ? (
 					<div

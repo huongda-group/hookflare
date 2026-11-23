@@ -140,7 +140,10 @@ export function ResourcePicker({
 	};
 
 	const renderOption = (option: ResourceOption) => {
-		const duplicate = (duplicates.get(option.name) ?? 0) > 1;
+		const duplicate =
+			(duplicates.get(option.name) ??
+				/* istanbul ignore next -- @preserve unreachable: duplicates counts every loaded option */ 0) >
+			1;
 		return (
 			<button
 				key={option.id}

@@ -73,6 +73,7 @@ export function CursorTable<T>({
 	const error = query.isError && !nextPageError ? query.error : null;
 
 	const selectLoaded = () => {
+		/* istanbul ignore if -- @preserve unreachable: the controls calling this render only with a selection */
 		if (!selection) return;
 		const next = new Set<string>();
 		for (const row of rows) {
@@ -83,6 +84,7 @@ export function CursorTable<T>({
 	};
 
 	const toggle = (id: string) => {
+		/* istanbul ignore if -- @preserve unreachable: the controls calling this render only with a selection */
 		if (!selection) return;
 		const next = new Set(selection.selected);
 		if (next.has(id)) next.delete(id);
@@ -113,9 +115,9 @@ export function CursorTable<T>({
 						</Button>
 					</div>
 				) : null}
-				<div
-					role="region"
+				<section
 					aria-label={ariaLabel}
+					// biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be keyboard-focusable (WCAG 2.1.1)
 					tabIndex={0}
 					className="overflow-x-auto rounded-lg border border-border bg-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
 				>
@@ -188,7 +190,7 @@ export function CursorTable<T>({
 							})}
 						</TableBody>
 					</Table>
-				</div>
+				</section>
 				{nextPageError ? (
 					<div
 						role="status"

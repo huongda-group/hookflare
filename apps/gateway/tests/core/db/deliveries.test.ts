@@ -65,6 +65,23 @@ describe("lease", () => {
 		expect(await acquireLease(deps, expired.deliveryId, T0 + 40_000)).toBe(0);
 	});
 
+	it("refuses a retrying delivery until next_attempt_at, then leases it", async () => {
+		const deps = clock();
+		const p = await seedPipeline(deps);
+		const notDue = await seedDelivery(deps, p, {
+			delivery: { status: "retrying", attemptCount: 1, nextAttemptAt: T0 + 1 },
+		});
+		const due = await seedDelivery(deps, p, {
+			delivery: { status: "retrying", attemptCount: 1, nextAttemptAt: T0 },
+		});
+		expect(await acquireLease(deps, notDue.deliveryId, T0 + 40_000)).toBeNull();
+		expect((await row(deps, notDue.deliveryId)).d).toMatchObject({
+			status: "retrying",
+			nextAttemptAt: T0 + 1,
+		});
+		expect(await acquireLease(deps, due.deliveryId, T0 + 40_000)).toBe(1);
+	});
+
 	it.each(["delivered", "failed_final", "dead", "paused"] as const)(
 		"never leases a %s delivery",
 		async (status) => {

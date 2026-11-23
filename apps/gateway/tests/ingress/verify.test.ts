@@ -113,6 +113,13 @@ describe("hmac verifier", () => {
 			}),
 		).toEqual(fail("missing_secret"));
 	});
+
+	it("rejects a base64 signature that does not decode as bad_encoding", async () => {
+		const cfg = { ...config, encoding: "base64" };
+		expect(
+			await verifiers.hmac.verify(input({ "x-sig": "%%%not base64%%%" }, cfg)),
+		).toEqual(fail("bad_encoding"));
+	});
 });
 
 describe("token verifier", () => {
@@ -127,6 +134,16 @@ describe("token verifier", () => {
 		expect(await verifiers.token.verify(input({}, cfg))).toEqual(
 			fail("missing_header"),
 		);
+	});
+
+	it("fails closed with missing_secret when no secret is stored, even if the token matches", async () => {
+		const cfg = { in: "header", name: "x-token" };
+		expect(
+			await verifiers.token.verify({
+				...input({ "x-token": secret }, cfg),
+				secret: null,
+			}),
+		).toEqual(fail("missing_secret"));
 	});
 
 	it("checks a query token", async () => {

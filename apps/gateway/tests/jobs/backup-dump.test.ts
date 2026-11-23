@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	archiveBatches,
@@ -12,7 +13,11 @@ import {
 import { gunzipToLines } from "../../src/core/ndjson";
 import { dumpPage } from "../../src/jobs/backup/dump";
 import { dumpPart } from "../../src/jobs/backup/run";
-import { listTables } from "../../src/jobs/backup/tables";
+import {
+	listTables,
+	parentsFirst,
+	type TableInfo,
+} from "../../src/jobs/backup/tables";
 import { testDeps } from "../helpers/deps";
 import { seedDelivery, seedPipeline } from "../helpers/seed";
 
@@ -66,14 +71,27 @@ function storedSha256Hex(obj: R2Object): string | null {
 }
 
 describe("listTables", () => {
-	it("discovers user tables with keys, blob page sizes, and sorted names", async () => {
+	it("discovers user tables with keys, blob page sizes, parents first", async () => {
 		const tables = await listTables(deps.db);
 		const names = tables.map((t) => t.name);
 		expect(names).toContain("webhook_events");
 		expect(names).toContain("archive_parts");
 		expect(names).not.toContain("d1_migrations");
 		expect(names).not.toContain("_cf_KV");
-		expect(names).toEqual([...names].sort());
+		// Every table comes after the tables it references (bar self references).
+		for (const [i, t] of tables.entries()) {
+			for (const fk of t.foreignKeys) {
+				if (fk.table !== t.name) {
+					expect(
+						names.indexOf(fk.table),
+						`${t.name} -> ${fk.table}`,
+					).toBeLessThan(i);
+				}
+			}
+		}
+		expect(names.indexOf("webhook_events")).toBeLessThan(
+			names.indexOf("deliveries"),
+		);
 
 		const events = tables.find((t) => t.name === "webhook_events");
 		expect(events?.key).toEqual({ column: "id" });
@@ -91,6 +109,30 @@ describe("listTables", () => {
 			table: "webhook_events",
 			to: "id",
 		});
+	});
+});
+
+describe("parentsFirst", () => {
+	const t = (name: string, ...parents: string[]): TableInfo => ({
+		name,
+		key: { column: "id" },
+		columns: [],
+		foreignKeys: parents.map((table) => ({ column: "x", table, to: "id" })),
+		pageSize: 1,
+	});
+	it("orders parents first, ties by name, ignoring self and unknown references", () => {
+		expect(
+			parentsFirst([
+				t("b_child", "z_parent"),
+				t("a_self", "a_self"),
+				t("z_parent", "missing_table"),
+			]).map((x) => x.name),
+		).toEqual(["a_self", "z_parent", "b_child"]);
+	});
+	it("keeps every table of a cycle, taking the first by name", () => {
+		expect(
+			parentsFirst([t("y", "x"), t("x", "y"), t("w", "x")]).map((x) => x.name),
+		).toEqual(["w", "x", "y"]);
 	});
 });
 
@@ -207,6 +249,37 @@ describe("dumpPage", () => {
 		const lines = await readLines(part.key);
 		expect(lines).toHaveLength(2);
 		for (const row of lines) expect(row).not.toHaveProperty("__cursor");
+	});
+
+	it("writes a NULL blob cell as null and counts no blob bytes for it", async () => {
+		await deps.db.run(
+			sql`CREATE TABLE zz_null_blob (id TEXT PRIMARY KEY, data BLOB)`,
+		);
+		try {
+			await deps.db.run(
+				sql`INSERT INTO zz_null_blob VALUES ('a', NULL), ('b', X'0102')`,
+			);
+			const table = (await listTables(deps.db)).find(
+				(t) => t.name === "zz_null_blob",
+			);
+			if (!table) throw new Error("zz_null_blob table not found");
+			const { part } = await dumpPage(
+				deps,
+				table,
+				"test/backup/null-blob/",
+				1,
+				null,
+			);
+			if (!part) throw new Error("expected a part");
+			expect(part.blob_bytes).toEqual({ data: 2 });
+			const lines = await readLines(part.key);
+			expect(lines).toEqual([
+				{ id: "a", data: null },
+				{ id: "b", data: { $b64: "AQI=" } },
+			]);
+		} finally {
+			await deps.db.run(sql`DROP TABLE zz_null_blob`);
+		}
 	});
 
 	it("writes nothing for an empty table", async () => {

@@ -15,7 +15,7 @@ This is the wire contract for webhook senders, destination backends, and admin A
 | 404 | Source or related admission configuration is unavailable |
 | 413 | Body exceeds the configured limit |
 | 429 | Rate limited |
-| 503 | Required dependency unavailable, such as storage, queue, or an auth secret that could not be loaded; a persisted event may still be recovered |
+| 503 | Required dependency unavailable, such as storage, queue, the rate limiter, or an auth secret that could not be loaded; a persisted event may still be recovered |
 
 A `202` is not backend delivery confirmation. A `503` after persistence does not mean the event was lost: reconciliation can still enqueue it. If you retry the request, reuse the provider event ID when [the source](sources.md) is configured to extract it.
 

@@ -1,5 +1,12 @@
 import { useBlocker } from "@tanstack/react-router";
-import { type JSX, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import {
+	type JSX,
+	type ReactNode,
+	useCallback,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -102,6 +109,7 @@ export function DirtyFormGuard({
 			<Dialog
 				open={dirty && (blocked || pendingClose !== null)}
 				onOpenChange={(open) => {
+					/* istanbul ignore else -- @preserve unreachable: Radix calls onOpenChange(true) only from a Trigger, and this dialog has none */
 					if (!open) keepEditing();
 				}}
 			>

@@ -14,6 +14,6 @@ export const Route = createFileRoute("/endpoints/sources/$sourceId")({
 				sourceId={sourceId}
 				projectId={projectId}
 			/>
-		) : null;
+		) : /* istanbul ignore next -- @preserve unreachable: AppShell renders project-scoped outlets only once a project is active */ null;
 	},
 });

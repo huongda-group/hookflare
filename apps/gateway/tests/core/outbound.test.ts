@@ -27,4 +27,15 @@ describe("failureOf", () => {
 			message: "TypeError: refused",
 		});
 	});
+
+	it("stringifies a non-Error network failure and caps it at 500 chars", () => {
+		expect(failureOf({ kind: "error", error: "x".repeat(600) }, 1)).toEqual({
+			errorKind: "network",
+			message: "x".repeat(500),
+		});
+		expect(failureOf({ kind: "error", error: null }, 1)).toEqual({
+			errorKind: "network",
+			message: "null",
+		});
+	});
 });

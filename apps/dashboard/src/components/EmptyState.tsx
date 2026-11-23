@@ -33,13 +33,9 @@ export function EmptyState({
 				{icon ?? <Inbox className="size-5" />}
 			</span>
 			<p className="text-[15px] font-medium text-foreground">{title}</p>
-			<p className="max-w-prose text-sm text-muted-foreground">
-				{description}
-			</p>
+			<p className="max-w-prose text-sm text-muted-foreground">{description}</p>
 			{action ? (
-				<div className="mt-1 flex flex-wrap justify-center gap-2">
-					{action}
-				</div>
+				<div className="mt-1 flex flex-wrap justify-center gap-2">{action}</div>
 			) : null}
 		</div>
 	);

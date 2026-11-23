@@ -75,6 +75,21 @@ describe("admin projects", () => {
 		expect(legacy.status).toBe(400);
 	});
 
+	it("rejects an invalid PATCH with 400 and leaves the project unchanged", async () => {
+		const api = await adminApp(testDeps());
+		const project = await (
+			await api.request("POST", "/projects", { name: "Keep" })
+		).json<{ id: string }>();
+		const res = await api.request("PATCH", `/projects/${project.id}`, {
+			status: "archived",
+		});
+		expect(res.status).toBe(400);
+		expect(await res.json()).toMatchObject({ error: "invalid_request" });
+		expect(
+			await (await api.request("GET", `/projects/${project.id}`)).json(),
+		).toMatchObject({ name: "Keep", status: "active" });
+	});
+
 	it("returns 413 for a body above 64 KiB", async () => {
 		const api = await adminApp(testDeps());
 		const res = await api.request("POST", "/projects", {

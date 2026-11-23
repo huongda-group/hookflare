@@ -359,4 +359,52 @@ describe("SetupPage", () => {
 			),
 		);
 	});
+	it("links invalid username and password fields to their errors", async () => {
+		setupOpen();
+		const posted = vi.fn();
+		server.use(
+			http.post(apiUrl("/auth/setup"), () => {
+				posted();
+				return HttpResponse.json({}, { status: 201 });
+			}),
+		);
+		const { user } = renderApp("/setup");
+		const username = await screen.findByLabelText("Username");
+		const password = screen.getByLabelText("Password");
+		expect(username).toHaveAttribute("aria-describedby", "setup-username-help");
+		expect(password).toHaveAttribute("aria-describedby", "setup-password-help");
+		await user.click(
+			screen.getByRole("button", { name: "Create admin account" }),
+		);
+		await waitFor(() =>
+			expect(username).toHaveAttribute(
+				"aria-describedby",
+				"setup-username-help setup-username-error",
+			),
+		);
+		expect(password).toHaveAttribute(
+			"aria-describedby",
+			"setup-password-help setup-password-error",
+		);
+		expect(username).toHaveAccessibleDescription(/3–64 characters/);
+		expect(posted).not.toHaveBeenCalled();
+	});
+
+	it("shows and hides the confirmation without losing the value", async () => {
+		setupOpen();
+		const { user } = renderApp("/setup");
+		const confirm = (await screen.findByLabelText(
+			"Confirm password",
+		)) as HTMLInputElement;
+		await user.type(confirm, "correct-horse");
+		await user.click(
+			screen.getByRole("button", { name: "Show Confirm password" }),
+		);
+		expect(confirm).toHaveAttribute("type", "text");
+		await user.click(
+			screen.getByRole("button", { name: "Hide Confirm password" }),
+		);
+		expect(confirm).toHaveAttribute("type", "password");
+		expect(confirm.value).toBe("correct-horse");
+	});
 });

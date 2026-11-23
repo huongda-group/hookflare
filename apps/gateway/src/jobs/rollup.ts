@@ -72,7 +72,9 @@ export async function rollup(
 					.where(eq(statsHourly.hour, hour)),
 			]);
 			const [written] = results[results.length - 1] as { n: number }[];
-			rows[hour] = written?.n ?? 0;
+			rows[hour] =
+				written?.n ??
+				/* istanbul ignore next -- @preserve unreachable: SELECT count() without GROUP BY always returns one row */ 0;
 			return true;
 		} catch (err) {
 			failed.push(hour);

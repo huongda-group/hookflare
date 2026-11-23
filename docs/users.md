@@ -12,7 +12,7 @@ Roles apply globally within a deployment. Each role includes the permissions of 
 | Operator | Viewer plus `payload.read`, `deliveries.replay`, `destinations.operate` |
 | Admin | Operator plus `config.write`, `users.manage`, `audit.read`, `settings.manage` |
 
-Admins create accounts with an initial password, change roles, disable users, and reset passwords. The last active password-bearing admin cannot be disabled or demoted. Legacy password-less identities do not satisfy that guard. Disabling an account removes sessions; authentication checks the user on each request.
+Admins create accounts with an initial password, change roles, disable users, and reset passwords. The last active password-bearing admin cannot be disabled or demoted. Legacy password-less identities do not satisfy that guard. Disabling an account removes sessions and revokes its API tokens; authentication checks the user on each request.
 
 ## Design and interaction
 

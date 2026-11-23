@@ -330,6 +330,40 @@ describe("processDelivery with a limiter (spec §5.3)", () => {
 		}
 	});
 
+	it("releases nothing when a late acquire answer is a rejection", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		try {
+			const releases: string[] = [];
+			const deps = testDeps();
+			const { deliveryId } = await seedLimited(deps, { maxInFlight: 1 });
+			deps.limiter = () => ({
+				acquire: () =>
+					new Promise<AcquireResult>((resolve) =>
+						setTimeout(
+							() =>
+								resolve({
+									ok: false,
+									reason: "in_flight",
+									retryAfterMs: 1_000,
+								}),
+							LIMITER_TIMEOUT_MS + 500,
+						),
+					),
+				async release(id) {
+					releases.push(id);
+				},
+			});
+			const pending = processDelivery(deps, deliveryId, logger);
+			await vi.advanceTimersByTimeAsync(LIMITER_TIMEOUT_MS + 1);
+			expect((await pending).action).toBe("retry");
+			await vi.advanceTimersByTimeAsync(1_000);
+			expect(releases).toEqual([]);
+			expect((await row(deps, deliveryId)).d.attemptCount).toBe(0);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("releases a slot granted after the acquire timed out", async () => {
 		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 		try {

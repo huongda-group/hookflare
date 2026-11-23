@@ -29,6 +29,7 @@ const V4_BLOCKED: Array<[string, number]> = [
 	["172.16.0.0", 12],
 	["192.0.0.0", 24],
 	["192.0.2.0", 24],
+	["192.88.99.0", 24], // 6to4 relay anycast (deprecated)
 	["192.168.0.0", 16],
 	["198.18.0.0", 15],
 	["198.51.100.0", 24],
@@ -51,6 +52,7 @@ const V6_6TO4: [string, number] = ["2002::", 16];
 /** Prefixes whose last 32 bits embed an IPv4 address that is checked instead. */
 const V6_EMBEDDED_V4: Array<[string, number]> = [
 	["::ffff:0:0", 96],
+	["::ffff:0:0:0", 96], // IPv4-translated (RFC 2765)
 	["64:ff9b::", 96],
 ];
 
@@ -104,8 +106,17 @@ function parseIPv6(input: string): number[] | null {
 					.map((g) =>
 						/^[0-9a-f]{1,4}$/.test(g) ? Number.parseInt(g, 16) : Number.NaN,
 					);
-	const head = groups(halves[0] ?? "");
-	const rest = halves.length === 2 ? groups(halves[1] ?? "") : [];
+	const head = groups(
+		halves[0] ??
+			/* istanbul ignore next -- @preserve unreachable: String.split always returns at least one element */ "",
+	);
+	const rest =
+		halves.length === 2
+			? groups(
+					halves[1] ??
+						/* istanbul ignore next -- @preserve unreachable: halves.length === 2 */ "",
+				)
+			: [];
 	if ([...head, ...rest].some(Number.isNaN)) {
 		return null;
 	}

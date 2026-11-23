@@ -150,9 +150,12 @@ export const api = {
 	postVoid: (path: string, body?: unknown) => sendVoid("POST", path, body),
 	put: <T>(path: string, body?: unknown) => send<T>("PUT", path, body),
 	patch: <T>(path: string, body?: unknown) => send<T>("PATCH", path, body),
-	/** DELETE answers 204 with an empty body, so there is nothing to parse. */
-	delete: (path: string) =>
-		apiRaw(path, { method: "DELETE" }).then(() => undefined),
+	/**
+	 * DELETE answers 204 with an empty body, so there is nothing to parse. An
+	 * optional JSON body carries audited fields such as `reason`.
+	 */
+	delete: (path: string, body?: unknown) =>
+		apiRaw(path, sendInit("DELETE", body), body).then(() => undefined),
 };
 
 export type BackupRunResult = { backup_id: string; instance_id: string };

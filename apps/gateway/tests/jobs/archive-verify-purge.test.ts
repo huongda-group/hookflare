@@ -1,6 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cutoffsFor, DAY_MS } from "../../src/core/db/archive";
+import { cutoffsFor, DAY_MS, MISSING_PART } from "../../src/core/db/archive";
 import {
 	archiveBatches,
 	archiveParts,
@@ -121,6 +121,62 @@ describe("verifyBatch", () => {
 			expect(await eventExists(events[0].eventId)).toBe(true);
 		},
 	);
+
+	it("throws for an unknown batch", async () => {
+		await expect(verifyBatch(deps, "arb_missing")).rejects.toThrow(
+			"archive batch arb_missing not found",
+		);
+	});
+
+	it("reports a batch that already left building with its stored error, or its status", async () => {
+		const failed = await seedBatch(deps, { status: "failed", error: "boom" });
+		const expired = await seedBatch(deps, { status: "expired" });
+		expect(await verifyBatch(deps, failed.id)).toEqual({
+			ok: false,
+			error: "boom",
+		});
+		expect(await verifyBatch(deps, expired.id)).toEqual({
+			ok: false,
+			error: "status expired",
+		});
+		expect((await status(expired.id)).status).toBe("expired");
+	});
+
+	it("fails a with-files part that has no R2 key", async () => {
+		const { batch, events } = await built(1);
+		await deps.db
+			.update(archiveParts)
+			.set({ r2Key: null })
+			.where(eq(archiveParts.batchId, batch.id));
+		expect(await verifyBatch(deps, batch.id)).toEqual({
+			ok: false,
+			error: "part 1: object missing",
+		});
+		expect((await status(batch.id)).status).toBe("failed");
+		const [ev] = await deps.db
+			.select()
+			.from(webhookEvents)
+			.where(eq(webhookEvents.id, events[0].eventId));
+		expect(ev.archiveBatchId).toBeNull();
+	});
+
+	it("fails a part whose R2 object carries no sha256", async () => {
+		const { batch } = await built(1);
+		const [part] = await deps.db
+			.select()
+			.from(archiveParts)
+			.where(eq(archiveParts.batchId, batch.id));
+		const obj = await deps.payloads.get(part.r2Key as string);
+		// Same bytes and size, re-put without a checksum.
+		await deps.payloads.put(
+			part.r2Key as string,
+			await (obj as R2ObjectBody).arrayBuffer(),
+		);
+		expect(await verifyBatch(deps, batch.id)).toEqual({
+			ok: false,
+			error: "part 1: sha256 mismatch",
+		});
+	});
 });
 
 describe("purge", () => {
@@ -237,6 +293,48 @@ describe("purge", () => {
 		expect(await deps.payloads.head(victimKey)).not.toBeNull();
 		expect(await deps.payloads.head(other.r2Key)).toBeNull();
 	});
+
+	it("treats an empty selection as a no-op at every purge step", async () => {
+		const { batch, events } = await built(1);
+		await verifyBatch(deps, batch.id);
+		expect(await deletePurgeChunk(deps, batch.id, 1, cut, [])).toBe(0);
+		expect(
+			await deleteGonePayloads(deps, [{ id: events[0].eventId, r2Key: null }]),
+		).toBe(0);
+		expect(await eventExists(events[0].eventId)).toBe(true);
+		const [ev] = await deps.db
+			.select()
+			.from(webhookEvents)
+			.where(eq(webhookEvents.id, events[0].eventId));
+		expect(await deps.payloads.head(ev.r2Key as string)).not.toBeNull();
+	});
+
+	it("purges no audit row for a part number the batch never built", async () => {
+		const batch = await seedBatch(deps, {
+			kind: "audit",
+			day: "2026-01-02",
+			status: "verified",
+		});
+		await deps.db.insert(auditLogs).values({
+			id: "aud_no_part",
+			actor: "purge@test",
+			action: "settings.updated",
+			resourceType: "settings",
+			resourceId: "x",
+			at: DAY_START + 1,
+		});
+		try {
+			expect(await purgeAuditPart(deps, batch.id, 1)).toBe(0);
+			expect(
+				await deps.db
+					.select()
+					.from(auditLogs)
+					.where(eq(auditLogs.id, "aud_no_part")),
+			).toHaveLength(1);
+		} finally {
+			await deps.db.delete(auditLogs).where(eq(auditLogs.id, "aud_no_part"));
+		}
+	});
 });
 
 describe("purge re-checks the batch inside the delete transaction (re-review)", () => {
@@ -296,7 +394,7 @@ describe("purge re-checks the batch inside the delete transaction (re-review)", 
 });
 
 describe("missing R2 payload (re-review)", () => {
-	it("leaves the event out of the part, unmarks it, and purge keeps it", async () => {
+	it("leaves the event out of the part, parks it, and purge and finish keep it", async () => {
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 		try {
 			const p = await seedPipeline(deps);
@@ -325,7 +423,10 @@ describe("missing R2 payload (re-review)", () => {
 				.select()
 				.from(webhookEvents)
 				.where(eq(webhookEvents.id, lost.eventId));
-			expect(after).toMatchObject({ archiveBatchId: null, archivePart: null });
+			expect(after).toMatchObject({
+				archiveBatchId: batch.id,
+				archivePart: MISSING_PART,
+			});
 			const [part] = await deps.db
 				.select()
 				.from(archiveParts)
@@ -353,6 +454,16 @@ describe("missing R2 payload (re-review)", () => {
 			expect((await purgeD1(batch.id)).deleted).toBe(1);
 			expect(await eventExists(lost.eventId)).toBe(true);
 			expect(await eventExists(kept.eventId)).toBe(false);
+			// finish keeps the parked mark, so no later run marks it again.
+			await finishBatch(deps, batch.id);
+			const [parked] = await deps.db
+				.select()
+				.from(webhookEvents)
+				.where(eq(webhookEvents.id, lost.eventId));
+			expect(parked).toMatchObject({
+				archiveBatchId: batch.id,
+				archivePart: MISSING_PART,
+			});
 		} finally {
 			errorSpy.mockRestore();
 		}

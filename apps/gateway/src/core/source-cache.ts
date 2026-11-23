@@ -35,6 +35,7 @@ export function setCachedSource(
 ): void {
 	if (cache.size >= MAX_ENTRIES) {
 		const oldest = cache.keys().next();
+		/* istanbul ignore else -- @preserve unreachable: size >= MAX_ENTRIES means the map is non-empty */
 		if (!oldest.done) cache.delete(oldest.value);
 	}
 	cache.set(sourceId, { bundle, expiresAt: now + SOURCE_CACHE_TTL_MS });

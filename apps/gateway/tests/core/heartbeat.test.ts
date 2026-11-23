@@ -1,7 +1,13 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { settings } from "../../src/core/db/schema";
-import { beat, HEARTBEAT_KEY, readHeartbeat } from "../../src/core/heartbeat";
+import {
+	beat,
+	HEARTBEAT_KEY,
+	HEARTBEAT_STALE_MS,
+	heartbeatStale,
+	readHeartbeat,
+} from "../../src/core/heartbeat";
 import type { Db } from "../../src/deps";
 import { RECONCILE_CRON, runScheduled } from "../../src/jobs/scheduled";
 import { testDeps } from "../helpers/deps";
@@ -25,6 +31,17 @@ describe("heartbeat", () => {
 
 	it("returns null when no row exists", async () => {
 		expect(await readHeartbeat(testDeps().db)).toBeNull();
+	});
+
+	it("treats a corrupt or non-object row as no heartbeat", async () => {
+		const { db } = testDeps();
+		for (const valueJson of ["{not json", "null", "[1,2]", "42"]) {
+			await db
+				.insert(settings)
+				.values({ key: HEARTBEAT_KEY, valueJson, updatedAt: 1 })
+				.onConflictDoUpdate({ target: settings.key, set: { valueJson } });
+			expect(await readHeartbeat(db)).toBeNull();
+		}
 	});
 
 	it("throws when D1 is down, so the caller can log heartbeat.failed", async () => {
@@ -72,5 +89,34 @@ describe("heartbeat", () => {
 			log.mockRestore();
 			err.mockRestore();
 		}
+	});
+});
+
+describe("heartbeatStale", () => {
+	const now = 10 * HEARTBEAT_STALE_MS;
+
+	it("judges by reconcile_at once the reconciler has beaten", () => {
+		expect(
+			heartbeatStale({ reconcile_at: now - HEARTBEAT_STALE_MS }, now),
+		).toBe(false);
+		expect(
+			heartbeatStale({ reconcile_at: now - HEARTBEAT_STALE_MS - 1 }, now),
+		).toBe(true);
+	});
+
+	it("is stale when reconcile never beat but first_at is too old", () => {
+		expect(heartbeatStale({ first_at: 0, alerts_at: now }, now)).toBe(true);
+		expect(heartbeatStale({ first_at: now - 1, alerts_at: 0 }, now)).toBe(
+			false,
+		);
+	});
+
+	it("falls back to the oldest key when first_at is missing (pre-first_at rows)", () => {
+		expect(heartbeatStale({ alerts_at: now, archive_at: 0 }, now)).toBe(true);
+		expect(heartbeatStale({ alerts_at: now - 1 }, now)).toBe(false);
+	});
+
+	it("is never stale for an empty map", () => {
+		expect(heartbeatStale({}, now)).toBe(false);
 	});
 });

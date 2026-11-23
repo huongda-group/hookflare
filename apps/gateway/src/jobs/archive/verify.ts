@@ -143,5 +143,6 @@ async function countAudit(
 ): Promise<number> {
 	const [r] = await deps.db.all<{ n: number }>(sql`
 		SELECT COUNT(*) AS n FROM audit_logs WHERE at >= ${dayStart} AND at < ${dayStart + DAY_MS} AND id >= ${firstId} AND id <= ${lastId}`);
+	/* istanbul ignore next -- @preserve unreachable: COUNT(*) without GROUP BY always returns one row */
 	return r?.n ?? 0;
 }

@@ -1,4 +1,12 @@
 import { QueryClientProvider } from "@tanstack/react-query";
+import {
+	createMemoryHistory,
+	createRootRoute,
+	createRoute,
+	createRouter,
+	Outlet,
+	RouterProvider,
+} from "@tanstack/react-router";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
@@ -6,7 +14,7 @@ import type { ComponentProps, ReactElement } from "react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { DestinationSelect } from "@/components/DestinationSelect";
-import { ResourceLabel } from "@/components/ResourceLabel";
+import { NamedResourceLink, ResourceLabel } from "@/components/ResourceLabel";
 import { ResourcePicker } from "@/components/ResourcePicker";
 import { createQueryClient } from "@/router";
 import { destination, project, source } from "../helpers/fixtures";
@@ -263,6 +271,7 @@ describe("ResourcePicker", () => {
 			}),
 		);
 		const onChange = vi.fn();
+		// biome-ignore lint/correctness/noComponentHookFactories: the harness closes over this test's spies
 		function Harness() {
 			const [projectId, setProjectId] = useState("prj_1");
 			return (
@@ -408,6 +417,95 @@ describe("ResourcePicker", () => {
 	});
 });
 
+describe("ResourcePicker keyboard and loading", () => {
+	it("shows a loading state, ignores an empty exact ID, and closes on Escape", async () => {
+		let release!: () => void;
+		const gate = new Promise<void>((r) => {
+			release = r;
+		});
+		server.use(
+			http.get(apiUrl("/sources"), async () => {
+				await gate;
+				return HttpResponse.json({
+					data: [source({ id: "src_1", name: "Stripe" })],
+					next_cursor: null,
+				});
+			}),
+		);
+		const onChange = vi.fn();
+		const { user } = renderWith(
+			<Picker kind="source" label="Source" onChange={onChange} />,
+		);
+		const trigger = screen.getByRole("combobox", { name: "Source" });
+		await user.click(trigger);
+		expect(await screen.findByText("Loading options…")).toHaveAttribute(
+			"role",
+			"status",
+		);
+		release();
+		expect(
+			await screen.findByRole("option", { name: "Stripe" }),
+		).toBeInTheDocument();
+
+		// Blank exact IDs are not a selection.
+		await user.type(screen.getByLabelText("Exact source ID"), "   ");
+		await user.click(screen.getByRole("button", { name: "Use ID" }));
+		expect(onChange).not.toHaveBeenCalled();
+
+		// Other keys leave the list open; Escape closes it and refocuses the trigger.
+		await user.keyboard("a");
+		expect(trigger).toHaveAttribute("aria-expanded", "true");
+		await user.keyboard("{Escape}");
+		expect(trigger).toHaveAttribute("aria-expanded", "false");
+		expect(trigger).toHaveFocus();
+		expect(onChange).not.toHaveBeenCalled();
+	});
+});
+
+describe("NamedResourceLink", () => {
+	it("navigates without triggering the enclosing row's click", async () => {
+		paged("/destinations", [destination({ id: "dst_1", name: "Billing API" })]);
+		const rowClick = vi.fn();
+		const client = createQueryClient();
+		const rootRoute = createRootRoute({
+			component: () => (
+				<QueryClientProvider client={client}>
+					{/* biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: mirrors a clickable table row */}
+					<div onClick={rowClick}>
+						<NamedResourceLink
+							kind="destination"
+							id="dst_1"
+							projectId="prj_1"
+							href="/destinations/dst_1"
+						/>
+					</div>
+					<Outlet />
+				</QueryClientProvider>
+			),
+		});
+		const detailRoute = createRoute({
+			getParentRoute: () => rootRoute,
+			path: "/destinations/$id",
+			component: () => <p>Destination detail</p>,
+		});
+		const router = createRouter({
+			routeTree: rootRoute.addChildren([detailRoute]),
+			history: createMemoryHistory({ initialEntries: ["/"] }),
+		});
+		await router.load();
+		const user = userEvent.setup();
+		render(<RouterProvider router={router} />);
+		const link = await screen.findByRole("link", { name: "Billing API" });
+		expect(link).toHaveAttribute(
+			"href",
+			"/destinations/dst_1?project_id=prj_1",
+		);
+		await user.click(link);
+		expect(await screen.findByText("Destination detail")).toBeInTheDocument();
+		expect(rowClick).not.toHaveBeenCalled();
+	});
+});
+
 describe("ResourceLabel", () => {
 	it("reads shared cached pages without any request, falling back to the ID", async () => {
 		const calls = paged("/sources", storeEvents(10));
@@ -536,6 +634,7 @@ describe("delegation from the existing selects", () => {
 				});
 			}),
 		);
+		// biome-ignore lint/correctness/noComponentHookFactories: the harness closes over this test's spies
 		function Harness() {
 			const [projectId, setProjectId] = useState("prj_1");
 			return (

@@ -13,15 +13,19 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import {
+	backupIdOf,
 	checkKnownDb,
+	configDatabaseId,
 	prepareMigrations,
 	readPartRows,
 	restoreBackup,
+	sha256File,
 	verifyChecks,
 } from "../lib/restore.mjs";
-import { wranglerBin } from "../lib/wrangler-bin.mjs";
+import { repoRoot, wranglerBin } from "../lib/wrangler-bin.mjs";
 
 const PROD_ID = "11111111-1111-1111-1111-111111111111";
 const STAGING_ID = "22222222-2222-2222-2222-222222222222";
@@ -200,6 +204,33 @@ describe("wranglerBin", () => {
 		assert.equal(
 			wranglerBin("/repo", () => true),
 			join("/repo", "node_modules", ".bin", "wrangler"),
+		);
+	});
+
+	it("resolves wrangler.cmd on Windows", (t) => {
+		t.mock.property(process, "platform", "win32");
+		/** @type {string[]} */
+		const checked = [];
+		assert.equal(
+			wranglerBin("/repo", (path) => {
+				checked.push(path);
+				return true;
+			}),
+			join("/repo", "node_modules", ".bin", "wrangler.cmd"),
+		);
+		assert.deepEqual(checked, [
+			join("/repo", "node_modules", ".bin", "wrangler.cmd"),
+		]);
+	});
+
+	it("defaults to the repository root next to scripts/", () => {
+		assert.equal(
+			wranglerBin(undefined, () => true),
+			join(repoRoot, "node_modules", ".bin", "wrangler"),
+		);
+		assert.equal(
+			repoRoot,
+			join(dirname(fileURLToPath(import.meta.url)), "..", ".."),
 		);
 	});
 
@@ -502,5 +533,298 @@ describe("prepareMigrations", () => {
 			/0002_items\.sql/,
 		);
 		assert.ok(!existsSync(join(dir, "o", MIGRATIONS[0])));
+	});
+});
+
+describe("backupIdOf", () => {
+	it("returns the last non-empty prefix segment", () => {
+		assert.equal(backupIdOf(PREFIX), "bk1");
+		assert.equal(backupIdOf("d1/2026/10/16/bk2"), "bk2");
+	});
+
+	it("rejects a prefix without segments", () => {
+		assert.throws(() => backupIdOf("//"), /restore: bad prefix \/\//);
+		assert.throws(() => backupIdOf(""), /restore: bad prefix/);
+	});
+});
+
+describe("configDatabaseId", () => {
+	/** @param {string} body */
+	function raw(body) {
+		const path = join(dir, "raw.jsonc");
+		writeFileSync(path, body);
+		return path;
+	}
+
+	it("prefers the DB binding over other D1 databases", () => {
+		assert.equal(
+			configDatabaseId(
+				raw(
+					'{"d1_databases": [{"binding": "OTHER", "database_id": "x"}, {"binding": "DB", "database_id": "y"}]}',
+				),
+			),
+			"y",
+		);
+	});
+
+	it("falls back to the only D1 database when none is bound as DB", () => {
+		assert.equal(
+			configDatabaseId(
+				raw('{"d1_databases": [{"binding": "MAIN", "database_id": 42}]}'),
+			),
+			"42",
+		);
+	});
+
+	it("throws when the config has no usable database_id", () => {
+		for (const body of [
+			"{}",
+			'{"d1_databases": {}}',
+			'{"d1_databases": []}',
+			'{"d1_databases": [{"binding": "DB", "database_id": ""}]}',
+		]) {
+			const path = raw(body);
+			assert.throws(
+				() => configDatabaseId(path),
+				new RegExp(`restore: ${path} has no D1 database_id`),
+			);
+		}
+	});
+});
+
+describe("sha256File", () => {
+	it("hashes the file contents", async () => {
+		const path = join(dir, "f.bin");
+		writeFileSync(path, "hello");
+		assert.equal(
+			await sha256File(path),
+			createHash("sha256").update("hello").digest("hex"),
+		);
+	});
+});
+
+describe("readPartRows without a trailing newline", () => {
+	it("yields the final unterminated line", async () => {
+		const path = join(dir, "p.ndjson.gz");
+		writeFileSync(path, gzipSync('{"id":1}\n{"id":2}'));
+		const rows = [];
+		for await (const r of readPartRows(path)) {
+			rows.push(r);
+		}
+		assert.deepEqual(rows, [{ id: 1 }, { id: 2 }]);
+	});
+});
+
+describe("restoreBackup guards and resume safety", () => {
+	it("rejects an unsupported manifest version before querying", async () => {
+		const { manifest } = backup();
+		const bucket = new Map([
+			[
+				`${PREFIX}manifest.json`,
+				Buffer.from(JSON.stringify({ ...manifest, version: 2 })),
+			],
+		]);
+		const d = deps(bucket, targetDb());
+		d.query = async () => {
+			throw new Error("queried");
+		};
+		await assert.rejects(
+			restoreBackup(options(), d),
+			/restore: unsupported manifest version 2/,
+		);
+	});
+
+	it("reports missing target migrations with a dash for no extras", async () => {
+		const { bucket } = backup();
+		const d = deps(bucket, targetDb(["0001_init.sql"]));
+		await assert.rejects(restoreBackup(options(), d), (err) => {
+			assert.match(err.message, /missing on target: 0002_items\.sql/);
+			assert.match(err.message, /extra on target: {3}-/);
+			return true;
+		});
+		assert.deepEqual(d.executed, []);
+	});
+
+	it("rejects a part whose download does not match the manifest sha256", async () => {
+		const { bucket, manifest } = backup();
+		const key = manifest.tables[0].parts[0].key;
+		bucket.set(key, gzipSync("tampered\n"));
+		const d = deps(bucket, targetDb());
+		await assert.rejects(
+			restoreBackup(options(), d),
+			new RegExp(
+				`restore: sha256 mismatch for ${key}: manifest ${manifest.tables[0].parts[0].sha256}, got [0-9a-f]{64}`,
+			),
+		);
+		assert.deepEqual(d.executed, []);
+	});
+
+	it("reuses verified local parts and re-downloads corrupt ones", async () => {
+		const { bucket, manifest } = backup();
+		const out = join(dir, ".restore", "bk1");
+		const [itemsKey, projectsKey] = manifest.tables.map((t) => t.parts[0].key);
+		mkdirSync(dirname(join(out, itemsKey)), { recursive: true });
+		mkdirSync(dirname(join(out, projectsKey)), { recursive: true });
+		writeFileSync(join(out, itemsKey), bucket.get(itemsKey));
+		writeFileSync(join(out, projectsKey), "corrupt");
+		const d = deps(bucket, targetDb());
+		const logs = [];
+		d.log = (m) => logs.push(m);
+		await restoreBackup(options({ dryRun: true }), d);
+		const downloads = logs.filter((m) => m.startsWith("restore: downloading"));
+		assert.deepEqual(downloads, [
+			`restore: downloading ${PREFIX}manifest.json`,
+			`restore: downloading ${projectsKey}`,
+		]);
+		assert.ok(logs.includes("restore: --dry-run, nothing applied"));
+		assert.ok(logs.includes("restore: items: 1 orphaned row(s) skipped"));
+	});
+
+	it("refuses to resume when a regenerated file differs from applied.json", async () => {
+		const { bucket } = backup();
+		const db = targetDb();
+		await restoreBackup(options(), deps(bucket, db));
+		const appliedPath = join(dir, ".restore", "bk1", "applied.json");
+		const applied = JSON.parse(readFileSync(appliedPath, "utf8"));
+		applied.files[0].sha256 = "0".repeat(64);
+		writeFileSync(appliedPath, JSON.stringify(applied));
+		const d = deps(bucket, db);
+		await assert.rejects(
+			restoreBackup(options(), d),
+			/restore: 0001\.sql differs from the file recorded in .*applied\.json; .*resuming is unsafe/,
+		);
+		assert.deepEqual(d.executed, []);
+	});
+
+	it("skips the emptiness query for a manifest without tables", async () => {
+		const manifest = {
+			version: 1,
+			backup_id: "bk1",
+			prefix: PREFIX,
+			started_at: 1,
+			finished_at: 2,
+			d1_migrations: MIGRATIONS,
+			tables: [],
+		};
+		const bucket = new Map([
+			[`${PREFIX}manifest.json`, Buffer.from(JSON.stringify(manifest))],
+		]);
+		const queries = [];
+		const db = targetDb();
+		const d = deps(bucket, db);
+		d.query = async (sql) => {
+			queries.push(sql);
+			return db.prepare(sql).all();
+		};
+		const result = await restoreBackup(options(), d);
+		assert.deepEqual(queries, ["SELECT name FROM d1_migrations ORDER BY id"]);
+		assert.deepEqual(result.files, []);
+		assert.deepEqual(result.orphans, {});
+	});
+
+	it("treats an empty or NULL count result as an empty target", async () => {
+		const { bucket } = backup();
+		const db = targetDb();
+		for (const counts of [[], [{ items: null, projects: 0 }]]) {
+			rmSync(join(dir, ".restore"), { recursive: true, force: true });
+			const d = deps(bucket, db);
+			d.query = async (sql) =>
+				sql.startsWith("SELECT (SELECT COUNT") ? counts : db.prepare(sql).all();
+			await restoreBackup(options({ dryRun: false }), d);
+			assert.ok(d.executed.length > 0);
+			db.exec("DELETE FROM items; DELETE FROM projects;");
+		}
+	});
+
+	it("preloads a large self-referencing part in batches and sizes orphan blobs", async () => {
+		const rows = [];
+		for (let i = 0; i < 1005; i++) {
+			rows.push({ id: `n${i}`, parent_id: i === 0 ? null : `n${i - 1}` });
+		}
+		// Forward reference into the second preload batch.
+		rows[0].parent_id = "n1004";
+		rows.push(
+			{ id: "o1", parent_id: "gone", data: { $b64: "AA==" } },
+			{ id: "o2", parent_id: "gone", data: { $b64: "AAA=" } },
+			{ id: "o3", parent_id: "gone", data: { $b64: "AAAA" } },
+			{ id: "o4", parent_id: "gone", data: null },
+		);
+		const nodes = part("nodes", `${PREFIX}nodes/0000.ndjson.gz`, rows);
+		const manifest = {
+			version: 1,
+			backup_id: "bk1",
+			prefix: PREFIX,
+			started_at: 1,
+			finished_at: 2,
+			d1_migrations: MIGRATIONS,
+			tables: [
+				{
+					name: "nodes",
+					key: { column: "id" },
+					columns: [
+						{ name: "id", type: "TEXT", blob: false },
+						{ name: "parent_id", type: "TEXT", blob: false },
+						{ name: "data", type: "BLOB", blob: true },
+					],
+					foreign_keys: [{ column: "parent_id", table: "nodes", to: "id" }],
+					rows: rows.length,
+					parts: [nodes.entry],
+				},
+			],
+		};
+		const bucket = new Map([
+			[`${PREFIX}manifest.json`, Buffer.from(JSON.stringify(manifest))],
+			[nodes.entry.key, nodes.body],
+		]);
+		const result = await restoreBackup(
+			options({ dryRun: true }),
+			deps(bucket, targetDb()),
+		);
+		assert.deepEqual(result.orphans, {
+			nodes: {
+				count: 4,
+				sample: ["o1", "o2", "o3", "o4"].map((id) => ({
+					table: "nodes",
+					key: { id },
+					fk: { parent_id: "gone" },
+				})),
+				blob_bytes: { data: 1 + 2 + 3 },
+			},
+		});
+	});
+});
+
+describe("verifyChecks edge cases", () => {
+	it("reports a failing integrity check and missing count rows", async () => {
+		const { manifest } = backup();
+		delete manifest.tables[0].parts[0].blob_bytes;
+		const answers = new Map([
+			["PRAGMA integrity_check", [{ x: "row 1 missing" }, { x: "row 2" }]],
+			["PRAGMA foreign_key_check", []],
+			["SELECT name FROM d1_migrations ORDER BY id", [{ name: MIGRATIONS[0] }]],
+		]);
+		const checks = await verifyChecks({
+			manifest,
+			orphans: { items: { count: 1 } },
+			query: async (sql) => answers.get(sql) ?? [],
+		});
+		const byName = Object.fromEntries(checks.map((c) => [c.check, c]));
+		assert.deepEqual(byName.integrity_check, {
+			check: "integrity_check",
+			expected: '"ok"',
+			actual: '[{"x":"row 1 missing"},{"x":"row 2"}]',
+			ok: false,
+		});
+		assert.equal(byName["rows items"].expected, "1");
+		assert.equal(byName["rows items"].actual, "null");
+		assert.equal(byName["rows projects"].expected, "1");
+		assert.deepEqual(byName["blob_bytes items.data"], {
+			check: "blob_bytes items.data",
+			expected: "0",
+			actual: "0",
+			ok: true,
+		});
+		assert.equal(byName.d1_migrations.ok, false);
+		assert.equal(byName.foreign_key_check.ok, true);
 	});
 });

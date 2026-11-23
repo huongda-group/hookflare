@@ -87,6 +87,7 @@ export function TurnstileWidget({
 						onTokenRef.current(null);
 					},
 				});
+				/* istanbul ignore else -- @preserve unreachable: render() is synchronous, so the cleanup cannot run between the check above and here */
 				if (!cancelled) setStatus("ready");
 			})
 			.catch(() => {

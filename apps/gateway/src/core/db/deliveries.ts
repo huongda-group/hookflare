@@ -114,10 +114,23 @@ export async function acquireLease(
 	deliveryId: string,
 	leaseUntil: number,
 ): Promise<number | null> {
+	const now = deps.now();
 	const [row] = await deps.db
 		.update(deliveries)
 		.set({ status: "in_flight", leaseUntil, nextAttemptAt: null })
-		.where(and(eq(deliveries.id, deliveryId), claimable(deps.now())))
+		.where(
+			and(
+				eq(deliveries.id, deliveryId),
+				claimable(now),
+				// A duplicate message must not cut a backoff short, even when the
+				// delivery became `retrying` after this worker loaded it.
+				or(
+					ne(deliveries.status, "retrying"),
+					isNull(deliveries.nextAttemptAt),
+					lte(deliveries.nextAttemptAt, now),
+				),
+			),
+		)
 		.returning({ attemptCount: deliveries.attemptCount });
 	return row?.attemptCount ?? null;
 }
@@ -366,7 +379,7 @@ export async function getInitialDelivery(
 		.get();
 }
 
-const TERMINAL: DeliveryStatus[] = ["delivered", "failed_final", "dead"];
+export const TERMINAL: DeliveryStatus[] = ["delivered", "failed_final", "dead"];
 
 /** "<eventId>|<destinationId>" of replays still in the pipeline (spec §9.2). */
 export async function activeReplays(

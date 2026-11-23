@@ -8,7 +8,7 @@ The public state endpoint reports `setup_required: true` only while no user row 
 
 Login uses username/password. Invalid credentials, disabled users, and password-less users all return `401 invalid_credentials`. New usernames are normalized to lowercase and follow `^[a-z0-9][a-z0-9._@+-]{2,63}$`; login accepts legacy username formats. New passwords are 6–256 characters and cannot equal the username.
 
-Sessions store a SHA-256 token hash in D1. The cookie is `hookflare_session`, HttpOnly, SameSite=Strict, scoped to `/api/admin`, and Secure outside local development. Idle lifetime is 12 hours and absolute lifetime is seven days. The current user is checked on each authenticated request.
+Sessions store a SHA-256 token hash in D1. The cookie is `hookflare_session`, HttpOnly, SameSite=Strict, scoped to `/api/admin`, and Secure outside local development. Idle lifetime is 12 hours and absolute lifetime is seven days. The current user is checked on each authenticated request. Signing in with an existing session cookie ends that previous session in the same database batch.
 
 ## Design and interaction
 

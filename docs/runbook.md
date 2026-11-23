@@ -48,9 +48,11 @@ pnpm run deploy
 pnpm run smoke
 ```
 
-The deploy script runs **restore-point record → build → migrate → deploy → smoke**. Missing smoke environment stops it before changes unless `--skip-smoke` is explicit. A gradual version split must be resolved before recording a single rollback target. Git-connected builds that skip smoke still need a separate smoke run afterward.
+The deploy script runs **build → restore-point record → migrate → deploy → smoke**. The D1 bookmark is recorded immediately before migrations, after the build, so it is as recent as possible. Missing smoke environment stops it before changes unless `--skip-smoke` is explicit. A gradual version split must be resolved before recording a single rollback target. Git-connected builds that skip smoke still need a separate smoke run afterward.
 
-Keep `.deploy/<timestamp>.json`: it records the previous/new Worker versions, D1 bookmark, smoke result, and manual rollback commands. The script prints recovery commands but never executes them automatically. A failure before migration/deployment starts has nothing from those steps to undo.
+Keep `.deploy/<timestamp>.json`: it records the previous/new Worker versions, D1 bookmark and the time it was recorded (`bookmarkAt`), whether the migrate step applied migrations (`migrationsApplied`), the smoke result, and manual rollback commands. The script prints recovery commands but never executes them automatically. A failure before migration/deployment starts has nothing from those steps to undo.
+
+The Worker rollback (`wrangler rollback <previousVersion>`) is the normal recovery for a failed smoke. The D1 `time-travel restore` command is listed only when migrations were actually applied: wrangler's "No migrations to apply" output means D1 is unchanged and no restore is offered; a failed or unrecognized migrate run is treated as applied. When listed, it follows a `# DESTRUCTIVE` comment line because it discards every D1 write since `bookmarkAt`, including webhooks already accepted with 202. Use it only when the new migrations themselves must be undone, after weighing that loss (see [Path A](#path-a-time-travel)).
 
 Smoke creates/reuses the dedicated `smoke` project, source, and destination, rotates its source secret, sends one signed event, replays it, and verifies both deliveries at the sink. Success is exit 0 with one event ID and two delivery IDs. Use the correct URL variable from the table; the origin must match the selected config. Smoke changes its dedicated resources, so do not use them for business traffic.
 

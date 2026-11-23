@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { describe, expect, it, type MockInstance, vi } from "vitest";
 import { sessions, users } from "../../src/core/db/schema";
 import {
+	ARCHIVE_CRON,
 	RECONCILE_CRON,
 	ROLLUP_CRON,
 	runScheduled,
@@ -114,6 +115,32 @@ describe("runScheduled", () => {
 		expect(lines(err)).toContain("sessions.purge_failed");
 		log.mockRestore();
 		err.mockRestore();
+	});
+
+	it("logs archive.start_failed instead of throwing when the Workflow rejects", async () => {
+		const err = vi.spyOn(console, "error").mockImplementation(() => {});
+		const archive = {
+			create: async () => {
+				throw new Error("workflows unavailable");
+			},
+		} as unknown as Workflow;
+		const deps = testDeps({ archive, now: () => Date.UTC(2027, 0, 6, 3) });
+		await expect(runScheduled(ARCHIVE_CRON, deps)).resolves.toBeUndefined();
+		expect(lines(err)).toContain("archive.start_failed");
+		err.mockRestore();
+	});
+
+	it("warns on an unknown cron and runs nothing", async () => {
+		const log = vi.spyOn(console, "log").mockImplementation(() => {});
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const archive = fakeArchive();
+		await runScheduled("15 4 * * *", testDeps({ archive }));
+		const all = [...lines(log), ...lines(warn)];
+		expect(all).toContain("scheduled.unknown_cron");
+		expect(all).not.toContain("reconcile.run");
+		expect(archive.created).toEqual([]);
+		log.mockRestore();
+		warn.mockRestore();
 	});
 
 	it("starts today's archive instance once on 0 3 * * *", async () => {

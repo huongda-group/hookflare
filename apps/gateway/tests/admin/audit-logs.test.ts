@@ -44,6 +44,9 @@ describe("GET /audit-logs", () => {
 		expect((await admin.request("GET", "/audit-logs?cursor=@@")).status).toBe(
 			400,
 		);
+		const invalid = await admin.request("GET", "/audit-logs?limit=0");
+		expect(invalid.status).toBe(400);
+		expect(await invalid.json()).toMatchObject({ error: "invalid_request" });
 		const op = await adminApp(deps, { role: "operator" });
 		expect((await op.request("GET", "/audit-logs")).status).toBe(403);
 	});

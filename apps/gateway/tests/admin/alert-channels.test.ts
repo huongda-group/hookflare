@@ -168,4 +168,99 @@ describe("alert channels API (spec §6.5)", () => {
 				.where(eq(alertChannels.id, ch.id)),
 		).toEqual([]);
 	});
+	it("patches name and rules and audits the before and after", async () => {
+		const app = await adminApp(deps);
+		const ch = await (
+			await app.request("POST", "/alert-channels", {
+				name: "ops",
+				config: { type: "discord", url: URL1 },
+				rules: ["new_dead"],
+			})
+		).json<AlertChannel>();
+		const res = await app.request("PATCH", `/alert-channels/${ch.id}`, {
+			name: "renamed",
+			rules: ["consecutive_failures"],
+			reason: "rename",
+		});
+		expect(res.status).toBe(200);
+		const after = await res.json<AlertChannel>();
+		expect(after).toMatchObject({
+			name: "renamed",
+			rules: ["consecutive_failures"],
+			config_fingerprint: ch.config_fingerprint,
+		});
+		const updated = (await auditRows(deps, ch.id)).find(
+			(a) => a.action === "alert_channel.updated",
+		);
+		expect(updated).toMatchObject({ reason: "rename" });
+		expect(updated?.diffJson).toMatchObject({
+			before: { name: "ops", rules: ["new_dead"] },
+			after: { name: "renamed", rules: ["consecutive_failures"] },
+			config_replaced: false,
+		});
+	});
+
+	it("rejects invalid PATCH and DELETE bodies without changing the channel", async () => {
+		const app = await adminApp(deps);
+		const ch = await (
+			await app.request("POST", "/alert-channels", {
+				name: "ops",
+				config: { type: "discord", url: URL1 },
+			})
+		).json<AlertChannel>();
+		const patch = await app.request("PATCH", `/alert-channels/${ch.id}`, {
+			unknown_field: true,
+		});
+		expect(patch.status).toBe(400);
+		expect(await patch.json()).toMatchObject({ error: "invalid_request" });
+		const del = await app.request("DELETE", `/alert-channels/${ch.id}`, "{");
+		expect(del.status).toBe(400);
+		expect(await del.json()).toMatchObject({ error: "invalid_request" });
+		const [row] = await deps.db
+			.select()
+			.from(alertChannels)
+			.where(eq(alertChannels.id, ch.id));
+		expect(row).toMatchObject({ name: "ops", enabled: true });
+		expect((await auditRows(deps, ch.id)).map((a) => a.action)).toEqual([
+			"alert_channel.created",
+		]);
+	});
+
+	it("answers 404 for PATCH, DELETE, and test of an unknown channel", async () => {
+		const app = await adminApp(deps);
+		const id = "ach_01J00000000000000000000000";
+		for (const [method, path, body] of [
+			["PATCH", `/alert-channels/${id}`, { name: "x" }],
+			["DELETE", `/alert-channels/${id}`, undefined],
+			["POST", `/alert-channels/${id}/test`, undefined],
+		] as const) {
+			const res = await app.request(method, path, body);
+			expect.soft(res.status, `${method} ${path}`).toBe(404);
+			expect.soft(await res.json()).toEqual({ error: "not_found" });
+		}
+		expect(await auditRows(deps, id)).toEqual([]);
+	});
+
+	it("reports and audits a failed test send", async () => {
+		const failing = testDeps({
+			fetch: vi.fn(
+				async () => new Response("nope", { status: 500 }),
+			) as unknown as typeof fetch,
+		});
+		const app = await adminApp(failing);
+		const ch = await (
+			await app.request("POST", "/alert-channels", {
+				name: "ops",
+				config: { type: "discord", url: URL1 },
+			})
+		).json<AlertChannel>();
+		const res = await app.request("POST", `/alert-channels/${ch.id}/test`);
+		expect(res.status).toBe(200);
+		const result = { ok: false, error: "HTTP 500" };
+		expect(await res.json()).toEqual(result);
+		const tested = (await auditRows(failing, ch.id)).find(
+			(a) => a.action === "alert_channel.tested",
+		);
+		expect(tested?.diffJson).toEqual({ result });
+	});
 });

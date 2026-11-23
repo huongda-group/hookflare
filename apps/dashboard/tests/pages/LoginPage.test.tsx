@@ -296,4 +296,22 @@ describe("LoginPage", () => {
 			),
 		);
 	});
+	it("focuses the first invalid field instead of posting an empty form", async () => {
+		const posted = vi.fn();
+		server.use(
+			http.post(apiUrl("/auth/login"), () => {
+				posted();
+				return new HttpResponse(null, { status: 204 });
+			}),
+		);
+		const { user } = renderApp("/login");
+		const username = await screen.findByLabelText("Username");
+		await user.type(screen.getByLabelText("Password"), "correct-horse");
+		await user.click(screen.getByRole("button", { name: "Sign in" }));
+		await waitFor(() => expect(username).toHaveFocus());
+		expect(
+			username.parentElement?.querySelector("[data-field-error]"),
+		).toBeInTheDocument();
+		expect(posted).not.toHaveBeenCalled();
+	});
 });

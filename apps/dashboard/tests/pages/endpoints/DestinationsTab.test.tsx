@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it, vi } from "vitest";
 import { destination, project, T } from "../../helpers/fixtures";
@@ -179,5 +179,56 @@ describe("Destinations tab empty state", () => {
 		expect(
 			within(table).getByRole("button", { name: "New destination" }),
 		).toBeInTheDocument();
+	});
+
+	it("creates from the empty state and forgets the secret after Done", async () => {
+		server.use(
+			http.post(apiUrl("/destinations"), () =>
+				HttpResponse.json(
+					{ ...destination(), signing_secret: "whsec_empty" },
+					{ status: 201 },
+				),
+			),
+		);
+		const { user } = renderApp("/endpoints?tab=destinations");
+		await screen.findByText("No destinations yet.");
+		await user.click(
+			within(screen.getByRole("table")).getByRole("button", {
+				name: "New destination",
+			}),
+		);
+		await user.type(screen.getByLabelText("Name"), "Billing API");
+		await user.type(
+			screen.getByLabelText("URL"),
+			"https://billing.example.com/hooks",
+		);
+		await user.click(screen.getByRole("button", { name: "Create" }));
+		expect(await screen.findByText("whsec_empty")).toBeInTheDocument();
+		await user.click(screen.getByLabelText("I have stored this secret"));
+		await user.click(screen.getByRole("button", { name: "Done" }));
+		await waitFor(() =>
+			expect(screen.queryByText("whsec_empty")).not.toBeInTheDocument(),
+		);
+	});
+});
+
+describe("Destinations tab rows", () => {
+	it("opens the detail page when any part of the row is clicked", async () => {
+		server.use(
+			http.get(apiUrl("/destinations"), () => list(destination())),
+			http.get(apiUrl("/destinations/dst_1"), () =>
+				HttpResponse.json(destination()),
+			),
+		);
+		const { user, router } = renderApp("/endpoints?tab=destinations");
+		await user.click(
+			await screen.findByText("https://billing.example.com/hooks"),
+		);
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe(
+				"/endpoints/destinations/dst_1",
+			),
+		);
+		expect(router.state.location.search).toEqual({ project_id: "prj_1" });
 	});
 });

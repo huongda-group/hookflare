@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createLogger, log, redactHeaders } from "../../src/core/log";
+import {
+	createLogger,
+	log,
+	parseLogLevel,
+	redactHeaders,
+	redactValue,
+} from "../../src/core/log";
 
 function lastJson(spy: ReturnType<typeof vi.spyOn>): Record<string, unknown> {
 	const call = spy.mock.calls[spy.mock.calls.length - 1];
@@ -178,5 +184,103 @@ describe("log", () => {
 			msg: "log_error",
 			original_msg: "test.evil",
 		});
+	});
+
+	it("reports a non-Error throw during redaction as 'unknown'", () => {
+		const evil = {
+			toJSON() {
+				throw "not an error";
+			},
+		};
+		log("info", "test.evil2", { evil });
+		expect(lastJson(errorSpy)).toMatchObject({
+			msg: "log_error",
+			error: "unknown",
+		});
+	});
+
+	it("createLogger works without per-call fields", () => {
+		createLogger(undefined, { request_id: "r_2" }).warn("test.nofields");
+		expect(lastJson(warnSpy)).toEqual({
+			request_id: "r_2",
+			level: "warn",
+			msg: "test.nofields",
+		});
+	});
+
+	it("falls back to info for an unknown or non-string LOG_LEVEL", () => {
+		expect(parseLogLevel("verbose")).toBe("info");
+		expect(parseLogLevel(3)).toBe("info");
+		expect(parseLogLevel("WARN")).toBe("warn");
+	});
+});
+
+describe("redactValue", () => {
+	it("serializes an Error without a stack as {name, message}", () => {
+		const err = new Error("boom");
+		err.stack = undefined;
+		expect(redactValue(err)).toEqual({ name: "Error", message: "boom" });
+	});
+
+	it("labels functions, symbols, invalid dates and binary data instead of dumping them", () => {
+		expect(
+			redactValue({
+				fn: () => 1,
+				sym: Symbol("s"),
+				bad: new Date(Number.NaN),
+				bytes: new Uint8Array([1, 2]),
+				buf: new ArrayBuffer(4),
+			}),
+		).toEqual({
+			fn: "[function]",
+			sym: "[symbol]",
+			bad: "Invalid Date",
+			bytes: "[BINARY]",
+			buf: "[BINARY]",
+		});
+	});
+
+	it("redacts sensitive entries inside a Headers object", () => {
+		expect(
+			redactValue({
+				h: new Headers({ authorization: "Bearer x", accept: "*/*" }),
+			}),
+		).toEqual({ h: { authorization: "[REDACTED]", accept: "*/*" } });
+	});
+
+	it("redacts through an object's toJSON()", () => {
+		const custom = { toJSON: () => ({ password: "p", ok: 1 }) };
+		expect(redactValue(custom)).toEqual({ password: "[REDACTED]", ok: 1 });
+	});
+
+	it("truncates beyond the maximum depth", () => {
+		let nested: Record<string, unknown> = { leaf: true };
+		for (let i = 0; i < 12; i++) nested = { n: nested };
+		expect(JSON.stringify(redactValue(nested))).toContain('"[TRUNCATED]"');
+	});
+
+	it("honors extra sensitive names in any spelling", () => {
+		expect(
+			redactValue({ "X-Tenant": "t", tenant_id: "t2", other: "o" }, [
+				"x-tenant",
+				"TenantId",
+			]),
+		).toEqual({
+			"X-Tenant": "[REDACTED]",
+			tenant_id: "[REDACTED]",
+			other: "o",
+		});
+	});
+});
+
+describe("redactHeaders (plain records)", () => {
+	it("skips undefined values and joins multi-value headers", () => {
+		expect(
+			redactHeaders({
+				Accept: ["a/b", "c/d"],
+				"X-Missing": undefined,
+				"Set-Cookie": ["a=1", "b=2"],
+			}),
+		).toEqual({ accept: "a/b, c/d", "set-cookie": "[REDACTED]" });
 	});
 });

@@ -1,4 +1,5 @@
 import { and, eq, inArray } from "drizzle-orm";
+import { SecretKeyError } from "../core/crypto";
 import {
 	acquireLease,
 	type DeliveryContext,
@@ -304,6 +305,11 @@ async function prepareAndSend(
 		try {
 			request = await sign(deps, ctx, body);
 		} catch (err) {
+			// A missing or malformed SECRETS_KEY is a deployment problem, not a
+			// property of this delivery: retry instead of failing it for good.
+			if (err instanceof SecretKeyError) {
+				return infra("secrets", err);
+			}
 			logger.error("delivery.sign_failed", {
 				delivery_id: deliveryId,
 				error: String(err),

@@ -10,7 +10,10 @@ import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppBindings } from "../../app";
 import { type AuditAction, auditInsertIfChanged } from "../../core/audit";
-import { revokeUserApiTokensStmt } from "../../core/db/api-tokens";
+import {
+	revokeDisabledUserApiTokensStmts,
+	revokeUserApiTokensStmt,
+} from "../../core/db/api-tokens";
 import { isUniqueViolation } from "../../core/db/errors";
 import type { UserRow } from "../../core/db/schema";
 import { users } from "../../core/db/schema";
@@ -47,7 +50,10 @@ export function userRoutes() {
 		return c.json({
 			data: page.map(toUser),
 			next_cursor:
-				rows.length > q.value.limit ? (page.at(-1)?.username ?? null) : null,
+				rows.length > q.value.limit
+					? (page.at(-1)?.username ??
+						/* istanbul ignore next -- @preserve unreachable: limit >= 1, so a page past the limit is never empty */ null)
+					: null,
 		} satisfies Page<User>);
 	});
 
@@ -117,8 +123,11 @@ export function userRoutes() {
 			updatedAt: ts,
 		};
 		const update = updateUserStmt(db, username, set);
+		const actor =
+			c.var.actor?.username ??
+			/* istanbul ignore next -- @preserve unreachable: requirePermission already rejected a request without an actor */ "";
 		const audit = auditInsertIfChanged(db, {
-			actor: c.var.actor?.username ?? "",
+			actor,
 			action,
 			resourceType: "user",
 			resourceId: username,
@@ -131,10 +140,22 @@ export function userRoutes() {
 			},
 			at: ts,
 		});
-		// Disabling revokes the user's sessions (spec §6.6), but only after the
-		// update is known to have applied: a rejected update must revoke
-		// nothing, so the delete runs in a second batch.
-		const [[row]] = await db.batch([update, audit]);
+		// Disabling revokes the user's API tokens in the same batch, fenced on
+		// the update having applied (a rejected update revokes nothing). The
+		// sessions are deleted only after the update is known to have applied,
+		// so that delete runs in a second batch.
+		const [[row]] = await db.batch([
+			update,
+			audit,
+			...(disabled === true
+				? revokeDisabledUserApiTokensStmts(db, {
+						username,
+						now: ts,
+						actor,
+						reason: reason ?? null,
+					})
+				: []),
+		]);
 		if (!row) return c.json({ error: "last_admin" }, 409);
 		if (disabled === true) {
 			await db.batch([deleteUserSessionsStmt(db, username)]);
@@ -164,7 +185,9 @@ export function userRoutes() {
 				.set({ passwordHash, passwordChangedAt: ts, updatedAt: ts })
 				.where(eq(users.username, username)),
 			auditInsertIfChanged(db, {
-				actor: c.var.actor?.username ?? "",
+				actor:
+					c.var.actor?.username ??
+					/* istanbul ignore next -- @preserve unreachable: requirePermission already rejected a request without an actor */ "",
 				action: "user.password_reset",
 				resourceType: "user",
 				resourceId: username,

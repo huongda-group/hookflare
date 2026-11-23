@@ -10,6 +10,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { AlertChannelDialog } from "@/components/AlertChannelDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DataState } from "@/components/DataState";
 import { DirtyFormGuard } from "@/components/DirtyFormGuard";
 import { FormField } from "@/components/FormField";
 import { FormSection } from "@/components/FormSection";
@@ -63,6 +64,7 @@ function RulesForm({ initial }: { initial: AlertRules }) {
 		try {
 			await api.patch("/settings", { alert_rules });
 			await qc.invalidateQueries({ queryKey: qk.settings });
+			form.reset(alert_rules);
 			setSaved(true);
 		} catch (err) {
 			applyServerIssues(form, err);
@@ -123,6 +125,7 @@ function Channels() {
 		queryKey: qk.alertChannels.all,
 		queryFn: () => api.get<{ data: AlertChannel[] }>("/alert-channels"),
 	});
+	const channels = list.data?.data ?? [];
 	const [editing, setEditing] = useState<AlertChannel | "new" | null>(null);
 	const [deleting, setDeleting] = useState<AlertChannel | null>(null);
 	const [results, setResults] = useState<Record<string, ChannelTestResult>>({});
@@ -145,86 +148,94 @@ function Channels() {
 		>
 			<div className="flex items-center justify-between">
 				<span className="text-sm text-muted-foreground">
-					{(list.data?.data ?? []).length} channel(s)
+					{list.data ? `${channels.length} channel(s)` : null}
 				</span>
 				<Button onClick={() => setEditing("new")}>Add channel</Button>
 			</div>
-			<Table>
-				<TableHeader>
-					<TableRow>
-						<TableHead>Name</TableHead>
-						<TableHead>Type</TableHead>
-						<TableHead>Fingerprint</TableHead>
-						<TableHead>Rules</TableHead>
-						<TableHead>Projects</TableHead>
-						<TableHead />
-					</TableRow>
-				</TableHeader>
-				<TableBody>
-					{(list.data?.data ?? []).map((c) => (
-						<TableRow key={c.id}>
-							<TableCell>
-								{c.name}
-								{c.enabled ? "" : " (disabled)"}
-							</TableCell>
-							<TableCell>
-								{c.type}
-								{c.chat_id ? ` · ${c.chat_id}` : ""}
-							</TableCell>
-							<TableCell className="font-mono">
-								{c.config_fingerprint}
-							</TableCell>
-							<TableCell>
-								{c.rules.length ? c.rules.join(", ") : "All"}
-							</TableCell>
-							<TableCell>
-								{c.project_ids.length ? c.project_ids.length : "All"}
-							</TableCell>
-							<TableCell className="space-x-2 text-right">
-								<Button
-									size="sm"
-									variant="outline"
-									onClick={() => test.mutate(c.id)}
-								>
-									Send test
-								</Button>
-								<Button
-									size="sm"
-									variant="outline"
-									onClick={() => toggle.mutate(c)}
-								>
-									{c.enabled ? "Disable" : "Enable"}
-								</Button>
-								<Button
-									size="sm"
-									variant="outline"
-									onClick={() => setEditing(c)}
-								>
-									Edit
-								</Button>
-								<Button
-									size="sm"
-									variant="destructive"
-									onClick={() => setDeleting(c)}
-								>
-									Delete
-								</Button>
-								{results[c.id] && (
-									<span
-										className={
-											results[c.id].ok ? "text-success" : "text-failure"
-										}
-									>
-										{results[c.id].ok
-											? "Sent"
-											: `Failed: ${results[c.id].error}`}
-									</span>
-								)}
-							</TableCell>
+			<DataState
+				pending={list.isPending}
+				error={list.error}
+				hasData={list.data !== undefined}
+				retrying={list.isRefetching}
+				onRetry={() => void list.refetch()}
+			>
+				<Table>
+					<TableHeader>
+						<TableRow>
+							<TableHead>Name</TableHead>
+							<TableHead>Type</TableHead>
+							<TableHead>Fingerprint</TableHead>
+							<TableHead>Rules</TableHead>
+							<TableHead>Projects</TableHead>
+							<TableHead />
 						</TableRow>
-					))}
-				</TableBody>
-			</Table>
+					</TableHeader>
+					<TableBody>
+						{channels.map((c) => (
+							<TableRow key={c.id}>
+								<TableCell>
+									{c.name}
+									{c.enabled ? "" : " (disabled)"}
+								</TableCell>
+								<TableCell>
+									{c.type}
+									{c.chat_id ? ` · ${c.chat_id}` : ""}
+								</TableCell>
+								<TableCell className="font-mono">
+									{c.config_fingerprint}
+								</TableCell>
+								<TableCell>
+									{c.rules.length ? c.rules.join(", ") : "All"}
+								</TableCell>
+								<TableCell>
+									{c.project_ids.length ? c.project_ids.length : "All"}
+								</TableCell>
+								<TableCell className="space-x-2 text-right">
+									<Button
+										size="sm"
+										variant="outline"
+										onClick={() => test.mutate(c.id)}
+									>
+										Send test
+									</Button>
+									<Button
+										size="sm"
+										variant="outline"
+										onClick={() => toggle.mutate(c)}
+									>
+										{c.enabled ? "Disable" : "Enable"}
+									</Button>
+									<Button
+										size="sm"
+										variant="outline"
+										onClick={() => setEditing(c)}
+									>
+										Edit
+									</Button>
+									<Button
+										size="sm"
+										variant="destructive"
+										onClick={() => setDeleting(c)}
+									>
+										Delete
+									</Button>
+									{results[c.id] && (
+										<span
+											className={
+												results[c.id].ok ? "text-success" : "text-failure"
+											}
+										>
+											{results[c.id].ok
+												? "Sent"
+												: `Failed: ${results[c.id].error}`}
+										</span>
+									)}
+								</TableCell>
+							</TableRow>
+						))}
+					</TableBody>
+				</Table>
+			</DataState>
 			{editing && (
 				<AlertChannelDialog
 					channel={editing === "new" ? undefined : editing}
@@ -242,8 +253,11 @@ function Channels() {
 					description="Its notification history is deleted too."
 					confirmLabel="Delete"
 					onOpenChange={(o) => !o && setDeleting(null)}
-					onConfirm={async () => {
-						await api.delete(`/alert-channels/${deleting.id}`);
+					onConfirm={async (reason) => {
+						await api.delete(
+							`/alert-channels/${deleting.id}`,
+							reason ? { reason } : undefined,
+						);
 						setDeleting(null);
 						invalidate();
 					}}

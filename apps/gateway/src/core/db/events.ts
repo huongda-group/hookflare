@@ -43,6 +43,16 @@ export async function insertEventWithDelivery(
 	]);
 }
 
+/** Whether an event row with this ID exists. */
+export async function eventExists(db: Db, eventId: string): Promise<boolean> {
+	const row = await db
+		.select({ id: webhookEvents.id })
+		.from(webhookEvents)
+		.where(eq(webhookEvents.id, eventId))
+		.get();
+	return row !== undefined;
+}
+
 export async function findEventIdByProviderId(
 	db: Db,
 	sourceId: string,

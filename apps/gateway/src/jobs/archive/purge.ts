@@ -1,5 +1,10 @@
-import { and, eq, inArray, type SQL, sql } from "drizzle-orm";
-import { type Cutoffs, DAY_MS, eligibleSql } from "../../core/db/archive";
+import { and, eq, inArray, ne, type SQL, sql } from "drizzle-orm";
+import {
+	type Cutoffs,
+	DAY_MS,
+	eligibleSql,
+	MISSING_PART,
+} from "../../core/db/archive";
 import {
 	archiveBatches,
 	archiveParts,
@@ -188,6 +193,8 @@ export async function listParts(
  * Sets `purged` and, in the same batch, clears the marks of every event the
  * purge left in D1 (it became ineligible, or was marked for a part that was
  * never built), so no event stays marked forever; a later batch archives it.
+ * Events parked under MISSING_PART keep their mark, so no later run builds
+ * an empty batch for them again.
  */
 export async function finishBatch(deps: Deps, batchId: string): Promise<void> {
 	await deps.db.batch([
@@ -206,6 +213,7 @@ export async function finishBatch(deps: Deps, batchId: string): Promise<void> {
 			.where(
 				and(
 					eq(webhookEvents.archiveBatchId, batchId),
+					ne(webhookEvents.archivePart, MISSING_PART),
 					sql`EXISTS (SELECT 1 FROM archive_batches WHERE id = ${batchId} AND status = 'purged')`,
 				),
 			),

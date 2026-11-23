@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
-import { project, T } from "../helpers/fixtures";
+import { project, source, T } from "../helpers/fixtures";
 import { renderApp } from "../helpers/render";
 import { apiUrl, server } from "../helpers/server";
 
@@ -86,5 +86,50 @@ describe("Project detail (spec §8.5)", () => {
 		await user.click(within(dialog).getByRole("button", { name: "Disable" }));
 		await waitFor(() => expect(patches).toHaveLength(1));
 		expect(patches[0]).toEqual({ status: "disabled" });
+	});
+	it("re-enables a disabled project that already has endpoints", async () => {
+		overviewHandlers();
+		const patches: unknown[] = [];
+		let status: "active" | "disabled" = "disabled";
+		server.use(
+			http.get(apiUrl("/projects/prj_1"), () =>
+				HttpResponse.json(project({ status })),
+			),
+			http.get(apiUrl("/sources"), () =>
+				HttpResponse.json({ data: [source()], next_cursor: null }),
+			),
+			http.patch(apiUrl("/projects/prj_1"), async ({ request }) => {
+				patches.push(await request.json());
+				status = "active";
+				return HttpResponse.json(project({ status }));
+			}),
+		);
+		const { user } = renderApp("/projects/prj_1");
+		expect(
+			await screen.findByRole("heading", { name: "Payments" }),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByRole("heading", { name: /no sources/i }),
+		).not.toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Enable" }));
+		const dialog = await screen.findByRole("dialog", {
+			name: "Enable Payments?",
+		});
+		expect(dialog).toHaveTextContent("Sources accept events again.");
+		await user.click(within(dialog).getByRole("button", { name: "Enable" }));
+		await waitFor(() => expect(patches).toEqual([{ status: "active" }]));
+		expect(
+			await screen.findByRole("button", { name: "Disable" }),
+		).toBeInTheDocument();
+	});
+
+	it("keeps the reporting period in the URL", async () => {
+		overviewHandlers();
+		const { user, router } = renderApp("/projects/prj_1");
+		await user.click(await screen.findByRole("tab", { name: "7d" }));
+		await waitFor(() =>
+			expect(router.state.location.search).toEqual({ range: "7d" }),
+		);
+		expect(router.state.location.pathname).toBe("/projects/prj_1");
 	});
 });

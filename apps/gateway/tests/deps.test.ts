@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { decryptSecret } from "../src/core/crypto";
 import { createDeps } from "../src/deps";
 import { recordingQueue, testDeps } from "./helpers/deps";
@@ -21,6 +21,47 @@ describe("createDeps", () => {
 			typeof (env as unknown as { INGRESS_LIMITER: RateLimit }).INGRESS_LIMITER
 				.limit,
 		).toBe("function");
+	});
+});
+
+describe("createDeps outbound and limiter seams", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it("fetch delegates to the global fetch at call time", async () => {
+		const deps = createDeps(testEnv());
+		// Stubbed after createDeps: the seam must not capture fetch eagerly.
+		const spy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(new Response("pong", { status: 201 }));
+		const init = { method: "POST", body: "x" };
+		const res = await deps.fetch("https://backend.example.com/hook", init);
+		expect(res.status).toBe(201);
+		await expect(res.text()).resolves.toBe("pong");
+		expect(spy).toHaveBeenCalledWith("https://backend.example.com/hook", init);
+	});
+
+	it("limiter returns one Durable Object per destination", async () => {
+		const deps = createDeps(testEnv());
+		const req = { maxInFlight: 1, ratePerS: null, leaseMs: 60_000 };
+		const destA = `dst_${crypto.randomUUID()}`;
+		const destB = `dst_${crypto.randomUUID()}`;
+		const first = await deps.limiter(destA).acquire(req);
+		expect(first.ok).toBe(true);
+		// Same name: the same object, whose only slot is taken.
+		await expect(deps.limiter(destA).acquire(req)).resolves.toMatchObject({
+			ok: false,
+			reason: "in_flight",
+		});
+		// Another destination has its own counter.
+		await expect(deps.limiter(destB).acquire(req)).resolves.toMatchObject({
+			ok: true,
+		});
+		if (first.ok) await deps.limiter(destA).release(first.slotId);
+		await expect(deps.limiter(destA).acquire(req)).resolves.toMatchObject({
+			ok: true,
+		});
 	});
 });
 

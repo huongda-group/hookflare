@@ -4,6 +4,7 @@ import {
 	checkSmokeTarget,
 	httpSmokeApi,
 	pollUntil,
+	runId,
 	runSmoke,
 	signStandardWebhook,
 	smokeEnv,
@@ -517,5 +518,386 @@ describe("signStandardWebhook", () => {
 		const raw = Buffer.from(atob(secret.slice("whsec_".length)), "binary");
 		const expected = `v1,${createHmac("sha256", raw).update(`${id}.${ts}.`).update(body).digest("base64")}`;
 		assert.equal(await signStandardWebhook(secret, id, ts, body), expected);
+	});
+});
+
+describe("runSmoke edge cases", () => {
+	it("runs with the default log and real sleep when nothing needs a retry", async () => {
+		const api = {
+			sinkUrl: "https://sink.example.com",
+			ensureProject: async () => ({ id: "prj" }),
+			ensureDestination: async (url) => {
+				assert.match(
+					url,
+					/^https:\/\/sink\.example\.com\/r\/[0-9A-HJKMNP-TV-Z]+\/hook$/,
+				);
+				return { id: "dst" };
+			},
+			ensureSource: async () => ({ id: "src", ingress_url: "https://x" }),
+			send: async () => "evt",
+			deliveries: async () => [
+				{ id: "dlv_1", status: "delivered" },
+				{ id: "dlv_2", status: "delivered" },
+			],
+			replay: async () => ({ delivery_id: "dlv_2" }),
+			sinkStats: async () => ({
+				unique: 2,
+				received: 2,
+				ids: ["dlv_2", "dlv_1"],
+			}),
+		};
+		const result = await runSmoke(api);
+		assert.deepEqual(result.deliveryIds, ["dlv_1", "dlv_2"]);
+		assert.match(result.sinkRun, /^[0-9A-HJKMNP-TV-Z]+$/);
+	});
+
+	it("throws when the initial delivery never arrives", async () => {
+		const { api } = happyApi();
+		api.deliveries = async () => [];
+		const lines = [];
+		await assert.rejects(
+			runSmoke(api, (line) => lines.push(line), { sleep: async () => {} }),
+			/^Error: smoke: event not delivered within 60s$/,
+		);
+		assert.deepEqual(lines, [
+			"smoke: project prj_smoke",
+			lines[1],
+			"smoke: source src_smoke",
+			"smoke: event evt_smoke",
+		]);
+		assert.match(lines[1], /^smoke: destination dst_smoke -> https:\/\/sink/);
+	});
+
+	it("waits for every initial delivery to be delivered", async () => {
+		const { api } = happyApi();
+		api.deliveries = async () => [
+			{ id: "dlv_a", status: "delivered" },
+			{ id: "dlv_b", status: "failed" },
+		];
+		await assert.rejects(
+			runSmoke(api, () => {}, { sleep: async () => {} }),
+			/smoke: event not delivered within 60s/,
+		);
+	});
+
+	it("rethrows API errors while polling instead of reporting a timeout", async () => {
+		const { api } = happyApi();
+		api.deliveries = async () => {
+			throw new Error("smoke: list deliveries failed with 500 boom");
+		};
+		await assert.rejects(
+			runSmoke(api, () => {}, { sleep: async () => {} }),
+			/^Error: smoke: list deliveries failed with 500 boom$/,
+		);
+
+		const second = happyApi().api;
+		let polls = 0;
+		second.deliveries = async () => {
+			polls++;
+			if (polls > 1) {
+				throw new Error("network down");
+			}
+			return [{ id: "dlv_initial", status: "delivered" }];
+		};
+		await assert.rejects(
+			runSmoke(second, () => {}, { sleep: async () => {} }),
+			/^Error: network down$/,
+		);
+	});
+});
+
+describe("pollUntil timing", () => {
+	it("sleeps between attempts but not after the last, then times out", async () => {
+		const sleeps = [];
+		let calls = 0;
+		await assert.rejects(
+			pollUntil(
+				async (attempt) => {
+					assert.equal(attempt, calls);
+					calls++;
+					return undefined;
+				},
+				{
+					timeoutMs: 3000,
+					intervalMs: 1000,
+					sleep: async (ms) => sleeps.push(ms),
+				},
+			),
+			/^Error: poll: timed out after 3000ms$/,
+		);
+		assert.equal(calls, 3);
+		assert.deepEqual(sleeps, [1000, 1000]);
+	});
+
+	it("makes at least one attempt with a zero timeout and interval", async () => {
+		let calls = 0;
+		await assert.rejects(
+			pollUntil(
+				async () => {
+					calls++;
+					return null;
+				},
+				{
+					timeoutMs: 0,
+					intervalMs: 0,
+					sleep: async () => assert.fail("slept"),
+				},
+			),
+			/poll: timed out after 0ms/,
+		);
+		assert.equal(calls, 1);
+	});
+
+	it("uses a real timer by default", async () => {
+		let calls = 0;
+		const value = await pollUntil(async () => (++calls === 2 ? 0 : null), {
+			timeoutMs: 10,
+			intervalMs: 1,
+		});
+		assert.equal(value, 0);
+		assert.equal(calls, 2);
+	});
+});
+
+describe("signStandardWebhook with a bare secret and string body", () => {
+	it("signs the UTF-8 bytes of a string body with the raw base64 key", async () => {
+		const { createHmac } = await import("node:crypto");
+		const key = Buffer.from("bare-secret-key");
+		const expected = `v1,${createHmac("sha256", key).update('evt.1.{"é":1}').digest("base64")}`;
+		assert.equal(
+			await signStandardWebhook(key.toString("base64"), "evt", 1, '{"é":1}'),
+			expected,
+		);
+	});
+});
+
+describe("smokeEnv project ID", () => {
+	it("reads a trimmed per-worker smoke project ID and ignores a blank one", () => {
+		const base = {
+			HOOKFLARE_URL: "https://hooks.example.com",
+			HOOKFLARE_API_TOKEN: "hf_test_token",
+			SINK_URL: "https://sink.example.com",
+		};
+		assert.equal(
+			smokeEnv({ ...base, HOOKFLARE_SMOKE_PROJECT_ID: "  prj_1 " })?.projectId,
+			"prj_1",
+		);
+		assert.ok(
+			!("projectId" in smokeEnv({ ...base, HOOKFLARE_SMOKE_PROJECT_ID: "  " })),
+		);
+	});
+});
+
+describe("httpSmokeApi ordering guards", () => {
+	it("refuses steps that run before their prerequisites", async () => {
+		const admin = fakeAdmin();
+		const api = httpSmokeApi(smokeTestEnv, admin.fetchFn);
+		await assert.rejects(
+			api.ensureDestination("https://sink.example.com/r/x/hook"),
+			/smoke: ensureProject must run first/,
+		);
+		await assert.rejects(
+			api.ensureSource(),
+			/smoke: ensureDestination must run first/,
+		);
+		await assert.rejects(api.send(), /smoke: ensureSource must run first/);
+		await api.ensureProject("smoke");
+		await assert.rejects(
+			api.ensureSource(),
+			/smoke: ensureDestination must run first/,
+		);
+		assert.deepEqual(
+			admin.mutations.map((m) => `${m.method} ${m.path}`),
+			["POST /projects"],
+		);
+	});
+});
+
+describe("httpSmokeApi requests", () => {
+	/**
+	 * Fetch fake that answers by `METHOD url` and records every call.
+	 * @param {Record<string, unknown>} routes
+	 */
+	function routed(routes) {
+		/** @type {{ key: string, init: any }[]} */
+		const calls = [];
+		const fetchFn = async (url, init = {}) => {
+			const key = `${init.method ?? "GET"} ${url}`;
+			calls.push({ key, init });
+			if (!(key in routes)) {
+				throw new Error(`unexpected ${key}`);
+			}
+			const route = routes[key];
+			return typeof route === "function"
+				? route()
+				: new Response(JSON.stringify(route), { status: 200 });
+		};
+		return { calls, fetchFn };
+	}
+
+	const base = "https://api.example.com/api/admin/v1";
+
+	it("lists an event's deliveries and replays it with an audit reason", async () => {
+		const { calls, fetchFn } = routed({
+			[`GET ${base}/events/evt_1/deliveries`]: {
+				data: [
+					{ id: "dlv_1", status: "delivered", attempt_count: 1 },
+					{ id: "dlv_2", status: "pending" },
+				],
+			},
+			[`POST ${base}/events/evt_1/replay`]: {
+				delivery_id: "dlv_3",
+				extra: true,
+			},
+		});
+		const api = httpSmokeApi(
+			{ ...smokeTestEnv, url: "https://api.example.com/" },
+			fetchFn,
+		);
+		assert.deepEqual(await api.deliveries("evt_1"), [
+			{ id: "dlv_1", status: "delivered" },
+			{ id: "dlv_2", status: "pending" },
+		]);
+		assert.deepEqual(await api.replay("evt_1"), { delivery_id: "dlv_3" });
+		assert.equal(calls[0].init.headers.authorization, "Bearer hf_test_token");
+		assert.deepEqual(JSON.parse(calls[1].init.body), {
+			reason: "post-deploy smoke test",
+		});
+	});
+
+	it("treats a missing data array or ids list as empty", async () => {
+		const { fetchFn } = routed({
+			[`GET ${base}/events/evt_1/deliveries`]: {},
+			"GET https://sink.example.com/r/run1/stats?ids=1": {
+				unique: 0,
+				received: 0,
+			},
+			[`GET ${base}/projects?limit=100`]: {},
+			[`POST ${base}/projects`]: { id: "prj_new" },
+		});
+		const api = httpSmokeApi(
+			{ ...smokeTestEnv, sinkUrl: "https://sink.example.com/" },
+			fetchFn,
+		);
+		assert.equal(api.sinkUrl, "https://sink.example.com");
+		assert.deepEqual(await api.deliveries("evt_1"), []);
+		assert.deepEqual(await api.sinkStats("run1"), {
+			unique: 0,
+			received: 0,
+			ids: [],
+		});
+		assert.deepEqual(await api.ensureProject("smoke"), { id: "prj_new" });
+	});
+
+	it("reports the status and a truncated body for a failed call", async () => {
+		const { fetchFn } = routed({
+			[`POST ${base}/events/evt_1/replay`]: () =>
+				new Response("x".repeat(300), { status: 409 }),
+			[`GET ${base}/events/evt_2/deliveries`]: () => ({
+				ok: false,
+				status: 503,
+				text: async () => {
+					throw new Error("body stream broke");
+				},
+			}),
+		});
+		const api = httpSmokeApi(smokeTestEnv, fetchFn);
+		await assert.rejects(api.replay("evt_1"), (err) => {
+			assert.equal(
+				err.message,
+				`smoke: replay event failed with 409 ${"x".repeat(200)}`,
+			);
+			return true;
+		});
+		await assert.rejects(
+			api.deliveries("evt_2"),
+			/^Error: smoke: list deliveries failed with 503 $/,
+		);
+	});
+
+	it("reports a rejected ingress send with its status", async () => {
+		const admin = fakeAdmin();
+		const fetchFn = async (url, init) =>
+			new URL(url).origin === "https://hooks.example.com"
+				? new Response('{"error":"bad signature"}', { status: 401 })
+				: admin.fetchFn(url, init);
+		const api = httpSmokeApi(smokeTestEnv, fetchFn);
+		await api.ensureProject("smoke");
+		await api.ensureDestination("https://sink.example.com/r/run/hook");
+		await api.ensureSource();
+		await assert.rejects(
+			api.send(),
+			/smoke: send event failed with 401 \{"error":"bad signature"\}/,
+		);
+	});
+});
+
+describe("httpSmokeApi source reuse", () => {
+	it("re-enables, repoints, and fixes the auth config of a reused source", async () => {
+		const admin = fakeAdmin({
+			projects: [{ id: "prj_smoke", name: "smoke" }],
+			destinations: [
+				{
+					id: "dst_cur",
+					project_id: "prj_smoke",
+					name: "smoke",
+					url: "https://sink.example.com/r/run/hook",
+				},
+			],
+			sources: [
+				{
+					id: "src_other",
+					project_id: "prj_smoke",
+					name: "not-smoke",
+					auth_type: "hmac",
+				},
+				{
+					id: "src_old",
+					project_id: "prj_smoke",
+					destination_id: "dst_gone",
+					name: "smoke",
+					status: "disabled",
+					auth_type: "hmac",
+					auth_config: { ...hmacConfig, encoding: "base64" },
+					ingress_url: "https://hooks.example.com/in/src_old",
+				},
+			],
+		});
+		const api = httpSmokeApi(smokeTestEnv, admin.fetchFn);
+		await api.ensureProject("smoke");
+		await api.ensureDestination("https://sink.example.com/r/run/hook");
+		await api.ensureSource();
+		assert.deepEqual(
+			admin.mutations.map((m) => `${m.method} ${m.path}`),
+			["PATCH /sources/src_old", "POST /sources/src_old/rotate-secret"],
+		);
+		assert.deepEqual(admin.mutations[0].body, {
+			destination_id: "dst_cur",
+			status: "active",
+			auth_config: hmacConfig,
+			reason: "post-deploy smoke test",
+		});
+	});
+});
+
+describe("runId", () => {
+	const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+	it("starts with the 10-char Crockford timestamp and sorts by time", (t) => {
+		t.mock.timers.enable({ apis: ["Date"], now: 1729094400000 });
+		const first = runId();
+		t.mock.timers.tick(1);
+		const second = runId();
+		let time = 0;
+		for (const ch of first.slice(0, 10)) {
+			time = time * 32 + CROCKFORD.indexOf(ch);
+		}
+		assert.equal(time, 1729094400000);
+		assert.ok(first < second, `${first} !< ${second}`);
+		assert.match(first, /^[0-9A-HJKMNP-TV-Z]+$/);
+	});
+
+	it("is a 26-char ULID with 80 bits of randomness, as documented", () => {
+		assert.match(runId(), /^[0-9A-HJKMNP-TV-Z]{26}$/);
 	});
 });

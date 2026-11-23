@@ -65,6 +65,60 @@ describe("app", () => {
 		expect(Date.now() - started).toBeLessThan(1000);
 	});
 
+	it("GET /healthz returns 503 when the D1 probe outlasts the timeout", async () => {
+		vi.useFakeTimers();
+		try {
+			// The heartbeat read answers; only the SELECT 1 probe hangs.
+			const hangingEnv = envWithDb({
+				prepare: () => ({ first: () => new Promise(() => {}) }),
+			});
+			const pending = createApp({
+				healthTimeoutMs: 2000,
+				createDeps: () => testDeps(),
+			}).request("/healthz", {}, hangingEnv);
+			await vi.advanceTimersByTimeAsync(2000);
+			const res = await pending;
+			expect(res.status).toBe(503);
+			await expect(res.json()).resolves.toMatchObject({
+				status: "degraded",
+				reason: "d1_unavailable",
+			});
+			const line = JSON.parse(errorSpy.mock.calls[0]?.[0] as string);
+			expect(line).toMatchObject({ msg: "health.d1_failed" });
+			expect(JSON.stringify(line)).toContain("timed out");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("GET /healthz reports version unknown without version metadata", async () => {
+		const res = await createApp().request("/healthz", {}, {
+			...env,
+			CF_VERSION_METADATA: undefined,
+		} as unknown as typeof env);
+		await expect(res.json()).resolves.toMatchObject({ version: "unknown" });
+	});
+
+	it("an error before the request context is set still returns a JSON 500 with a fresh request_id", async () => {
+		const req = new Request("https://hookflare.example.com/healthz");
+		// Reading cf-ray is the first thing the request middleware does.
+		Object.defineProperty(req, "headers", {
+			get() {
+				throw new Error("headers unavailable");
+			},
+		});
+		const res = await createApp().fetch(req, env);
+		expect(res.status).toBe(500);
+		const body = (await res.json()) as { error: string; request_id: string };
+		expect(body.error).toBe("internal_error");
+		expect(body.request_id).toMatch(/^[0-9a-f-]{36}$/);
+		const line = JSON.parse(errorSpy.mock.calls[0]?.[0] as string);
+		expect(line).toMatchObject({
+			msg: "http.unhandled_error",
+			request_id: body.request_id,
+		});
+	});
+
 	it("unknown routes return 404 JSON", async () => {
 		const res = await createApp().request("/no-such-route", {}, env);
 		expect(res.status).toBe(404);

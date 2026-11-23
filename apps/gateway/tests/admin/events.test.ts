@@ -1,4 +1,5 @@
 import type { EventSummary, WebhookEvent } from "@hookflare/shared";
+import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { deliveries } from "../../src/core/db/schema";
 import { newId } from "../../src/core/ids";
@@ -153,6 +154,34 @@ describe("GET /events", () => {
 			400,
 		);
 		expect((await api.request("GET", "/events?status=nope")).status).toBe(400);
+	});
+
+	it("reports latest_delivery null for an event without deliveries", async () => {
+		const { deps, p, c, api } = await fixture();
+		await deps.db.delete(deliveries).where(eq(deliveries.id, c.deliveryId));
+		const page = await (
+			await api.request("GET", `/events?source_id=${p.source.id}&limit=1`)
+		).json<{ data: EventSummary[] }>();
+		expect(page.data).toEqual([
+			expect.objectContaining({ id: c.eventId, latest_delivery: null }),
+		]);
+	});
+
+	it("rejects an invalid project scope on event detail, deliveries, and payload", async () => {
+		const { deps, a } = await fixture();
+		// payload.read is an operator permission.
+		const api = await adminApp(deps, { role: "operator" });
+		for (const suffix of ["", "/deliveries", "/payload"]) {
+			const res = await api.request(
+				"GET",
+				`/events/${a.eventId}${suffix}?project_id=not-a-project`,
+			);
+			expect.soft(res.status, suffix).toBe(400);
+			expect.soft(await res.json()).toMatchObject({
+				error: "invalid_request",
+				issues: [expect.objectContaining({ path: "project_id" })],
+			});
+		}
 	});
 
 	it("never returns headers or body in the list", async () => {

@@ -17,8 +17,9 @@ describe("archives API (spec §7.6)", () => {
 	async function batchWithPart(
 		status: "verified" | "building" | "expired" | "failed" | "purged",
 		withFiles = true,
+		kind: "events" | "audit" = "events",
 	) {
-		const b = await seedBatch(deps, { status, withFiles });
+		const b = await seedBatch(deps, { status, withFiles, kind });
 		const key = withFiles
 			? `archive/2026/01/02/${b.id}/part-0001.ndjson.gz`
 			: null;
@@ -56,6 +57,74 @@ describe("archives API (spec §7.6)", () => {
 		});
 	});
 
+	it("filters by status and day range and pages by (created_at, id)", async () => {
+		const mk = (
+			day: string,
+			status: "verified" | "failed",
+			createdAt: number,
+		) => seedBatch(deps, { day, status, createdAt });
+		const jan1 = await mk("2026-01-01", "verified", 100);
+		const jan2 = await mk("2026-01-02", "verified", 200);
+		// Same created_at as jan2: the id breaks the tie.
+		const jan3 = await mk("2026-01-03", "verified", 200);
+		await mk("2026-01-02", "failed", 300);
+		const app = await adminApp(deps, { role: "viewer" });
+		const qs = "status=verified&from_day=2026-01-02&to_day=2026-01-03&limit=1";
+		const seen: string[] = [];
+		let cursor: string | null = null;
+		do {
+			const res = await app.request(
+				"GET",
+				`/archives?${qs}${cursor ? `&cursor=${cursor}` : ""}`,
+			);
+			expect(res.status).toBe(200);
+			const page = await res.json<{
+				data: { id: string; parts: unknown[] }[];
+				next_cursor: string | null;
+			}>();
+			seen.push(...page.data.map((b) => b.id));
+			cursor = page.next_cursor;
+		} while (cursor);
+		expect(seen).toEqual([jan3.id, jan2.id]);
+		expect(seen).not.toContain(jan1.id);
+	});
+
+	it("returns an empty page when nothing matches", async () => {
+		const res = await (await adminApp(deps, { role: "viewer" })).request(
+			"GET",
+			"/archives?kind=audit",
+		);
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ data: [], next_cursor: null });
+	});
+
+	it("rejects an invalid query or cursor with 400", async () => {
+		const app = await adminApp(deps, { role: "viewer" });
+		const bad = await app.request("GET", "/archives?limit=0");
+		expect(bad.status).toBe(400);
+		expect(await bad.json()).toMatchObject({ error: "invalid_request" });
+		const cur = await app.request("GET", "/archives?cursor=zz");
+		expect(cur.status).toBe(400);
+		expect(await cur.json()).toMatchObject({
+			issues: [{ path: "cursor", code: "invalid_cursor" }],
+		});
+	});
+
+	it("returns 404 for an unknown part or a part whose R2 object is gone, without auditing", async () => {
+		const b = await batchWithPart("verified");
+		const app = await adminApp(deps, { role: "operator" });
+		expect((await app.request("GET", `/archives/${b.id}/parts/2`)).status).toBe(
+			404,
+		);
+		await deps.payloads.delete(
+			`archive/2026/01/02/${b.id}/part-0001.ndjson.gz`,
+		);
+		const gone = await app.request("GET", `/archives/${b.id}/parts/1`);
+		expect(gone.status).toBe(404);
+		expect(await gone.json()).toEqual({ error: "not_found" });
+		expect(await auditRows(deps, b.id)).toEqual([]);
+	});
+
 	it("streams a part to operators and audits the download (M5-23)", async () => {
 		const b = await batchWithPart("verified");
 		const res = await (await adminApp(deps, { role: "operator" })).request(
@@ -78,6 +147,28 @@ describe("archives API (spec §7.6)", () => {
 				).request("GET", `/archives/${b.id}/parts/1`)
 			).status,
 		).toBe(403);
+	});
+
+	it("serves audit archive parts only to roles with audit.read", async () => {
+		const b = await batchWithPart("verified", true, "audit");
+		const denied = await (await adminApp(deps, { role: "operator" })).request(
+			"GET",
+			`/archives/${b.id}/parts/1`,
+		);
+		expect(denied.status).toBe(403);
+		expect(await denied.json()).toEqual({
+			error: "forbidden",
+			required: "audit.read",
+		});
+		expect(await auditRows(deps, b.id)).toEqual([]);
+		const res = await (await adminApp(deps, { role: "admin" })).request(
+			"GET",
+			`/archives/${b.id}/parts/1`,
+		);
+		expect(res.status).toBe(200);
+		expect(res.headers.get("content-disposition")).toContain(
+			"hookflare-audit-",
+		);
 	});
 
 	it("streams a purged batch with files to operators", async () => {

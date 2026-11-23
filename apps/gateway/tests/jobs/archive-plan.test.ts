@@ -142,6 +142,90 @@ describe("planRun", () => {
 		).toBeGreaterThanOrEqual(1);
 		expect(second.batches.filter((b) => b.kind === "audit")).toEqual([]);
 	});
+
+	it("resumes its own building audit batch instead of opening a second one for the day", async () => {
+		const { auditLogs } = await import("../../src/core/db/schema");
+		const at = NOW - 400 * DAY_MS;
+		await deps.db.insert(auditLogs).values({
+			id: "aud_plan_resume",
+			actor: "plan@test",
+			action: "settings.updated",
+			resourceType: "settings",
+			resourceId: "x",
+			at,
+		});
+		try {
+			const day = new Date(at).toISOString().slice(0, 10);
+			const own = await seedBatch(deps, {
+				kind: "audit",
+				day,
+				workflowInstanceId: "inst-ra",
+			});
+			const plan = await planRun(deps, "inst-ra", never, logger);
+			if (!plan.ok) throw new Error("expected a plan");
+			const audit = plan.batches.filter((b) => b.kind === "audit");
+			expect(audit.filter((b) => b.id === own.id)).toEqual([
+				expect.objectContaining({ status: "building", maxParts: 1 }),
+			]);
+			const rows = (await deps.db.select().from(archiveBatches)).filter(
+				(r) => r.kind === "audit" && r.day === day,
+			);
+			expect(rows.map((r) => r.id)).toEqual([own.id]);
+		} finally {
+			await deps.db
+				.delete(auditLogs)
+				.where(eq(auditLogs.id, "aud_plan_resume"));
+		}
+	});
+
+	it("skips an abandoned batch another instance adopts first", async () => {
+		const abandoned = await seedBatch(deps, { workflowInstanceId: "dead-x" });
+		const plan = await planRun(
+			deps,
+			"inst-slow",
+			async (id) => {
+				// A concurrent plan adopts it between the liveness check and ours.
+				await deps.db
+					.update(archiveBatches)
+					.set({ workflowInstanceId: "inst-fast" })
+					.where(eq(archiveBatches.id, abandoned.id));
+				return id !== "dead-x";
+			},
+			logger,
+		);
+		if (!plan.ok) throw new Error("expected a plan");
+		expect(plan.batches.map((b) => b.id)).not.toContain(abandoned.id);
+		const [row] = await deps.db
+			.select()
+			.from(archiveBatches)
+			.where(eq(archiveBatches.id, abandoned.id));
+		expect(row.workflowInstanceId).toBe("inst-fast");
+	});
+
+	it("opens no audit batch when the budget cannot afford a single part", async () => {
+		const { auditLogs } = await import("../../src/core/db/schema");
+		for (const [i, id] of ["aud_poor_1", "aud_poor_2"].entries())
+			await deps.db.insert(auditLogs).values({
+				id,
+				actor: "plan@test",
+				action: "settings.updated",
+				resourceType: "settings",
+				resourceId: "x",
+				at: NOW - (400 + i) * DAY_MS,
+			});
+		try {
+			// 15 - 10 fixed = 5 steps: below one batch (4) plus one audit part (2).
+			const plan = await planRun(deps, "inst-poor", never, logger, {
+				stepBudget: 15,
+				maxPartsPerBatch: MAX_PARTS_PER_BATCH,
+			});
+			if (!plan.ok) throw new Error("expected a plan");
+			expect(plan.batches).toEqual([]);
+			expect(await deps.db.select().from(archiveBatches)).toEqual([]);
+		} finally {
+			await deps.db.delete(auditLogs).where(eq(auditLogs.actor, "plan@test"));
+		}
+	});
 });
 
 describe("expireArchives", () => {
@@ -185,5 +269,40 @@ describe("expireArchives", () => {
 		).toBe("expired");
 		expect(await expireArchives(deps, storage, NOW)).toBe(0);
 		expect(await expireArchives(deps, DEFAULT_STORAGE_SETTINGS, NOW)).toBe(0); // null = forever
+	});
+
+	it("removes a failed batch's files across list pages and keeps its row", async () => {
+		const failed = await seedBatch(deps, {
+			status: "failed",
+			day: "2026-02-03",
+			withFiles: true,
+		});
+		const empty = await seedBatch(deps, {
+			status: "failed",
+			day: "2026-02-04",
+			withFiles: true,
+		});
+		const prefix = `archive/2026/02/03/${failed.id}/`;
+		for (const k of ["part-0001.ndjson.gz", "part-0002.ndjson.gz", "x"])
+			await deps.payloads.put(`${prefix}${k}`, "x");
+		const paged = {
+			...deps,
+			payloads: new Proxy(deps.payloads, {
+				get(target, prop) {
+					if (prop === "list")
+						return (o: R2ListOptions) => target.list({ ...o, limit: 1 });
+					const v = Reflect.get(target, prop);
+					return typeof v === "function" ? v.bind(target) : v;
+				},
+			}),
+		};
+		expect(await expireArchives(paged, DEFAULT_STORAGE_SETTINGS, NOW)).toBe(0);
+		expect(await listKeys(deps.payloads, prefix)).toEqual([]);
+		const rows = await deps.db.select().from(archiveBatches);
+		for (const id of [failed.id, empty.id])
+			expect(rows.find((r) => r.id === id)).toMatchObject({
+				status: "failed",
+				withFiles: false,
+			});
 	});
 });

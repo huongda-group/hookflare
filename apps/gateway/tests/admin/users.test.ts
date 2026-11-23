@@ -1,6 +1,6 @@
 import type { Page, User } from "@hookflare/shared";
 import { and, eq, ne } from "drizzle-orm";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { verifyPassword } from "../../src/admin/auth/password";
 import { createApp } from "../../src/app";
 import { sessions, users } from "../../src/core/db/schema";
@@ -12,6 +12,7 @@ import {
 	uniqueUsername,
 } from "../helpers/admin";
 import { testDeps } from "../helpers/deps";
+import { faultyDeps } from "../helpers/faults";
 
 beforeEach(seedAdminProject);
 
@@ -409,5 +410,53 @@ describe("/users", () => {
 				.from(sessions)
 				.where(eq(sessions.username, target.username)),
 		).toEqual([]);
+	});
+	it("rejects an invalid list query or reset body with 400", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps, { role: "admin" });
+		const list = await api.request("GET", "/users?limit=0");
+		expect(list.status).toBe(400);
+		expect(await list.json()).toMatchObject({ error: "invalid_request" });
+		const username = uniqueUsername("rst");
+		await api.request("POST", "/users", {
+			username,
+			role: "viewer",
+			password: PASSWORD,
+		});
+		const reset = await api.request("POST", `/users/${username}/password`, {
+			password: "",
+		});
+		expect(reset.status).toBe(400);
+		const row = await getUser(deps.db, username);
+		expect(await verifyPassword(PASSWORD, row?.passwordHash ?? null)).toBe(
+			true,
+		);
+		expect((await auditRows(deps, username)).map((a) => a.action)).toEqual([
+			"user.created",
+		]);
+	});
+
+	it("answers 500 and creates nothing when the create batch fails for another reason", async () => {
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		const base = testDeps();
+		const admin = await adminApp(base, { role: "admin" });
+		const api = await adminApp(
+			faultyDeps(base, { d1: [{ match: /insert into "audit_logs"/i }] }),
+			{ username: admin.username },
+		);
+		const username = uniqueUsername("fail");
+		try {
+			const res = await api.request("POST", "/users", {
+				username,
+				role: "viewer",
+				password: PASSWORD,
+			});
+			expect(res.status).toBe(500);
+			expect(await res.json()).toMatchObject({ error: "internal_error" });
+			expect(await getUser(base.db, username)).toBeUndefined();
+			expect(await auditRows(base, username)).toEqual([]);
+		} finally {
+			errorSpy.mockRestore();
+		}
 	});
 });

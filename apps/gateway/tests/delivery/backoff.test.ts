@@ -52,12 +52,18 @@ describe("Retry-After", () => {
 		);
 	});
 
-	it.each([null, "", "soon", "1.5", "-5", "2026-10-15"])(
-		"rejects %j",
-		(value) => {
-			expect(parseRetryAfter(value, NOW)).toBeNull();
-		},
-	);
+	it.each([
+		null,
+		"",
+		"soon",
+		"1.5",
+		"-5",
+		"2026-10-15",
+		// Shaped like an IMF-fixdate, but not a real date.
+		"Mon, 15 Foo 2026 10:00:00 GMT",
+	])("rejects %j", (value) => {
+		expect(parseRetryAfter(value, NOW)).toBeNull();
+	});
 
 	it("clamps to [1, backoff_max_s]", () => {
 		const p: Policy = { ...DEFAULT_POLICY, backoffMaxS: 600 };

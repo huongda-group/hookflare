@@ -33,6 +33,15 @@ describe("DestinationLimiter", () => {
 		expect((await at(s, inFlight2, T0)).ok).toBe(true);
 	});
 
+	it("rejects every request at max_in_flight 0 without waiting, since no slot can expire", async () => {
+		const s = stub();
+		expect(await at(s, { ...inFlight2, maxInFlight: 0 }, T0)).toEqual({
+			ok: false,
+			reason: "in_flight",
+			retryAfterMs: 0,
+		});
+	});
+
 	it("frees a slot once its lease expires", async () => {
 		const s = stub();
 		await at(s, inFlight2, T0);

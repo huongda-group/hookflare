@@ -33,7 +33,8 @@ export function applyServerIssues<T extends FieldValues>(
 	if (err instanceof ApiError && err.issues?.length) {
 		let mapped = false;
 		flushSync(() => {
-			for (const issue of err.issues ?? []) {
+			for (const issue of err.issues ??
+				/* istanbul ignore next -- @preserve unreachable: checked non-empty above */ []) {
 				if (issue.path) {
 					form.setError(issue.path as Path<T>, { message: issue.message });
 					mapped = true;

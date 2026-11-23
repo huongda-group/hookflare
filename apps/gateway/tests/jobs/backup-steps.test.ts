@@ -79,6 +79,41 @@ async function dumpAll(prefix: string) {
 	};
 }
 
+/** A backup of just the `backups` table: one part plus its manifest. */
+async function smallBackup(id: string, prefix: string) {
+	await seedBackup(id, prefix, Date.now());
+	const table = (await listTables(deps.db)).find((t) => t.name === "backups");
+	if (!table) throw new Error("backups table not found");
+	const { part } = await dumpPage(deps, table, prefix, 1, null);
+	if (!part) throw new Error("expected a part");
+	await writeManifest(deps, id, [table], [part], Date.now());
+	return part;
+}
+
+/** deps whose backups bucket serves `head` through `rewrite` (null = missing). */
+function withHead(
+	rewrite: (key: string, head: R2Object | null) => unknown,
+	extra: Partial<Record<"get", (key: string) => unknown>> = {},
+) {
+	return {
+		...deps,
+		backups: new Proxy(deps.backups, {
+			get(target, prop) {
+				if (prop === "head")
+					return async (key: string) => rewrite(key, await target.head(key));
+				if (prop === "get" && extra.get) return extra.get;
+				const v = Reflect.get(target, prop);
+				return typeof v === "function" ? v.bind(target) : v;
+			},
+		}),
+	};
+}
+
+async function backupRow(id: string) {
+	const [row] = await deps.db.select().from(backups).where(sql`id = ${id}`);
+	return row;
+}
+
 describe("writeManifest", () => {
 	it("lists applied d1_migrations and per-table rows equal to the parts sum", async () => {
 		const prefix = "test/backup/steps/manifest/";
@@ -122,6 +157,13 @@ describe("writeManifest", () => {
 			Object.fromEntries(manifest.tables.map((t) => [t.name, t.rows])),
 		);
 	});
+
+	it("throws for an unknown backup and writes no manifest", async () => {
+		await expect(
+			writeManifest(deps, "bk_nope", [], [], Date.now()),
+		).rejects.toThrow("backup bk_nope not found");
+		expect(await listKeys(deps.backups, "test/backup/steps/")).toEqual([]);
+	});
 });
 
 describe("verifyBackup", () => {
@@ -162,6 +204,119 @@ describe("verifyBackup", () => {
 			.where(sql`id = 'bk_verify_bad'`);
 		expect(row.status).toBe("failed");
 		expect(row.error).toContain(victim.key);
+	});
+
+	it("throws for an unknown backup", async () => {
+		await expect(verifyBackup(deps, "bk_unknown")).rejects.toThrow(
+			"backup bk_unknown not found",
+		);
+	});
+
+	it("fails when the manifest object is missing", async () => {
+		await seedBackup("bk_no_manifest", "test/backup/steps/none/", Date.now());
+		expect(await verifyBackup(deps, "bk_no_manifest")).toEqual({
+			ok: false,
+			error: "manifest: object missing",
+		});
+		expect(await backupRow("bk_no_manifest")).toMatchObject({
+			status: "failed",
+			error: "manifest: object missing",
+		});
+	});
+
+	it("fails when the manifest vanishes between HEAD and GET", async () => {
+		await smallBackup("bk_vanish", "test/backup/steps/vanish/");
+		const racing = withHead((_k, h) => h, { get: async () => null });
+		expect(await verifyBackup(racing, "bk_vanish")).toEqual({
+			ok: false,
+			error: "manifest: object missing",
+		});
+		expect((await backupRow("bk_vanish")).status).toBe("failed");
+	});
+
+	it("fails when the manifest size differs from its HEAD", async () => {
+		await smallBackup("bk_msize", "test/backup/steps/msize/");
+		const lying = withHead((k, h) =>
+			k.endsWith("manifest.json") && h
+				? { size: h.size + 1, checksums: h.checksums }
+				: h,
+		);
+		const r = await verifyBackup(lying, "bk_msize");
+		expect(r.ok).toBe(false);
+		if (!r.ok) expect(r.error).toMatch(/^manifest: size \d+ ≠ \d+$/);
+		expect((await backupRow("bk_msize")).status).toBe("failed");
+	});
+
+	it("fails when the manifest was stored without its sha256", async () => {
+		const prefix = "test/backup/steps/msha/";
+		await smallBackup("bk_msha", prefix);
+		const obj = await deps.backups.get(`${prefix}manifest.json`);
+		const bytes = await (obj as R2ObjectBody).arrayBuffer();
+		await deps.backups.put(`${prefix}manifest.json`, bytes);
+		expect(await verifyBackup(deps, "bk_msha")).toEqual({
+			ok: false,
+			error: "manifest: sha256 mismatch",
+		});
+	});
+
+	it("fails on a manifest that is not JSON", async () => {
+		const prefix = "test/backup/steps/mjson/";
+		await seedBackup("bk_mjson", prefix, Date.now());
+		const bytes = new TextEncoder().encode("{not json");
+		const { sha256Hex } = await import("../../src/core/ndjson");
+		await deps.backups.put(`${prefix}manifest.json`, bytes, {
+			sha256: await sha256Hex(bytes),
+		});
+		expect(await verifyBackup(deps, "bk_mjson")).toEqual({
+			ok: false,
+			error: "manifest: invalid JSON",
+		});
+		expect((await backupRow("bk_mjson")).status).toBe("failed");
+	});
+
+	it("fails when a listed part is missing", async () => {
+		const part = await smallBackup("bk_pmiss", "test/backup/steps/pmiss/");
+		await deps.backups.delete(part.key);
+		expect(await verifyBackup(deps, "bk_pmiss")).toEqual({
+			ok: false,
+			error: `part ${part.key}: object missing`,
+		});
+	});
+
+	it("fails when a part has the right size but another sha256", async () => {
+		const part = await smallBackup("bk_psha", "test/backup/steps/psha/");
+		const obj = await deps.backups.get(part.key);
+		// Same bytes, stored without a checksum: R2 reports no sha256.
+		await deps.backups.put(part.key, await (obj as R2ObjectBody).arrayBuffer());
+		expect(await verifyBackup(deps, "bk_psha")).toEqual({
+			ok: false,
+			error: `part ${part.key}: sha256 mismatch`,
+		});
+		expect((await backupRow("bk_psha")).status).toBe("failed");
+	});
+
+	const toHex = (b: ArrayBuffer) =>
+		[...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
+	it.each([
+		["upper-case hex", (b: ArrayBuffer) => toHex(b).toUpperCase()],
+		[
+			"base64",
+			(b: ArrayBuffer) => btoa(String.fromCharCode(...new Uint8Array(b))),
+		],
+		["Uint8Array", (b: ArrayBuffer) => new Uint8Array(b)],
+	])("accepts an R2 sha256 reported as %s", async (_name, shape) => {
+		const id = `bk_shape_${_name.replace(/\W/g, "")}`;
+		await smallBackup(id, `test/backup/steps/${id}/`);
+		const reshaped = withHead((_k, h) =>
+			h
+				? {
+						size: h.size,
+						checksums: { sha256: shape(h.checksums.sha256 as ArrayBuffer) },
+					}
+				: h,
+		);
+		expect(await verifyBackup(reshaped, id)).toEqual({ ok: true });
+		expect((await backupRow(id)).status).toBe("verified");
 	});
 });
 
@@ -248,5 +403,41 @@ describe("expireBackups", () => {
 		const remaining = await deps.db.select({ id: backups.id }).from(backups);
 		expect(remaining.map((r) => r.id)).toEqual(["bk_off"]);
 		expect(await listKeys(deps.backups, prefix)).toHaveLength(1);
+	});
+
+	it("skips an old running backup and pages through every listed key", async () => {
+		const now = Date.now();
+		const running = "test/backup/steps/old-running/";
+		const done = "test/backup/steps/old-done/";
+		await seedBackup("bk_old_running", running, now - 50 * DAY_MS);
+		await seedBackup("bk_old_done", done, now - 50 * DAY_MS, "verified");
+		await deps.db
+			.update(backups)
+			.set({ status: "failed" })
+			.where(sql`id = 'bk_old_done'`);
+		for (const k of ["a", "b", "c"])
+			await deps.backups.put(`${done}${k}`, new Uint8Array([1]));
+		await deps.backups.put(`${running}a`, new Uint8Array([1]));
+		// One key per list page: the loop must follow the cursor.
+		const paged = {
+			...deps,
+			backups: new Proxy(deps.backups, {
+				get(target, prop) {
+					if (prop === "list")
+						return (o: R2ListOptions) => target.list({ ...o, limit: 1 });
+					const v = Reflect.get(target, prop);
+					return typeof v === "function" ? v.bind(target) : v;
+				},
+			}),
+		};
+		const result = await expireBackups(
+			paged,
+			{ ...DEFAULT_STORAGE_SETTINGS, backup_retention_days: 35 },
+			now,
+		);
+		expect(result.deleted).toEqual(["bk_old_done"]);
+		expect(await listKeys(deps.backups, done)).toEqual([]);
+		expect(await listKeys(deps.backups, running)).toHaveLength(1);
+		expect((await backupRow("bk_old_running")).status).toBe("running");
 	});
 });

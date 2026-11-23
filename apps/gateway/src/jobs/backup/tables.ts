@@ -37,7 +37,33 @@ function literal(name: string): string {
 }
 
 /**
- * Every user table in this D1, sorted by name: internal `sqlite_*` tables,
+ * Parents before children (ties by name). The dump reads tables minutes
+ * apart, so a row created between two reads is caught as an orphan child
+ * (reported by the restore) instead of a parent silently missing its
+ * children, e.g. an accepted event restored without its delivery.
+ * Self references are ignored; a cycle keeps the remaining tables by name.
+ */
+export function parentsFirst(tables: TableInfo[]): TableInfo[] {
+	const names = new Set(tables.map((t) => t.name));
+	const pending = [...tables].sort((a, b) => a.name.localeCompare(b.name));
+	const done = new Set<string>();
+	const order: TableInfo[] = [];
+	while (pending.length > 0) {
+		const i = pending.findIndex((t) =>
+			t.foreignKeys.every(
+				(fk) =>
+					fk.table === t.name || !names.has(fk.table) || done.has(fk.table),
+			),
+		);
+		const [next] = pending.splice(i === -1 ? 0 : i, 1);
+		done.add(next.name);
+		order.push(next);
+	}
+	return order;
+}
+
+/**
+ * Every user table in this D1, parents first (see `parentsFirst`): internal `sqlite_*` tables,
  * Cloudflare `_cf_*` bookkeeping, and the migration journal are skipped.
  * A table pages by its single-column primary key, or by rowid when it has
  * none (or a composite one, whose leading column alone is not unique).
@@ -81,7 +107,7 @@ export async function listTables(db: Db): Promise<TableInfo[]> {
 			pageSize: columns.some((c) => c.blob) ? BLOB_PAGE_SIZE : PAGE_SIZE,
 		});
 	}
-	return tables;
+	return parentsFirst(tables);
 }
 
 export { ident };

@@ -1,13 +1,17 @@
 import type { ApiToken, CreatedApiToken } from "@hookflare/shared";
-import { eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
+import { Hono } from "hono";
 import { beforeEach, describe, expect, it } from "vitest";
 import { sha256Hex } from "../../../src/admin/auth/secrets";
+import { apiTokenRoutes } from "../../../src/admin/routes/api-tokens";
+import type { AppBindings } from "../../../src/app";
 import { createApp } from "../../../src/app";
 import { apiTokens, users } from "../../../src/core/db/schema";
 import type { Deps } from "../../../src/deps";
 import {
 	adminApp,
 	auditRows,
+	beforeNextBatch,
 	seedAdminProject,
 	uniqueUsername,
 } from "../../helpers/admin";
@@ -164,6 +168,134 @@ describe("/users/:username/tokens", () => {
 		expect((await withBearer(deps, token)).status).toBe(200);
 	});
 
+	it("audits a token created for another user with the admin as actor and the owner as target", async () => {
+		const deps = testDeps();
+		const { api, username } = await withUser(deps);
+		const { id } = await (
+			await api.request("POST", `/users/${username}/tokens`, { name: "ci" })
+		).json<CreatedApiToken>();
+		const [audit] = await auditRows(deps, id);
+		expect(audit).toMatchObject({
+			action: "api_token.created",
+			actor: api.username,
+			resourceType: "api_token",
+			resourceId: id,
+			diffJson: { username, name: "ci" },
+		});
+	});
+
+	it("rejects a disabled user's token while disabled, even before revocation", async () => {
+		const deps = testDeps();
+		const { api, username } = await withUser(deps);
+		const { token } = await (
+			await api.request("POST", `/users/${username}/tokens`, { name: "ci" })
+		).json<CreatedApiToken>();
+		// Disable directly, so the token row stays unrevoked: the per-request
+		// user read alone must reject it.
+		await deps.db
+			.update(users)
+			.set({ disabledAt: deps.now() })
+			.where(eq(users.username, username));
+		expect((await withBearer(deps, token)).status).toBe(401);
+		await deps.db
+			.update(users)
+			.set({ disabledAt: null })
+			.where(eq(users.username, username));
+		expect((await withBearer(deps, token)).status).toBe(200);
+	});
+
+	it("revokes every live token when the user is disabled and audits their IDs", async () => {
+		const deps = testDeps();
+		const { api, username } = await withUser(deps);
+		const created: CreatedApiToken[] = [];
+		for (const name of ["a", "b", "c"]) {
+			created.push(
+				await (
+					await api.request("POST", `/users/${username}/tokens`, { name })
+				).json<CreatedApiToken>(),
+			);
+		}
+		const [a, b, c] = created;
+		expect(
+			(await api.request("POST", `/users/${username}/tokens/${c.id}/revoke`))
+				.status,
+		).toBe(204);
+		const res = await api.request("PATCH", `/users/${username}`, {
+			disabled: true,
+			reason: "left the team",
+		});
+		expect(res.status).toBe(200);
+		const rows = await deps.db
+			.select()
+			.from(apiTokens)
+			.where(eq(apiTokens.username, username));
+		expect(rows.every((r) => r.revokedAt !== null)).toBe(true);
+
+		// Re-enabling does not resurrect the revoked tokens.
+		await api.request("PATCH", `/users/${username}`, { disabled: false });
+		expect((await withBearer(deps, a.token)).status).toBe(401);
+		expect((await withBearer(deps, b.token)).status).toBe(401);
+
+		const bulk = (await auditRows(deps, username)).filter(
+			(r) => r.action === "api_token.revoked",
+		);
+		expect(bulk).toHaveLength(1);
+		expect(bulk[0]).toMatchObject({
+			actor: api.username,
+			resourceType: "user",
+			resourceId: username,
+			reason: "left the team",
+			diffJson: { revoked_ids: [a.id, b.id].sort(), cause: "user.disabled" },
+		});
+	});
+
+	it("writes no bulk revoke audit when a disabled user has no live tokens", async () => {
+		const deps = testDeps();
+		const { api, username } = await withUser(deps);
+		const res = await api.request("PATCH", `/users/${username}`, {
+			disabled: true,
+		});
+		expect(res.status).toBe(200);
+		expect(
+			(await auditRows(deps, username)).map((r) => r.action),
+		).not.toContain("api_token.revoked");
+	});
+
+	it("revokes nothing when the disable is rejected as the last admin", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps, { role: "admin" });
+		const target = uniqueUsername("lastadm");
+		await api.request("POST", "/users", {
+			username: target,
+			role: "admin",
+			password: PASSWORD,
+		});
+		await (
+			await api.request("POST", `/users/${target}/tokens`, { name: "ci" })
+		).json<CreatedApiToken>();
+		// Every other admin is disabled after the handler's read, so the
+		// conditional update loses and the disable is rejected.
+		beforeNextBatch(deps, () =>
+			deps.db
+				.update(users)
+				.set({ disabledAt: deps.now() })
+				.where(and(eq(users.role, "admin"), ne(users.username, target))),
+		);
+		const res = await api.request("PATCH", `/users/${target}`, {
+			disabled: true,
+		});
+		expect(res.status).toBe(409);
+		expect(await res.json()).toEqual({ error: "last_admin" });
+		const [row] = await deps.db
+			.select()
+			.from(apiTokens)
+			.where(eq(apiTokens.username, target));
+		expect(row.revokedAt).toBeNull();
+		expect((await auditRows(deps, target)).map((r) => r.action)).not.toContain(
+			"api_token.revoked",
+		);
+	});
+
 	it("answers 404 when creating a token for an unknown user", async () => {
 		const deps = testDeps();
 		const api = await adminApp(deps, { role: "admin" });
@@ -199,5 +331,43 @@ describe("/users/:username/tokens", () => {
 				.from(apiTokens)
 				.where(eq(apiTokens.username, username)),
 		).toEqual([]);
+	});
+	it("rejects an invalid create body with 400 and stores nothing", async () => {
+		const deps = testDeps();
+		const { api, username } = await withUser(deps);
+		const res = await api.request("POST", `/users/${username}/tokens`, {
+			name: "",
+		});
+		expect(res.status).toBe(400);
+		expect(await res.json()).toMatchObject({ error: "invalid_request" });
+		expect(
+			await deps.db
+				.select()
+				.from(apiTokens)
+				.where(eq(apiTokens.username, username)),
+		).toEqual([]);
+	});
+
+	it("finds no user and touches no token when mounted without a :username", async () => {
+		const deps = testDeps();
+		const app = new Hono<AppBindings>()
+			.use(async (c, next) => {
+				c.set("deps", deps);
+				c.set("actor", { username: "root@example.com", role: "admin" });
+				await next();
+			})
+			.route("/tokens", apiTokenRoutes());
+		const list = await app.request("/tokens");
+		expect(await list.json()).toEqual({ data: [] });
+		const created = await app.request("/tokens", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ name: "ci" }),
+		});
+		expect(created.status).toBe(404);
+		const revoked = await app.request("/tokens/tok_missing/revoke", {
+			method: "POST",
+		});
+		expect(revoked.status).toBe(404);
 	});
 });

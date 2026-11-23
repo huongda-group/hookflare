@@ -1,5 +1,7 @@
 import { env } from "cloudflare:workers";
 import * as shared from "@hookflare/shared";
+import { getTableName, is } from "drizzle-orm";
+import { getTableConfig, SQLiteTable } from "drizzle-orm/sqlite-core";
 import { describe, expect, it } from "vitest";
 import * as db from "../../../src/core/db/schema";
 
@@ -105,5 +107,45 @@ describe("enum parity between the DB schema and @hookflare/shared", () => {
 		expect(shared.SOURCE_STATUSES).toEqual(db.SOURCE_STATUSES);
 		expect(shared.AUTH_TYPES).toEqual(db.AUTH_TYPES);
 		expect(shared.EVENT_ID_FROM).toEqual(db.EVENT_ID_FROM);
+	});
+});
+
+describe("drizzle schema matches the migrated foreign keys", () => {
+	const tables = Object.values(db).filter((v) => is(v, SQLiteTable));
+
+	it("declares every foreign key the migrations create, with the same target", async () => {
+		for (const table of tables) {
+			const config = getTableConfig(table);
+			const declared = config.foreignKeys
+				.map((fk) => {
+					const ref = fk.reference();
+					return {
+						from: ref.columns.map((c) => c.name).join(","),
+						table: getTableName(ref.foreignTable),
+						to: ref.foreignColumns.map((c) => c.name).join(","),
+						onDelete: (fk.onDelete ?? "no action").toUpperCase(),
+					};
+				})
+				.sort((a, b) => a.from.localeCompare(b.from));
+			const { results } = await env.DB.prepare(
+				`SELECT "from", "table", "to", on_delete AS onDelete FROM pragma_foreign_key_list('${config.name}')`,
+			).all<{ from: string; table: string; to: string; onDelete: string }>();
+			const migrated = results
+				.map((r) => ({ ...r, onDelete: r.onDelete.toUpperCase() }))
+				.sort((a, b) => a.from.localeCompare(b.from));
+			expect(declared, config.name).toEqual(migrated);
+		}
+	});
+});
+
+describe("blob column driver mapping", () => {
+	it("decodes every BLOB shape D1 may return to the same Uint8Array", () => {
+		const col = db.webhookEvents.bodyInline;
+		const want = new Uint8Array([1, 2, 255]);
+		const asView = col.mapFromDriverValue(want);
+		expect(asView).toBe(want);
+		expect(col.mapFromDriverValue([1, 2, 255])).toEqual(want);
+		expect(col.mapFromDriverValue(want.slice().buffer)).toEqual(want);
+		expect(col.mapToDriverValue(want)).toBe(want);
 	});
 });

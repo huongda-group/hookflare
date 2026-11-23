@@ -463,4 +463,32 @@ describe("AppShell", () => {
 			await screen.findByRole("menuitem", { name: "Change password" }),
 		).toBeInTheDocument();
 	});
+	it("hides every navigation group from an account without events.read", async () => {
+		server.use(
+			http.get(apiUrl("/me"), () =>
+				HttpResponse.json({ ...meFor("viewer"), permissions: [] }),
+			),
+		);
+		renderApp("/settings");
+		await screen.findByText("viewer@example.com");
+		const nav = screen.getByRole("navigation", { name: "Main" });
+		expect(within(nav).queryAllByRole("link")).toHaveLength(0);
+		expect(within(nav).queryByText("Monitor")).not.toBeInTheDocument();
+	});
+
+	it("says so when no project is available for a project-scoped page", async () => {
+		server.use(
+			http.get(apiUrl("/projects"), () =>
+				HttpResponse.json({ data: [], next_cursor: null }),
+			),
+		);
+		renderApp("/events");
+		expect(await screen.findByText("No projects available.")).toHaveAttribute(
+			"role",
+			"alert",
+		);
+		expect(
+			screen.queryByRole("combobox", { name: "Active project" }),
+		).not.toBeInTheDocument();
+	});
 });

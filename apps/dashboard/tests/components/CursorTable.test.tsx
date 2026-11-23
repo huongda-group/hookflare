@@ -41,7 +41,9 @@ function Probe({
 	empty = "Nothing here.",
 	emptyAction,
 	onRowClick,
+	hrefFor = (row) => `/resource/${row.id}`,
 }: {
+	hrefFor?: (row: Row) => string;
 	withSelection?: boolean;
 	withHref?: boolean;
 	max?: number;
@@ -69,7 +71,7 @@ function Probe({
 				ariaLabel="Probe table"
 				empty={empty}
 				emptyAction={emptyAction}
-				getRowHref={withHref ? (row) => `/resource/${row.id}` : undefined}
+				getRowHref={withHref ? hrefFor : undefined}
 				onRowClick={onRowClick}
 				selection={
 					withSelection ? { selected, onChange: setSelected, max } : undefined
@@ -328,6 +330,60 @@ describe("CursorTable data states", () => {
 		await waitFor(() =>
 			expect(router.state.location.pathname).toBe("/resource/evt_1"),
 		);
+	});
+
+	it("renders an external row link as a plain anchor", async () => {
+		server.use(http.get(apiUrl("/events"), () => page(ROWS)));
+		renderProbe(
+			<Probe hrefFor={(row) => `https://docs.example.com/${row.id}`} />,
+		);
+		const link = await screen.findByRole("link", { name: /evt_1/ });
+		expect(link).toHaveAttribute("href", "https://docs.example.com/evt_1");
+	});
+
+	it("unticks a selected row on a second click", async () => {
+		server.use(http.get(apiUrl("/events"), () => page(ROWS)));
+		const { user } = renderProbe(<Probe withSelection />);
+		const box = await screen.findByRole("checkbox", { name: "Select evt_1" });
+		await user.click(box);
+		expect(screen.getByText("selected:evt_1")).toBeInTheDocument();
+		await user.click(box);
+		expect(screen.getByText("selected:")).toBeInTheDocument();
+		expect(box).not.toBeChecked();
+	});
+
+	it("shows Loading… on the pager while a next page is in flight", async () => {
+		let failNext = true;
+		let release!: () => void;
+		server.use(
+			http.get(apiUrl("/events"), async ({ request }) => {
+				const cursor = new URL(request.url).searchParams.get("cursor");
+				if (!cursor) return page(ROWS, "c1");
+				await new Promise<void>((r) => {
+					release = r;
+				});
+				return failNext
+					? HttpResponse.json({ error: "internal" }, { status: 500 })
+					: page([{ id: "evt_9", label: "nine" }]);
+			}),
+		);
+		const { user } = renderProbe(<Probe />);
+		await screen.findByText("one");
+
+		await user.click(screen.getByRole("button", { name: "Load more" }));
+		expect(
+			await screen.findByRole("button", { name: "Loading…" }),
+		).toBeDisabled();
+		release();
+		await user.click(
+			await screen.findByRole("button", { name: "Retry loading more" }),
+		);
+		expect(
+			await screen.findByRole("button", { name: "Loading…" }),
+		).toBeDisabled();
+		failNext = false;
+		release();
+		expect(await screen.findByText("nine")).toBeInTheDocument();
 	});
 
 	it("puts wide table content in a labeled, keyboard-focusable overflow region", async () => {

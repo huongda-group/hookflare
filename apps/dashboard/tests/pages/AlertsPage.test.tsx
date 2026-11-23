@@ -1,5 +1,5 @@
 import type { Alert } from "@hookflare/shared";
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { alert, project } from "../helpers/fixtures";
@@ -210,5 +210,62 @@ describe("Alerts page", () => {
 			await screen.findByRole("button", { name: /retry loading more/i }),
 		).toBeInTheDocument();
 		expect(screen.getByText("Billing API")).toBeInTheDocument();
+	});
+	it("filters by status tab and rule through the URL and clears the rule filter", async () => {
+		const seen: URLSearchParams[] = [];
+		server.use(
+			http.get(apiUrl("/alerts"), ({ request }) => {
+				if (isDeployment(request)) return empty();
+				const q = new URL(request.url).searchParams;
+				seen.push(q);
+				return q.get("rule")
+					? empty()
+					: HttpResponse.json({
+							data: [alert({ resource_name: null, resource_id: "dst_raw" })],
+							next_cursor: null,
+						});
+			}),
+		);
+		const { user, router } = renderApp("/alerts?project_id=prj_1");
+		expect(await screen.findByRole("link", { name: "dst_raw" })).toBeVisible();
+
+		await user.click(screen.getByRole("tab", { name: "All" }));
+		await waitFor(() =>
+			expect(router.state.location.search).toMatchObject({ status: "all" }),
+		);
+		await waitFor(() => expect(seen.at(-1)?.has("status")).toBe(false));
+		expect(seen.at(-1)?.get("project_id")).toBe("prj_1");
+
+		const pickRule = async (name: string) => {
+			await user.click(screen.getByRole("combobox", { name: "Rule" }));
+			await user.click(await screen.findByRole("option", { name }));
+		};
+		await pickRule("new_dead");
+		await waitFor(() =>
+			expect(router.state.location.search).toMatchObject({ rule: "new_dead" }),
+		);
+		expect(
+			await screen.findByText("No project alerts match these filters."),
+		).toBeVisible();
+		expect(seen.at(-1)?.get("rule")).toBe("new_dead");
+
+		await pickRule("All rules");
+		await waitFor(() =>
+			expect(router.state.location.search).not.toHaveProperty("rule"),
+		);
+		expect(await screen.findByRole("link", { name: "dst_raw" })).toBeVisible();
+
+		await pickRule("new_dead");
+		await user.click(
+			await screen.findByRole("button", { name: "Clear filter" }),
+		);
+		await waitFor(() =>
+			expect(router.state.location.search).not.toHaveProperty("rule"),
+		);
+		expect(router.state.location.search).toMatchObject({
+			status: "all",
+			project_id: "prj_1",
+		});
+		expect(await screen.findByRole("link", { name: "dst_raw" })).toBeVisible();
 	});
 });

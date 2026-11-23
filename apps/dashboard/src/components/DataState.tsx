@@ -34,7 +34,14 @@ export function DataState({
 }): JSX.Element {
 	if (pending) return <DataSkeleton />;
 	if (error && !hasData)
-		return <LoadError what="this list" error={error} onRetry={onRetry} retrying={retrying} />;
+		return (
+			<LoadError
+				what="this list"
+				error={error}
+				onRetry={onRetry}
+				retrying={retrying}
+			/>
+		);
 	return (
 		<div className="space-y-3">
 			{error ? (

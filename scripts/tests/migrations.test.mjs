@@ -72,6 +72,15 @@ describe("findDestructive", () => {
 		assert.deepEqual(findDestructive("-- DROP TABLE x\nSELECT 1;"), []);
 	});
 
+	it("allows a plain ADD COLUMN and NOT NULL outside an ADD statement", () => {
+		assert.deepEqual(
+			findDestructive(
+				"ALTER TABLE a ADD b text;\nCREATE TABLE c (id text NOT NULL);",
+			),
+			[],
+		);
+	});
+
 	it("flags DROP COLUMN case-insensitively", () => {
 		assert.deepEqual(findDestructive("alter table a drop column b;"), [
 			"DROP COLUMN",
@@ -86,6 +95,19 @@ describe("newMigrations", () => {
 			["0002.sql"],
 		);
 	});
+
+	it("compares by basename so base and head paths may differ", () => {
+		assert.deepEqual(
+			newMigrations(
+				["base/migrations/0001.sql", "base/migrations/README.md"],
+				[
+					"apps/gateway/migrations/0001.sql",
+					"apps/gateway/migrations/0002.sql",
+				],
+			),
+			["apps/gateway/migrations/0002.sql"],
+		);
+	});
 });
 
 describe("checkMigrations", () => {
@@ -97,6 +119,19 @@ describe("checkMigrations", () => {
 			contract: [{ file: "0002.sql", release: "v1", reason: "backfill" }],
 		});
 		assert.equal(result.ok, true);
+	});
+
+	it("matches contract entries to files by basename", () => {
+		const result = checkMigrations({
+			files: [
+				{ name: "apps/gateway/migrations/0002.sql", sql: destructive },
+				{ name: "apps/gateway/migrations/0003.sql", sql: "SELECT 1;" },
+			],
+			contract: [
+				{ file: "migrations/0002.sql", release: "v1", reason: "backfill" },
+			],
+		});
+		assert.deepEqual(result, { ok: true, problems: [] });
 	});
 
 	it("fails a destructive file missing from the contract", () => {
@@ -201,6 +236,13 @@ describe("contractProblems", () => {
 				"contract.json[2]: must be an object with file, release, and reason",
 			],
 		);
+	});
+
+	it("labels entries without a file by index only", () => {
+		assert.deepEqual(contractProblems([{ release: "v1", reason: "x" }, null]), [
+			"contract.json[0]: missing file",
+			"contract.json[1]: must be an object with file, release, and reason",
+		]);
 	});
 
 	it("the repository contract is valid", () => {

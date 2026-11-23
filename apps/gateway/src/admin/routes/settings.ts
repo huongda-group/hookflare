@@ -4,10 +4,12 @@ import {
 	type Settings,
 	type StorageSettings,
 } from "@hookflare/shared";
+import { sql } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppBindings } from "../../app";
 import { readLastRun } from "../../core/archive-run";
 import { auditInsertIfChanged } from "../../core/audit";
+import { settings } from "../../core/db/schema";
 import {
 	ALERT_RULES_SETTING,
 	clearSettingsCache,
@@ -65,7 +67,9 @@ export function settingsRoutes() {
 		if (!body.ok) return body.response;
 		const { db, now } = c.var.deps;
 		const before = await readAll(db);
-		const actor = c.var.actor?.username ?? "";
+		const actor =
+			c.var.actor?.username ??
+			/* istanbul ignore next -- @preserve unreachable: requirePermission already rejected a request without an actor */ "";
 		const reason = body.value.reason;
 		// Each section is its own compare-and-swap row; updated_at must move even
 		// when two writes share a millisecond.
@@ -114,15 +118,42 @@ export function settingsRoutes() {
 				}),
 			];
 		});
-		const results = await db.batch(
-			stmts as unknown as Parameters<typeof db.batch>[0],
+		// Another PATCH may land between our read and write, making `before` stale.
+		// An empty RETURNING does not roll back the batch, so a guard runs first:
+		// when any section moved, it inserts a NULL value_json, the NOT NULL
+		// constraint fails, and D1 rolls back every section and audit row.
+		const unchanged = sql.join(
+			sections.map(
+				(s) =>
+					sql`(SELECT updated_at FROM settings WHERE key = ${s.key}) IS ${s.version}`,
+			),
+			sql` AND `,
 		);
-		// Another PATCH landed between our read and write: `before` would be stale.
-		// D1 batches are atomic, but an empty RETURNING does not roll back; check each upsert.
-		const conflict = sections.some(
-			(_, i) => (results[i * 2] as unknown[]).length === 0,
+		const guard = db.insert(settings).select(
+			db
+				.select({
+					key: sql<string>`'__settings_conflict__'`.as("key"),
+					valueJson: sql<string>`NULL`.as("value_json"),
+					updatedAt: sql<number>`0`.as("updated_at"),
+				})
+				.from(sql`(SELECT 1)`)
+				.where(sql`NOT (${unchanged})`),
 		);
-		if (conflict) return c.json({ error: "conflict" }, 409);
+		try {
+			await db.batch([guard, ...stmts] as unknown as Parameters<
+				typeof db.batch
+			>[0]);
+		} catch (err) {
+			const now = await readAll(db);
+			const current: Record<string, number | null> = {
+				[RETRY_DEFAULTS_KEY]: now.retry.updatedAt,
+				[ALERT_RULES_SETTING.key]: now.alertRules.updatedAt,
+				[STORAGE_SETTING.key]: now.storage.updatedAt,
+			};
+			if (sections.some((s) => current[s.key] !== s.version))
+				return c.json({ error: "conflict" }, 409);
+			throw err;
+		}
 		clearSettingsCache();
 		return c.json({
 			...toSettings(await readAll(db)),

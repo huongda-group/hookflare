@@ -26,6 +26,7 @@ export function SecretRevealDialog({
 			open={secret !== null}
 			onOpenChange={(o) => {
 				// Every close path (Escape, outside click, X) is gated inside the content.
+				/* istanbul ignore else -- @preserve unreachable: Radix calls onOpenChange(true) only from a Trigger, and this dialog has none */
 				if (!o) onClose();
 			}}
 		>
@@ -74,7 +75,12 @@ function SecretRevealContent({
 				<Button
 					variant="outline"
 					size="sm"
-					onClick={() => void navigator.clipboard?.writeText(secret ?? "")}
+					onClick={() =>
+						void navigator.clipboard?.writeText(
+							secret ??
+								/* istanbul ignore next -- @preserve unreachable: the dialog is closed while secret is null */ "",
+						)
+					}
 				>
 					Copy
 				</Button>

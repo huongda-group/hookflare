@@ -1,7 +1,7 @@
 import { DEFAULT_STORAGE_SETTINGS } from "@hookflare/shared";
 import { eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
-import { matchChannels } from "../../src/core/db/alerts";
+import { matchChannels, type OpenAlertRow } from "../../src/core/db/alerts";
 import { backups, settings } from "../../src/core/db/schema";
 import { STORAGE_SETTING } from "../../src/core/settings";
 import {
@@ -9,7 +9,9 @@ import {
 	consecutiveFailures,
 	DEAD_CURSOR_KEY,
 	d1Storage,
+	FAILURES_QUIET_MS,
 	newDead,
+	readD1SizeBytes,
 	stuckPending,
 } from "../../src/jobs/alerts/rules";
 import { RULES, resetAlerts } from "../helpers/alerts";
@@ -32,12 +34,90 @@ describe("consecutive_failures", () => {
 		const c = await seedPipeline(deps, {
 			destination: { consecutiveFailures: 9, status: "disabled" },
 		});
-		const ids = (await consecutiveFailures(deps.db, RULES)).map(
+		const ids = (await consecutiveFailures(deps.db, RULES, [], NOW)).map(
 			(x) => x.resourceId,
 		);
 		expect(ids).toContain(a.destination.id);
 		expect(ids).not.toContain(b.destination.id);
 		expect(ids).not.toContain(c.destination.id);
+	});
+
+	const openCf = (resourceId: string, detailsJson: string): OpenAlertRow => ({
+		id: `alr_${resourceId}`,
+		rule: "consecutive_failures",
+		resourceType: "destination",
+		resourceId,
+		projectId: "prj_x",
+		status: "open",
+		openedAt: NOW - 3_600_000,
+		lastNotifiedAt: null,
+		resolvedAt: null,
+		detailsJson,
+	});
+
+	it("carries a cleared incident over until it has been clear for FAILURES_QUIET_MS", async () => {
+		const run = (detailsJson: string) =>
+			consecutiveFailures(
+				deps.db,
+				RULES,
+				[openCf("dst_gone", detailsJson)],
+				NOW,
+			);
+		// First run under the threshold: stamps cleared_at.
+		expect(await run('{"consecutive_failures":7}')).toEqual([
+			{
+				rule: "consecutive_failures",
+				resourceType: "destination",
+				resourceId: "dst_gone",
+				projectId: "prj_x",
+				details: { consecutive_failures: 7, cleared_at: NOW },
+				carryOver: true,
+				updateDetails: true,
+			},
+		]);
+		// Inside the quiet period: carried over, nothing to write.
+		const inside = JSON.stringify({ cleared_at: NOW - FAILURES_QUIET_MS + 1 });
+		expect(await run(inside)).toMatchObject([
+			{ resourceId: "dst_gone", carryOver: true },
+		]);
+		expect((await run(inside))[0]).not.toHaveProperty("updateDetails");
+		// Quiet period over: no longer active, so the job resolves it.
+		expect(
+			await run(JSON.stringify({ cleared_at: NOW - FAILURES_QUIET_MS })),
+		).toEqual([]);
+		// Corrupt or non-object details, or a non-numeric cleared_at, restart the clock.
+		for (const bad of ["{oops", "[1]", "null", '{"cleared_at":"x"}'])
+			expect((await run(bad))[0]?.details).toMatchObject({ cleared_at: NOW });
+	});
+
+	it("drops cleared_at when the destination crosses the threshold again", async () => {
+		const p = await seedPipeline(deps, {
+			destination: { consecutiveFailures: 6 },
+		});
+		const id = p.destination.id;
+		const again = await consecutiveFailures(
+			deps.db,
+			RULES,
+			[openCf(id, JSON.stringify({ cleared_at: NOW - 1 }))],
+			NOW,
+		);
+		expect(again.find((a) => a.resourceId === id)).toEqual({
+			rule: "consecutive_failures",
+			resourceType: "destination",
+			resourceId: id,
+			projectId: p.project.id,
+			details: { consecutive_failures: 6 },
+			updateDetails: true,
+		});
+		const steady = await consecutiveFailures(
+			deps.db,
+			RULES,
+			[openCf(id, '{"consecutive_failures":5}')],
+			NOW,
+		);
+		expect(steady.find((a) => a.resourceId === id)).not.toHaveProperty(
+			"updateDetails",
+		);
 	});
 });
 
@@ -66,6 +146,22 @@ describe("new_dead (M5-13)", () => {
 		await seedDelivery(deps, p, {
 			status: "dead",
 			delivery: { completedAt: NOW - 3_600_000 },
+		});
+		const r = await newDead(deps.db, RULES, [], NOW);
+		expect(r.active).toEqual([]);
+		expect(r.cursor).toEqual({ from: null, to: NOW - 10_000 });
+	});
+
+	it("treats a cursor without a numeric `at` as missing and restarts without alerting", async () => {
+		await deps.db.insert(settings).values({
+			key: DEAD_CURSOR_KEY,
+			valueJson: JSON.stringify({ at: "yesterday" }),
+			updatedAt: 1,
+		});
+		const p = await seedPipeline(deps);
+		await seedDelivery(deps, p, {
+			status: "dead",
+			delivery: { completedAt: NOW - 60_000 },
 		});
 		const r = await newDead(deps.db, RULES, [], NOW);
 		expect(r.active).toEqual([]);
@@ -162,6 +258,31 @@ describe("new_dead scan bounds (Minor 6)", () => {
 	});
 });
 
+describe("new_dead scan with a tied boundary", () => {
+	it("takes the whole millisecond when every scanned row shares it, so the cursor still moves", async () => {
+		const { DEAD_MAX_DESTINATIONS, scanDead } = await import(
+			"../../src/jobs/alerts/rules"
+		);
+		const from = NOW + 90_000_000; // clear of rows other tests leave behind
+		const at = from + 5;
+		const ids: string[] = [];
+		for (let i = 0; i <= DEAD_MAX_DESTINATIONS; i++) {
+			const p = await seedPipeline(deps);
+			const { deliveryId } = await seedDelivery(deps, p, {
+				status: "dead",
+				delivery: { completedAt: at },
+			});
+			ids.push(deliveryId);
+		}
+		const r = await scanDead(deps.db, from, from + 10_000);
+		// More destinations than one run takes, all in one millisecond: the
+		// cursor cannot stop inside it, so the run takes all of them.
+		expect(r.rows).toHaveLength(DEAD_MAX_DESTINATIONS + 1);
+		expect(new Set(r.rows.map((x) => x.id))).toEqual(new Set(ids));
+		expect(r.to).toBe(at);
+	});
+});
+
 describe("d1_storage hysteresis", () => {
 	it("opens at d1_warn_pct and resolves only below d1_warn_pct − 5", async () => {
 		const GB = 1024 ** 3;
@@ -180,6 +301,16 @@ describe("d1_storage hysteresis", () => {
 		expect(await at(7.9 * GB, false)).toHaveLength(0);
 		expect(await at(7.6 * GB, true)).toHaveLength(1);
 		expect(await at(7.4 * GB, true)).toHaveLength(0);
+	});
+
+	it("reads the size from query metadata and treats a missing size as empty", async () => {
+		const withSize = (meta: object) =>
+			({ run: async () => ({ meta }) }) as unknown as typeof deps.db;
+		expect(
+			await d1Storage(withSize({ size_after: 9 * 1024 ** 3 }), RULES, []),
+		).toMatchObject([{ rule: "d1_storage", details: { percent: 90 } }]);
+		expect(await d1Storage(withSize({}), RULES, [])).toEqual([]);
+		expect(await readD1SizeBytes(withSize({}))).toBe(0);
 	});
 });
 
@@ -249,6 +380,17 @@ describe("backup_stale", () => {
 		expect(
 			await backupStale(stub, { ...ENABLED, backup_enabled: false }),
 		).toEqual([]);
+	});
+
+	it("opens without a grace period when backups ran but none ever verified", async () => {
+		// Fresh deployment by the wall clock, but a backup already failed.
+		const wallClock = { db: deps.db, now: () => Date.now() };
+		await seedBackup({ status: "failed", startedAt: Date.now() - 60_000 });
+		const [a] = await backupStale(wallClock, ENABLED);
+		expect(a).toMatchObject({
+			rule: "backup_stale",
+			details: { last_verified_at: null },
+		});
 	});
 
 	it("gives a fresh deployment a grace period when no backup row exists", async () => {

@@ -6,6 +6,10 @@
 
 A destination is an HTTPS backend endpoint belonging to a project. Admins configure URL, timeout, retry overrides, concurrency, rate limits, and signing secrets. Operators can pause/resume and send test deliveries.
 
+Destination URLs can carry credentials in the path or query, so only actors with `config.write` see them in full. Every other response (list, detail, pause/resume) returns the origin, plus `/…` when anything follows it (for example `https://api.example.com/…`).
+
+A test delivery sends the default `hookflare.test` envelope; a custom `payload` requires `config.write` (`403 {error:"forbidden", required:"config.write"}` otherwise), because it is signed with the real secret. Every test request carries the header `x-hookflare-test: 1`, and the `destination.tested` audit entry records the payload's SHA-256 hex (`payload_sha256`), never the payload itself.
+
 Paused destinations hold work without consuming attempts. Disabled destinations do not accept ordinary delivery. Outbound requests use SSRF checks, credential-header filtering, and manual redirects. DNS/network failures and blocked addresses have distinct handling; see [delivery](delivery.md).
 
 ## Design and interaction

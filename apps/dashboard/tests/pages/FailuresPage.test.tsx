@@ -370,4 +370,66 @@ describe("Failures", () => {
 			).toBeInTheDocument();
 		});
 	});
+	it("toggles unresolved-only through the URL and the request", async () => {
+		const seen: URLSearchParams[] = [];
+		server.use(
+			http.get(apiUrl("/failures"), ({ request }) => {
+				seen.push(new URL(request.url).searchParams);
+				return HttpResponse.json({ data: [], next_cursor: null });
+			}),
+		);
+		const { user, router } = renderApp("/failures?project_id=prj_1");
+		const box = await screen.findByRole("checkbox", {
+			name: "Unresolved only (no successful replay)",
+		});
+		expect(box).toBeChecked();
+		await user.click(box);
+		await waitFor(() =>
+			expect(router.state.location.search).toMatchObject({ unresolved: false }),
+		);
+		await waitFor(() => expect(seen.at(-1)?.get("unresolved")).toBe("false"));
+		expect(box).not.toBeChecked();
+	});
+
+	it("clears the selection from the selection banner", async () => {
+		server.use(
+			http.get(apiUrl("/failures"), () =>
+				HttpResponse.json({ data: [failure()], next_cursor: null }),
+			),
+		);
+		const { user } = renderApp("/failures", { role: "operator" });
+		await user.click(await screen.findByLabelText("Select dlv_1"));
+		expect(
+			screen.getByRole("button", { name: "Replay selected (1)" }),
+		).toBeEnabled();
+		await user.click(screen.getByRole("button", { name: "Clear selection" }));
+		expect(screen.getByLabelText("Select dlv_1")).not.toBeChecked();
+		expect(
+			screen.getByRole("button", { name: "Replay selected (0)" }),
+		).toBeDisabled();
+		expect(screen.queryByText(/of up to 100 selected/)).not.toBeInTheDocument();
+	});
+
+	it("falls back to the error text, then a dash, without an HTTP status", async () => {
+		server.use(
+			http.get(apiUrl("/failures"), () =>
+				HttpResponse.json({
+					data: [
+						failure({ last_http_status: null, last_error: "connect timeout" }),
+						failure({ id: "dlv_2", last_http_status: null, last_error: null }),
+					],
+					next_cursor: null,
+				}),
+			),
+		);
+		renderApp("/failures");
+		expect(await screen.findByText("connect timeout")).toBeInTheDocument();
+		const headers = screen
+			.getAllByRole("columnheader")
+			.map((h) => h.textContent);
+		const row = screen.getByText("dlv_2").closest("tr") as HTMLElement;
+		expect(
+			within(row).getAllByRole("cell")[headers.indexOf("Last error")],
+		).toHaveTextContent(/^—$/);
+	});
 });

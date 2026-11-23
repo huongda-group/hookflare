@@ -177,6 +177,10 @@ export function ReplayDialog({
 	const awaiting = data?.replayed.filter((r) => !r.enqueued) ?? [];
 	const skipped = data?.skipped ?? [];
 	const close = (o: boolean) => {
+		// A pending replay cannot be dismissed: Escape, an outside click, and
+		// Cancel all wait until the request settles and its outcome is shown.
+		if (m.isPending) return;
+		/* istanbul ignore else -- @preserve unreachable: Radix calls onOpenChange(true) only from a Trigger, and this dialog has none, and the buttons only close */
 		if (!o) {
 			m.reset();
 			setReason("");
@@ -240,7 +244,10 @@ export function ReplayDialog({
 										<OutcomeRow
 											key={r.to}
 											entry={r}
-											projectId={submitted?.projectId ?? projectId}
+											projectId={
+												submitted?.projectId ??
+												/* istanbul ignore next -- @preserve unreachable: result data implies the submitted variables */ projectId
+											}
 										/>
 									))}
 								</ul>
@@ -256,7 +263,10 @@ export function ReplayDialog({
 										<OutcomeRow
 											key={r.to}
 											entry={r}
-											projectId={submitted?.projectId ?? projectId}
+											projectId={
+												submitted?.projectId ??
+												/* istanbul ignore next -- @preserve unreachable: result data implies the submitted variables */ projectId
+											}
 										/>
 									))}
 								</ul>
@@ -301,7 +311,11 @@ export function ReplayDialog({
 							<p className="text-sm text-failure">{errorText(m.error)}</p>
 						)}
 						<DialogFooter>
-							<Button variant="outline" onClick={() => close(false)}>
+							<Button
+								variant="outline"
+								disabled={m.isPending}
+								onClick={() => close(false)}
+							>
 								Cancel
 							</Button>
 							<Button disabled={m.isPending} onClick={submit}>

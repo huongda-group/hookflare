@@ -118,6 +118,39 @@ describe("crypto", () => {
 		);
 	});
 
+	it("fails on a kid that matches neither the current nor the previous key", async () => {
+		const stored = await encryptSecret(
+			{ SECRETS_KEY: randomKeyB64() },
+			"s3cr3t",
+			"ctx",
+		);
+		const env: SecretsEnv = {
+			SECRETS_KEY: randomKeyB64(),
+			SECRETS_KEY_PREVIOUS: randomKeyB64(),
+		};
+		await expect(decryptSecret(env, stored, "ctx")).rejects.toThrow(
+			/unknown key id/,
+		);
+	});
+
+	it("refuses to decrypt without SECRETS_KEY (SecretKeyError, not DecryptError)", async () => {
+		const stored = await encryptSecret(
+			{ SECRETS_KEY: randomKeyB64() },
+			"s3cr3t",
+			"ctx",
+		);
+		await expect(
+			decryptSecret({ SECRETS_KEY: "" }, stored, "ctx"),
+		).rejects.toBeInstanceOf(SecretKeyError);
+	});
+
+	it("rejects a non-string stored value (e.g. a NULL column) as malformed", async () => {
+		const env: SecretsEnv = { SECRETS_KEY: randomKeyB64() };
+		await expect(
+			decryptSecret(env, null as unknown as string, "ctx"),
+		).rejects.toBeInstanceOf(DecryptError);
+	});
+
 	it("rejects malformed stored values", async () => {
 		const env: SecretsEnv = { SECRETS_KEY: randomKeyB64() };
 		for (const bad of ["", "v1.only", "v2.abcdef01.eA.eA", "not-a-secret"]) {
@@ -175,6 +208,8 @@ describe("crypto", () => {
 			`${v}.${kid}.${iv}.${ct.slice(0, 4)}`,
 			`${v}.${kid}.${iv.slice(0, 2)}.${ct}`,
 			`${v}.${kid}.@@@@.${ct}`,
+			// 4n+1 base64url characters can never encode whole bytes.
+			`${v}.${kid}.${iv}.${ct.slice(0, 4 * Math.floor(ct.length / 4) - 3)}`,
 			`${v}.${kid}.${iv}.${ct}x`,
 		]) {
 			await expect(decryptSecret(env, bad, "ctx")).rejects.toBeInstanceOf(

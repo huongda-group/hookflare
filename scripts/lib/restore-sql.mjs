@@ -171,9 +171,14 @@ function findCycle(names, parents) {
 	const visit = (name) => {
 		state.set(name, 1);
 		stack.push(name);
+		// Every visited name is a manifest table, so `parents` always has it.
+		/* node:coverage ignore next */
 		for (const p of parents.get(name) ?? []) {
 			if (state.get(p) === 1) {
+				// Self references are excluded, so a cycle spans two or more tables
+				// and the join is never empty.
 				return (
+					/* node:coverage ignore next */
 					[...stack.slice(stack.indexOf(p)), p].slice(0, -1).join(" -> ") || p
 				);
 			}
@@ -195,6 +200,9 @@ function findCycle(names, parents) {
 				return found;
 			}
 		}
+		// Only called when tableOrder made no progress, so a cycle always
+		// exists and this loop returns; the fallback below never runs.
+		/* node:coverage ignore next 3 */
 	}
 	return names.join(" -> ");
 }
@@ -247,6 +255,8 @@ function textChunks(value, budget) {
 	let bytes = 0;
 	for (const ch of value) {
 		const quote = ch === "'";
+		// `for…of` yields non-empty strings, so codePointAt(0) is defined.
+		/* node:coverage ignore next */
 		const n = quote ? 2 : codePointBytes(ch.codePointAt(0) ?? 0);
 		if (bytes + n > budget && chunk.length > 0) {
 			chunks.push(chunk);

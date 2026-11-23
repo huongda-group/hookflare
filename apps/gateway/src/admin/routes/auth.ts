@@ -243,7 +243,8 @@ export function authRoutes() {
 		);
 		// Statement 1 changed no rows: onboarding is already closed (spec §6.3).
 		const changes =
-			(results[0] as { meta?: { changes?: number } })?.meta?.changes ?? 0;
+			(results[0] as { meta?: { changes?: number } })?.meta?.changes ??
+			/* istanbul ignore next -- @preserve unreachable: D1 always reports meta.changes for a write */ 0;
 		if (changes === 0) return c.json({ error: "setup_closed" }, 409);
 		setSessionCookie(c, token);
 		return c.json({ username, role: "admin" }, 201);
@@ -291,11 +292,22 @@ export function authRoutes() {
 		}
 
 		const token = randomToken();
-		await insertSessionStmt(db, {
+		const insert = insertSessionStmt(db, {
 			idHash: await sha256Hex(token),
 			username,
 			now: now(),
 		});
+		// The cookie is replaced below, so a session it pointed to would only
+		// linger in D1 until expiry: end it in the same batch.
+		const previous = getCookie(c, SESSION_COOKIE);
+		if (previous) {
+			await db.batch([
+				deleteSessionStmt(db, await sha256Hex(previous)),
+				insert,
+			]);
+		} else {
+			await insert;
+		}
 		setSessionCookie(c, token);
 		c.var.logger.info("admin.login_ok", { username });
 		return c.body(null, 204);

@@ -61,7 +61,9 @@ function encodeRandom(rand: Uint8Array): string {
 /** Increment a 10-byte big-endian counter in place. Returns false on overflow. */
 function increment(rand: Uint8Array): boolean {
 	for (let i = rand.length - 1; i >= 0; i--) {
-		const cur = rand[i] ?? 0;
+		const cur =
+			rand[i] ??
+			/* istanbul ignore next -- @preserve unreachable: i is always within rand's bounds; `??` only satisfies noUncheckedIndexedAccess */ 0;
 		rand[i] = (cur + 1) & 0xff;
 		if (rand[i] !== 0) {
 			return true;
@@ -153,7 +155,10 @@ export function idTimestamp(id: string): number {
 	const timePart = ulid.slice(0, TIME_LEN);
 	let ms = 0;
 	for (const ch of timePart) {
-		ms = ms * 32 + (DECODING[ch] ?? 0);
+		ms =
+			ms * 32 +
+			(DECODING[ch] ??
+				/* istanbul ignore next -- @preserve unreachable: isId() already rejected characters outside the ULID alphabet */ 0);
 	}
 	return ms;
 }

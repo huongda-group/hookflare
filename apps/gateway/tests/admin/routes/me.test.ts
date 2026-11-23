@@ -1,8 +1,11 @@
 import { eq } from "drizzle-orm";
-import { beforeEach, describe, expect, it } from "vitest";
+import { Hono } from "hono";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { hashPassword, verifyPassword } from "../../../src/admin/auth/password";
 import { randomToken, sha256Hex } from "../../../src/admin/auth/secrets";
 import { SESSION_COOKIE } from "../../../src/admin/auth/session";
+import { meRoutes } from "../../../src/admin/routes/me";
+import type { AppBindings } from "../../../src/app";
 import { createApp } from "../../../src/app";
 import { auditLogs, users } from "../../../src/core/db/schema";
 import { insertSessionStmt } from "../../../src/core/db/sessions";
@@ -14,6 +17,7 @@ import {
 	uniqueUsername,
 } from "../../helpers/admin";
 import { testDeps } from "../../helpers/deps";
+import { denyAllLimiter, testEnv } from "../../helpers/env";
 
 const ORIGIN = "https://hookflare.example.com";
 const ADMIN_API = `${ORIGIN}/api/admin/v1`;
@@ -162,6 +166,47 @@ describe("POST /me/password", () => {
 		expect(await res.json()).toEqual({ error: "password_equals_username" });
 	});
 
+	it("rate-limits per username before PBKDF2 and returns 429 when rejected", async () => {
+		const keys: string[] = [];
+		const limiter = {
+			limit: async ({ key }: { key: string }) => {
+				keys.push(key);
+				return { success: true };
+			},
+		} as unknown as RateLimit;
+		const deps = testDeps({ env: testEnv({ LOGIN_LIMITER: limiter }) });
+		const api = await adminApp(deps, { role: "viewer" });
+		await setPassword(deps, api.username, PASSWORD);
+		const ok = await api.request("POST", "/me/password", {
+			current_password: "not-the-password",
+			new_password: NEW_PASSWORD,
+		});
+		expect(ok.status).toBe(401);
+		expect(keys).toEqual([`password:${api.username}`]);
+
+		const denied = testDeps({
+			env: testEnv({ LOGIN_LIMITER: denyAllLimiter }),
+		});
+		const blocked = await adminApp(denied, { role: "viewer" });
+		await setPassword(denied, blocked.username, PASSWORD);
+		const deriveSpy = vi.spyOn(crypto.subtle, "deriveBits");
+		try {
+			const res = await blocked.request("POST", "/me/password", {
+				current_password: PASSWORD,
+				new_password: NEW_PASSWORD,
+			});
+			expect(res.status).toBe(429);
+			expect(await res.json()).toEqual({ error: "too_many_attempts" });
+			expect(deriveSpy).not.toHaveBeenCalled();
+		} finally {
+			deriveSpy.mockRestore();
+		}
+		const row = await getUser(denied.db, blocked.username);
+		expect(await verifyPassword(PASSWORD, row?.passwordHash ?? null)).toBe(
+			true,
+		);
+	});
+
 	it("requires authentication", async () => {
 		const deps = testDeps();
 		const res = await createApp({ createDeps: () => deps }).request(
@@ -177,5 +222,44 @@ describe("POST /me/password", () => {
 			deps.env,
 		);
 		expect(res.status).toBe(401);
+	});
+	it("rejects an invalid body with 400 and keeps the password", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps, { role: "viewer" });
+		await setPassword(deps, api.username, PASSWORD);
+		const res = await api.request("POST", "/me/password", {
+			current_password: PASSWORD,
+		});
+		expect(res.status).toBe(400);
+		expect(await res.json()).toMatchObject({ error: "invalid_request" });
+		const row = await getUser(deps.db, api.username);
+		expect(await verifyPassword(PASSWORD, row?.passwordHash ?? null)).toBe(
+			true,
+		);
+	});
+});
+
+describe("me routes without the auth middleware", () => {
+	it("fail closed with 403 when no actor is set", async () => {
+		const deps = testDeps();
+		const app = new Hono<AppBindings>()
+			.use(async (c, next) => {
+				c.set("deps", deps);
+				await next();
+			})
+			.route("/me", meRoutes());
+		const me = await app.request("/me");
+		expect(me.status).toBe(403);
+		expect(await me.json()).toEqual({ error: "forbidden" });
+		const pw = await app.request("/me/password", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				current_password: PASSWORD,
+				new_password: NEW_PASSWORD,
+			}),
+		});
+		expect(pw.status).toBe(403);
+		expect(await pw.json()).toEqual({ error: "forbidden" });
 	});
 });

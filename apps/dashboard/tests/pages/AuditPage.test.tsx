@@ -121,4 +121,42 @@ describe("Audit", () => {
 		await new Promise((r) => setTimeout(r, 100));
 		expect(hits).toBe(0);
 	});
+	it("applies a filter on blur and drops it when cleared", async () => {
+		const seen: URLSearchParams[] = [];
+		server.use(
+			http.get(apiUrl("/audit-logs"), ({ request }) => {
+				seen.push(new URL(request.url).searchParams);
+				return HttpResponse.json({
+					data: [{ ...row, reason: null, diff: null }],
+					next_cursor: null,
+				});
+			}),
+		);
+		const { user, router } = renderApp("/audit?action=destination.updated");
+		const actorCell = await screen.findByText("ops-lead");
+		const cells = actorCell.closest("tr")?.querySelectorAll("td") ?? [];
+		// Reason and Diff columns both fall back to a dash.
+		expect(cells[4]).toHaveTextContent("—");
+		expect(cells[5]).toHaveTextContent("—");
+		expect(screen.queryByRole("button", { name: "Show diff" })).toBeNull();
+
+		await user.type(screen.getByLabelText("Actor"), "ops-lead");
+		await user.tab();
+		await waitFor(() =>
+			expect(router.state.location.search).toEqual({
+				action: "destination.updated",
+				actor: "ops-lead",
+			}),
+		);
+		await waitFor(() => expect(seen.at(-1)?.get("actor")).toBe("ops-lead"));
+
+		await user.clear(screen.getByLabelText("Actor"));
+		await user.tab();
+		await waitFor(() =>
+			expect(router.state.location.search).toEqual({
+				action: "destination.updated",
+			}),
+		);
+		await waitFor(() => expect(seen.at(-1)?.has("actor")).toBe(false));
+	});
 });

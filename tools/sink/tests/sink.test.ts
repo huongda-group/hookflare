@@ -1,4 +1,9 @@
-import { SELF } from "cloudflare:test";
+import {
+	env,
+	runDurableObjectAlarm,
+	runInDurableObject,
+	SELF,
+} from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { setSleep, shardFor } from "../src/index";
 
@@ -32,6 +37,16 @@ async function statsOf(run: string): Promise<{
 }
 
 describe("sink", () => {
+	// Must run before any test calls setSleep: the default sleep cannot be
+	// restored once replaced.
+	it("waits delay_ms with the real sleep before answering", async () => {
+		const run = runId();
+		const started = Date.now();
+		const res = await postHook(run, "msg_real_delay", "?delay_ms=20");
+		expect(res.status).toBe(200);
+		expect(Date.now() - started).toBeGreaterThanOrEqual(20);
+	});
+
 	it("records and merges across shards", async () => {
 		const run = runId();
 		for (let i = 0; i < 20; i++) {
@@ -169,5 +184,59 @@ describe("sink", () => {
 	it("unknown path returns 404", async () => {
 		const res = await SELF.fetch("https://sink.test/nope");
 		expect(res.status).toBe(404);
+	});
+
+	it("ignores a non-numeric delay_ms", async () => {
+		const seen: number[] = [];
+		setSleep(async (ms: number) => {
+			seen.push(ms);
+		});
+		try {
+			const res = await postHook(runId(), "msg_nan", "?delay_ms=abc");
+			expect(res.status).toBe(200);
+			expect(seen.every((ms) => ms === 0)).toBe(true);
+		} finally {
+			setSleep(
+				(ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+			);
+		}
+	});
+
+	it("returns 404 for an unsupported method on a run path", async () => {
+		const res = await SELF.fetch(`https://sink.test/r/${runId()}/hook`);
+		expect(res.status).toBe(404);
+	});
+
+	it("the alarm purges hits older than 7 days and re-arms itself", async () => {
+		const run = runId();
+		await postHook(run, "msg_fresh");
+		const stub = env.SHARD.get(
+			env.SHARD.idFromName(`shard-${shardFor("msg_fresh")}`),
+		);
+		const eightDaysAgo = Date.now() - 8 * 24 * 60 * 60 * 1000;
+		await runInDurableObject(stub, (_instance, state) => {
+			state.storage.sql.exec(
+				"INSERT INTO hits (run, webhook_id, status, at) VALUES (?, ?, ?, ?)",
+				run,
+				"msg_stale",
+				200,
+				eightDaysAgo,
+			);
+		});
+		expect(await runDurableObjectAlarm(stub)).toBe(true);
+		const remaining = await runInDurableObject(stub, (_instance, state) =>
+			state.storage.sql
+				.exec<{ webhook_id: string }>(
+					"SELECT webhook_id FROM hits WHERE run = ? ORDER BY webhook_id",
+					run,
+				)
+				.toArray()
+				.map((r) => r.webhook_id),
+		);
+		expect(remaining).toEqual(["msg_fresh"]);
+		const next = await runInDurableObject(stub, (_instance, state) =>
+			state.storage.getAlarm(),
+		);
+		expect(next).toBeGreaterThan(Date.now());
 	});
 });

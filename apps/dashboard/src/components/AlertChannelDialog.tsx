@@ -4,7 +4,7 @@ import {
 	type AlertChannel,
 	type AlertChannelType,
 } from "@hookflare/shared";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { FormField } from "@/components/FormField";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -57,6 +57,9 @@ export function AlertChannelDialog({
 		channel?.project_ids ?? [],
 	);
 	const [error, setError] = useState<string | null>(null);
+	const [saving, setSaving] = useState(false);
+	// The ref blocks a second click that lands before the disabled state renders.
+	const inFlight = useRef(false);
 
 	const configTouched =
 		type === "telegram"
@@ -74,6 +77,10 @@ export function AlertChannelDialog({
 			setError("Enter the bot token again to change the chat ID");
 			return;
 		}
+		/* istanbul ignore if -- @preserve unreachable: React commits the disabled state synchronously after a discrete click, so a second click never reaches this handler; the ref is defense in depth */
+		if (inFlight.current) return;
+		inFlight.current = true;
+		setSaving(true);
 		setError(null);
 		const body = {
 			name,
@@ -87,6 +94,9 @@ export function AlertChannelDialog({
 			onSaved();
 		} catch (err) {
 			setError(serverMessage(err));
+		} finally {
+			inFlight.current = false;
+			setSaving(false);
 		}
 	}
 
@@ -193,7 +203,9 @@ export function AlertChannelDialog({
 					{error && <p className="text-sm text-failure">{error}</p>}
 				</div>
 				<DialogFooter>
-					<Button onClick={save}>Save</Button>
+					<Button disabled={saving} onClick={save}>
+						Save
+					</Button>
 				</DialogFooter>
 			</DialogContent>
 		</Dialog>

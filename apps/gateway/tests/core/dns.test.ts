@@ -70,4 +70,22 @@ describe("createDohResolver", () => {
 			DnsError,
 		);
 	});
+
+	it("throws DnsError on a non-JSON DoH body", async () => {
+		const f = vi.fn(
+			async () => new Response("<html>", { status: 200 }),
+		) as unknown as typeof fetch;
+		await expect(createDohResolver(f)("x.example")).rejects.toThrow(
+			"doh invalid json",
+		);
+	});
+
+	it("reports a thrown non-Error as 'unknown' without echoing it", async () => {
+		const f = vi.fn(async () => {
+			throw "secret-ish string";
+		}) as unknown as typeof fetch;
+		await expect(createDohResolver(f)("x.example")).rejects.toThrow(
+			"doh request failed: unknown",
+		);
+	});
 });

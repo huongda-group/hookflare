@@ -1,7 +1,14 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { renderHook, screen, waitFor, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
-import { afterEach, expect, it, vi } from "vitest";
-import { project } from "../helpers/fixtures";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { alertLinkScope, useActiveProject } from "@/lib/project-selection";
+import {
+	alert,
+	destination,
+	project,
+	source,
+	webhookEvent,
+} from "../helpers/fixtures";
 import { chooseProject, renderApp } from "../helpers/render";
 import { apiUrl, server } from "../helpers/server";
 
@@ -118,4 +125,122 @@ it("works when browser storage is unavailable", async () => {
 	} finally {
 		read.mockRestore();
 	}
+});
+
+describe("alertLinkScope", () => {
+	it("reads the project, deployment, and legacy scopes of an alert link", () => {
+		expect(alertLinkScope(new URLSearchParams("project_id=prj_a"))).toBe(
+			"project",
+		);
+		expect(alertLinkScope(new URLSearchParams("scope=deployment"))).toBe(
+			"deployment",
+		);
+		expect(alertLinkScope(new URLSearchParams("scope=project"))).toBe(
+			"project",
+		);
+		expect(alertLinkScope(new URLSearchParams(""))).toBe("legacy");
+	});
+});
+
+describe("ActiveProjectContext default", () => {
+	it("is inert outside the shell", () => {
+		const { result } = renderHook(() => useActiveProject());
+		expect(result.current.projectId).toBeUndefined();
+		expect(() => result.current.selectProject("prj_a")).not.toThrow();
+	});
+});
+
+describe("switching projects", () => {
+	const ops = project({ id: "prj_b", name: "Ops" });
+	const twoProjects = () => catalog([a, ops]);
+	const details = () =>
+		server.use(
+			http.get(apiUrl("/sources/src_1"), () => HttpResponse.json(source())),
+			http.get(apiUrl("/destinations/dst_1"), () =>
+				HttpResponse.json(destination()),
+			),
+			http.get(apiUrl("/events/evt_1"), () =>
+				HttpResponse.json(webhookEvent()),
+			),
+			http.get(apiUrl("/alerts/alr_1"), () =>
+				HttpResponse.json({
+					...alert({ project_id: "prj_a" }),
+					notifications: [],
+				}),
+			),
+		);
+
+	it.each([
+		[
+			"/endpoints/sources/src_1?project_id=prj_a",
+			"/endpoints",
+			{ project_id: "prj_b", tab: "sources" },
+		],
+		[
+			"/endpoints/destinations/dst_1?project_id=prj_a",
+			"/endpoints",
+			{ project_id: "prj_b", tab: "destinations" },
+		],
+		["/events/evt_1?project_id=prj_a", "/events", { project_id: "prj_b" }],
+		[
+			"/alerts/alr_1?project_id=prj_a",
+			"/alerts",
+			{ project_id: "prj_b", status: "open" },
+		],
+	])(
+		"leaves the detail page %s for its collection",
+		async (path, to, search) => {
+			twoProjects();
+			details();
+			const { user, router } = renderApp(path);
+			expect(await picker()).toHaveTextContent("Payments");
+			await chooseProject(user, "Ops");
+			await waitFor(() => expect(router.state.location.pathname).toBe(to));
+			expect(router.state.location.search).toEqual(search);
+		},
+	);
+
+	it("only remembers the choice on a page outside project scope", async () => {
+		twoProjects();
+		const { user, router } = renderApp("/projects");
+		expect(await picker()).toHaveTextContent("Payments");
+		await chooseProject(user, "Ops");
+		await waitFor(() => expect(window.localStorage.getItem(key)).toBe("prj_b"));
+		expect(await picker()).toHaveTextContent("Ops");
+		expect(router.state.location.pathname).toBe("/projects");
+		expect(router.state.location.search).toEqual({});
+	});
+
+	it("keeps failure filters when scoping, and drops the destination on a switch", async () => {
+		twoProjects();
+		const { user, router } = renderApp(
+			"/failures?tab=failed_final&destination_id=dst_1",
+		);
+		await waitFor(() =>
+			expect(router.state.location.search).toMatchObject({
+				project_id: "prj_a",
+				tab: "failed_final",
+				destination_id: "dst_1",
+			}),
+		);
+		await chooseProject(user, "Ops");
+		await waitFor(() =>
+			expect(router.state.location.search).toMatchObject({
+				project_id: "prj_b",
+				tab: "failed_final",
+			}),
+		);
+		expect(router.state.location.search).not.toHaveProperty("destination_id");
+	});
+
+	it("keeps a resolved alert filter when scoping the alert list", async () => {
+		twoProjects();
+		const { router } = renderApp("/alerts?status=resolved");
+		await waitFor(() =>
+			expect(router.state.location.search).toMatchObject({
+				project_id: "prj_a",
+				status: "resolved",
+			}),
+		);
+	});
 });

@@ -28,6 +28,7 @@ export function TimeText({
 	});
 
 	return (
+		// biome-ignore lint/a11y/noStaticElementInteractions: hover mirrors the inner button's focus/click handlers
 		<span
 			className={cn("inline-flex flex-wrap items-center gap-x-1", className)}
 			onMouseEnter={() => setOpen(true)}

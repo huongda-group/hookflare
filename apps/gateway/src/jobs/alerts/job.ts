@@ -34,8 +34,11 @@ export const SEND_CONCURRENCY = 10;
  * No new send starts once a run has spent this long; with the 5 s send
  * timeout every claim settles well inside CLAIM_STALE_MS, so the next
  * minute's run never reclaims (and re-sends) a row this run still owns.
+ * Kept at 15 s because sending shares the every-minute cron invocation with
+ * reconcile before it and session purge after it; the rest of the minute is
+ * head room for those two.
  */
-export const SEND_BUDGET_MS = 30_000;
+export const SEND_BUDGET_MS = 15_000;
 export const MAX_TRIES = 3;
 export const CLAIM_STALE_MS = 60_000;
 /** Per run and per kind (opens, resolves, reminders); the rest wait for the next run. */
@@ -52,7 +55,8 @@ export type AlertsRunResult = {
 const run = (deps: Deps, stmts: BatchItem[]) =>
 	stmts.length
 		? deps.db.batch(stmts as [BatchItem, ...BatchItem[]])
-		: Promise.resolve([]);
+		: // Unreachable: every caller passes at least one statement (the alert row's own write or the dead-cursor upsert).
+			/* istanbul ignore next -- @preserve unreachable */ Promise.resolve([]);
 
 /** Spec §6.3 steps 1–5. Each incident change is its own batch, so one failure never blocks the rest. */
 export async function runAlerts(
@@ -95,6 +99,14 @@ export async function runAlerts(
 						mergeDead(existing.detailsJson, a.details),
 					),
 				);
+			} else if (a.updateDetails) {
+				await runSafely(
+					deps,
+					logger,
+					[updateDetailsStatement(deps.db, existing.id, a.details)],
+					a,
+					() => {},
+				);
 			}
 			continue;
 		}
@@ -117,7 +129,7 @@ export async function runAlerts(
 		result.opened += deadOpened;
 	});
 
-	// 3. Resolve.
+	// 3. Resolve. consecutive_failures waits out FAILURES_QUIET_MS (rules.ts).
 	let resolves = 0;
 	for (const o of open) {
 		if (activeByKey.has(keyOf(o))) continue;

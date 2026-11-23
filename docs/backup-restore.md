@@ -6,7 +6,7 @@
 
 Backups support operational recovery, while [archives](archives.md) support retention. `BackupWorkflow` dumps tables to R2, writes and verifies a manifest, and applies backup retention. Scheduled runs start daily at 20:00 UTC while enabled. Backups are enabled by default with 35-day retention.
 
-The R2 export reads tables over time and is not a point-in-time snapshot. Restore must handle missing parents, report skipped orphans, and pass verification before cutover. D1 Time Travel is a separate restore path.
+The R2 export reads tables over time and is not a point-in-time snapshot. Tables are dumped parents first (foreign-key order), so a row created between two table reads surfaces as an orphan child instead of a parent silently missing its children (for example an event without its delivery). Restore must handle missing parents, report skipped orphans, and pass verification before cutover. D1 Time Travel is a separate restore path.
 
 ## Design and interaction
 

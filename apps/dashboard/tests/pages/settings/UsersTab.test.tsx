@@ -427,4 +427,128 @@ describe("Settings › Users", () => {
 			expect(router.state.location.pathname).toBe("/projects"),
 		);
 	});
+	it("creates a user with the role chosen in the add form", async () => {
+		const created = vi.fn();
+		usersList();
+		server.use(
+			http.post(apiUrl("/users"), async ({ request }) => {
+				created(await request.json());
+				return HttpResponse.json({}, { status: 201 });
+			}),
+		);
+		const { user } = renderApp("/settings?tab=users");
+		expect(await screen.findByText("op")).toBeInTheDocument();
+		await user.type(screen.getByLabelText("Username"), "boss");
+		await user.type(screen.getByLabelText("Password"), "a-long-boss-password");
+		await user.click(screen.getByRole("combobox", { name: "Role" }));
+		await user.click(await screen.findByRole("option", { name: "admin" }));
+		await user.click(screen.getByRole("button", { name: "Add user" }));
+		await waitFor(() =>
+			expect(created).toHaveBeenCalledWith({
+				username: "boss",
+				role: "admin",
+				password: "a-long-boss-password",
+			}),
+		);
+		await waitFor(() =>
+			expect(screen.getByLabelText("Username")).toHaveValue(""),
+		);
+	});
+
+	it("re-enables a disabled user with the typed reason", async () => {
+		const patched = vi.fn();
+		server.use(
+			http.get(apiUrl("/users"), () =>
+				HttpResponse.json({
+					data: [{ ...op, disabled_at: 5 }],
+					next_cursor: null,
+				}),
+			),
+			http.patch(apiUrl("/users/op"), async ({ request }) => {
+				patched(await request.json());
+				return HttpResponse.json({});
+			}),
+		);
+		const { user } = renderApp("/settings?tab=users");
+		await user.click(await screen.findByRole("button", { name: "Enable op" }));
+		expect(
+			await screen.findByRole("heading", { name: "Enable op?" }),
+		).toBeInTheDocument();
+		await user.type(
+			screen.getByLabelText("Reason (optional)"),
+			"back from leave",
+		);
+		await user.click(screen.getByRole("button", { name: "Enable" }));
+		await waitFor(() =>
+			expect(patched).toHaveBeenCalledWith({
+				disabled: false,
+				reason: "back from leave",
+			}),
+		);
+		await waitFor(() =>
+			expect(
+				screen.queryByRole("heading", { name: "Enable op?" }),
+			).not.toBeInTheDocument(),
+		);
+	});
+
+	it("confirms a successful reset and closes without a discard prompt", async () => {
+		usersList();
+		server.use(
+			http.post(
+				apiUrl("/users/op/password"),
+				() => new HttpResponse(null, { status: 204 }),
+			),
+		);
+		const { user } = renderApp("/settings?tab=users");
+		await user.click(
+			await screen.findByRole("button", { name: "Reset password for op" }),
+		);
+		await user.type(
+			await screen.findByLabelText("New password"),
+			"a-long-reset-password",
+		);
+		await user.click(screen.getByRole("button", { name: "Reset password" }));
+		expect(
+			await screen.findByText(/op was signed out everywhere/),
+		).toBeInTheDocument();
+		// The footer button precedes the dialog's corner X, also named "Close".
+		await user.click(screen.getAllByRole("button", { name: "Close" })[0]);
+		await waitFor(() =>
+			expect(
+				screen.queryByRole("heading", { name: "Reset password for op" }),
+			).not.toBeInTheDocument(),
+		);
+		expect(
+			screen.queryByRole("heading", { name: "Discard unsaved changes?" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("closes the clean reset and token dialogs with Escape", async () => {
+		usersList();
+		server.use(
+			http.get(apiUrl("/users/op/tokens"), () =>
+				HttpResponse.json({ data: [] }),
+			),
+		);
+		const { user } = renderApp("/settings?tab=users");
+		await user.click(
+			await screen.findByRole("button", { name: "Reset password for op" }),
+		);
+		await screen.findByRole("heading", { name: "Reset password for op" });
+		await user.keyboard("{Escape}");
+		await waitFor(() =>
+			expect(
+				screen.queryByRole("heading", { name: "Reset password for op" }),
+			).not.toBeInTheDocument(),
+		);
+		await user.click(screen.getByRole("button", { name: "API tokens for op" }));
+		await screen.findByRole("dialog", { name: "API tokens for op" });
+		await user.keyboard("{Escape}");
+		await waitFor(() =>
+			expect(
+				screen.queryByRole("dialog", { name: "API tokens for op" }),
+			).not.toBeInTheDocument(),
+		);
+	});
 });

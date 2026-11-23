@@ -175,10 +175,11 @@ const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
  */
 export function runId() {
 	let time = Date.now();
-	const rand = crypto.getRandomValues(new Uint8Array(10));
+	// 16 random Crockford chars x 5 bits = 80 bits (each byte keeps its low 5 bits).
+	const rand = crypto.getRandomValues(new Uint8Array(16));
 	let out = "";
-	for (let i = 9; i >= 0; i--) {
-		out = CROCKFORD[rand[i] % 32] + out;
+	for (const byte of rand) {
+		out += CROCKFORD[byte % 32];
 	}
 	let timePart = "";
 	for (let i = 0; i < 10; i++) {

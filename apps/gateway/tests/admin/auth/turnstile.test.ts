@@ -44,6 +44,15 @@ describe("turnstileConfig", () => {
 
 	it("is off when neither key is set", () => {
 		expect(turnstileConfig(testEnv())).toEqual({ mode: "off" });
+		// Secrets are absent (not "") when never put.
+		expect(
+			turnstileConfig(
+				testEnv({
+					TURNSTILE_SITE_KEY: undefined,
+					TURNSTILE_SECRET_KEY: undefined,
+				}),
+			),
+		).toEqual({ mode: "off" });
 	});
 
 	it("is off when both keys are empty strings (the wrangler default)", () => {
@@ -142,6 +151,15 @@ describe("verifyTurnstile", () => {
 
 	it("returns failed when success is missing or not boolean", async () => {
 		for (const body of [{}, { success: "true" }, { success: 1 }]) {
+			const fetchFn = fetchStub(body);
+			await expect(verifyTurnstile(asFetch(fetchFn), INPUT)).resolves.toBe(
+				"failed",
+			);
+		}
+	});
+
+	it("returns failed when the JSON body is not an object", async () => {
+		for (const body of [null, "ok", 1]) {
 			const fetchFn = fetchStub(body);
 			await expect(verifyTurnstile(asFetch(fetchFn), INPUT)).resolves.toBe(
 				"failed",

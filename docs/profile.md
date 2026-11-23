@@ -6,7 +6,7 @@
 
 Every authenticated user can read `GET /api/admin/v1/me`, returning username, role, and permissions. The account button in the top-right header shows the username and role on desktop and mobile. It opens a menu with Change password and Log out. There is no standalone `/profile` page, avatar editor, or editable personal-information form.
 
-`POST /api/admin/v1/me/password` accepts `current_password` and `new_password`. The new password follows the [shared password rules](login.md#business-rules-and-current-behavior). A wrong current password returns `401 wrong_password` without a password-change audit entry. A successful change returns `204`, records `user.password_changed`, and revokes the account's other browser sessions in the same database batch as the password update.
+`POST /api/admin/v1/me/password` accepts `current_password` and `new_password`. The new password follows the [shared password rules](login.md#business-rules-and-current-behavior). Before verifying the current password, the route applies the login rate limiter keyed `password:<username>` and returns `429 too_many_attempts` when it rejects. A wrong current password returns `401 wrong_password` without a password-change audit entry. A successful change returns `204`, records `user.password_changed`, and revokes the account's other browser sessions in the same database batch as the password update.
 
 ## Design and interaction
 

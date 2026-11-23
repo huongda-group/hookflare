@@ -2,6 +2,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
+import { createGate } from "../../helpers/gate";
 import { renderApp } from "../../helpers/render";
 import { apiUrl, DEFAULT_SETTINGS, server } from "../../helpers/server";
 
@@ -295,5 +296,283 @@ describe("Settings › Storage", () => {
 		await user.type(hot, "7");
 		await queryClient.refetchQueries({ queryKey: ["settings"] });
 		expect(await screen.findByLabelText("Hot retention (days)")).toHaveValue(7);
+	});
+	it("saves non-reducing changes directly, including an archive retention", async () => {
+		const bodies: unknown[] = [];
+		useSummary();
+		server.use(
+			http.patch(apiUrl("/settings"), async ({ request }) => {
+				bodies.push(await request.json());
+				return HttpResponse.json({});
+			}),
+		);
+		const user = userEvent.setup();
+		const { router } = renderApp("/settings?tab=storage");
+		const audit = await screen.findByLabelText("Audit retention (days)");
+		await user.clear(audit);
+		await user.type(audit, "400");
+		await user.type(
+			screen.getByLabelText("Archive retention (days, empty = forever)"),
+			"730",
+		);
+		await user.click(screen.getByRole("button", { name: "Save storage" }));
+		expect(
+			await screen.findByText("Saved. Applies to the next archive run."),
+		).toBeInTheDocument();
+		expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+		expect(bodies).toEqual([
+			{
+				storage: {
+					...DEFAULT_SETTINGS.storage,
+					audit_retention_days: 400,
+					archive_retention_days: 730,
+				},
+			},
+		]);
+
+		// Saved values are the new baseline: leaving the page must not prompt.
+		await user.click(screen.getByRole("link", { name: "Projects" }));
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe("/projects"),
+		);
+		expect(
+			screen.queryByRole("heading", { name: "Discard unsaved changes?" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("shows a concurrent-write conflict inline", async () => {
+		useSummary();
+		server.use(
+			http.patch(apiUrl("/settings"), () =>
+				HttpResponse.json({ error: "conflict" }, { status: 409 }),
+			),
+		);
+		const user = userEvent.setup();
+		renderApp("/settings?tab=storage");
+		const audit = await screen.findByLabelText("Audit retention (days)");
+		await user.clear(audit);
+		await user.type(audit, "999");
+		await user.click(screen.getByRole("button", { name: "Save storage" }));
+		expect(
+			await screen.findByText("conflict", {
+				selector: "[data-field-error]",
+			}),
+		).toBeInTheDocument();
+		expect(screen.queryByText(/applies to the next archive run/i)).toBeNull();
+	});
+
+	it("names an unreadable preview response as unknown", async () => {
+		useSummary();
+		server.use(
+			http.get(
+				apiUrl("/archives/preview"),
+				() =>
+					new HttpResponse("not json", {
+						headers: { "content-type": "application/json" },
+					}),
+			),
+		);
+		const user = userEvent.setup();
+		renderApp("/settings?tab=storage");
+		const hot = await screen.findByLabelText("Hot retention (days)");
+		await user.clear(hot);
+		await user.type(hot, "10");
+		await user.click(screen.getByRole("button", { name: "Save storage" }));
+		expect(
+			await screen.findByText(
+				/could not load the archive preview \(unknown\)/i,
+			),
+		).toBeInTheDocument();
+	});
+
+	it("reverts edits and toggles the backup warning from the checkbox", async () => {
+		useSummary();
+		const user = userEvent.setup();
+		renderApp("/settings?tab=storage");
+		const hot = await screen.findByLabelText("Hot retention (days)");
+		await user.clear(hot);
+		await user.type(hot, "99");
+		await user.click(screen.getByRole("button", { name: "Revert" }));
+		expect(hot).toHaveValue(30);
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+		await user.click(screen.getByLabelText("Daily backup"));
+		expect(await screen.findByRole("alert")).toHaveTextContent(
+			/daily backups are off/i,
+		);
+		await user.click(screen.getByLabelText("Daily backup"));
+		await waitFor(() =>
+			expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
+		);
+	});
+
+	it("treats a missing backup flag as enabled", async () => {
+		useSummary();
+		const { backup_enabled: _omit, ...storage } = DEFAULT_SETTINGS.storage;
+		server.use(
+			http.get(apiUrl("/settings"), () =>
+				HttpResponse.json({ ...DEFAULT_SETTINGS, storage }),
+			),
+		);
+		renderApp("/settings?tab=storage");
+		expect(await screen.findByLabelText("Daily backup")).toBeChecked();
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+	});
+
+	it("shows a generic backup start failure", async () => {
+		useSummary();
+		server.use(
+			http.post(apiUrl("/backups/run"), () =>
+				HttpResponse.json({ error: "workflow_unavailable" }, { status: 503 }),
+			),
+		);
+		const user = userEvent.setup();
+		renderApp("/settings?tab=storage");
+		await user.click(
+			await screen.findByRole("button", { name: "Run backup now" }),
+		);
+		expect(
+			await screen.findByText("workflow_unavailable", { selector: "p" }),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Run backup now" }),
+		).toBeEnabled();
+	});
+
+	it("shows a failure newer than the last verified backup, with its error", async () => {
+		useSummary({
+			...SUMMARY,
+			last_failed: {
+				id: "backup-failed-new",
+				started_at: SUMMARY.last_verified.started_at + 1,
+				error: "R2 write failed",
+			},
+		});
+		renderApp("/settings?tab=storage");
+		expect(
+			await screen.findByText(/Last failure backup-failed-new/),
+		).toHaveTextContent(/: R2 write failed\.$/);
+	});
+
+	it("hides a failure older than the last verified backup", async () => {
+		useSummary({
+			...SUMMARY,
+			last_failed: {
+				id: "backup-failed-old",
+				started_at: SUMMARY.last_verified.started_at - 1,
+				error: null,
+			},
+		});
+		renderApp("/settings?tab=storage");
+		expect(await screen.findByText(/Last verified backup/)).toBeInTheDocument();
+		expect(screen.queryByText(/backup-failed-old/)).not.toBeInTheDocument();
+	});
+
+	it("shows a failure without an error when nothing was verified", async () => {
+		useSummary({
+			...SUMMARY,
+			last_verified: null,
+			last_failed: {
+				id: "backup-failed-only",
+				started_at: 1_760_000_000_000,
+				error: null,
+			},
+		});
+		renderApp("/settings?tab=storage");
+		expect(
+			await screen.findByText(/Last failure backup-failed-only/),
+		).toHaveTextContent(/started .*\.$/);
+		expect(screen.getByText("No verified backup yet.")).toBeInTheDocument();
+	});
+
+	it("describes the last archive run", async () => {
+		useSummary();
+		server.use(
+			http.get(apiUrl("/settings"), () =>
+				HttpResponse.json({
+					...DEFAULT_SETTINGS,
+					archive_last_run: {
+						instance_id: "archive-2026-10-16",
+						status: "complete",
+						started_at: 1_760_000_000_000,
+					},
+				}),
+			),
+		);
+		renderApp("/settings?tab=storage");
+		expect(
+			await screen.findByText(/Last run archive-2026-10-16 \(complete\)/),
+		).toBeInTheDocument();
+		expect(screen.queryByText("No run yet.")).not.toBeInTheDocument();
+	});
+
+	it("starts one archive run for a double-clicked Run now", async () => {
+		const gate = createGate();
+		let posts = 0;
+		useSummary();
+		server.use(
+			http.post(apiUrl("/archives/run"), async () => {
+				posts += 1;
+				await gate.wait();
+				return HttpResponse.json(
+					{ instance_id: "archive-manual-x" },
+					{ status: 202 },
+				);
+			}),
+		);
+		const user = userEvent.setup();
+		renderApp("/settings?tab=storage");
+		const run = await screen.findByRole("button", { name: "Run now" });
+		await user.dblClick(run);
+		await waitFor(() => expect(run).toBeDisabled());
+		gate.release();
+		expect(await screen.findByText(/archive-manual-x/)).toBeInTheDocument();
+		await waitFor(() => expect(run).toBeEnabled());
+		expect(posts).toBe(1);
+	});
+
+	it("shows an archive Run now failure inline", async () => {
+		useSummary();
+		server.use(
+			http.post(apiUrl("/archives/run"), () =>
+				HttpResponse.json({ error: "archive_running" }, { status: 409 }),
+			),
+		);
+		const user = userEvent.setup();
+		renderApp("/settings?tab=storage");
+		const run = await screen.findByRole("button", { name: "Run now" });
+		await user.click(run);
+		expect(await screen.findByText("archive_running")).toBeInTheDocument();
+		expect(run).toBeEnabled();
+		expect(screen.queryByText(/^Started /)).not.toBeInTheDocument();
+	});
+
+	it("saves once for a double-clicked Save anyway", async () => {
+		const gate = createGate();
+		let patches = 0;
+		useSummary();
+		server.use(
+			http.get(apiUrl("/archives/preview"), () =>
+				HttpResponse.json({ eligible: 5000, currently_eligible: 1200 }),
+			),
+			http.patch(apiUrl("/settings"), async () => {
+				patches += 1;
+				await gate.wait();
+				return HttpResponse.json({});
+			}),
+		);
+		const user = userEvent.setup();
+		renderApp("/settings?tab=storage");
+		const hot = await screen.findByLabelText("Hot retention (days)");
+		await user.clear(hot);
+		await user.type(hot, "7");
+		await user.click(screen.getByRole("button", { name: "Save storage" }));
+		const confirm = await screen.findByRole("button", { name: "Save anyway" });
+		await user.dblClick(confirm);
+		await waitFor(() => expect(confirm).toBeDisabled());
+		gate.release();
+		expect(
+			await screen.findByText(/applies to the next archive run/i),
+		).toBeInTheDocument();
+		expect(patches).toBe(1);
 	});
 });

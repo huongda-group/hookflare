@@ -14,7 +14,8 @@ function indexPages(
 	data: InfiniteData<Page<ResourceOption>> | undefined,
 ): Map<string, ResourceOption> {
 	const byId = new Map<string, ResourceOption>();
-	for (const page of data?.pages ?? [])
+	// biome-ignore format: keeps the coverage hint on the fallback operand
+	for (const page of data?.pages ?? /* istanbul ignore next -- @preserve unreachable: `select` only runs on loaded data */ [])
 		for (const option of page.data) byId.set(option.id, option);
 	return byId;
 }

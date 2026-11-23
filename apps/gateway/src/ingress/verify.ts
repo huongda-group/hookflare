@@ -104,9 +104,12 @@ const tokenVerifier: Verifier = {
 		if (given === null) {
 			return fail("missing_header");
 		}
-		return equalBytes(encoder.encode(given), encoder.encode(secret))
-			? OK
-			: fail("mismatch");
+		// Compare fixed-size digests so the timing does not reveal the secret's length.
+		const [a, b] = await Promise.all([
+			crypto.subtle.digest("SHA-256", encoder.encode(given)),
+			crypto.subtle.digest("SHA-256", encoder.encode(secret)),
+		]);
+		return crypto.subtle.timingSafeEqual(a, b) ? OK : fail("mismatch");
 	},
 };
 

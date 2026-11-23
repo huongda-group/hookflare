@@ -49,6 +49,7 @@ export function EventFilters({
 	useEffect(() => {
 		setTo(value.to);
 	}, [value.to]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: clear the hint whenever the selected source changes
 	useEffect(() => {
 		setHint(null);
 	}, [value.source_id]);
@@ -137,7 +138,13 @@ export function EventFilters({
 					kind="source"
 					projectId={value.project_id}
 					value={value.source_id}
-					onChange={(source_id) => onApply({ source_id })}
+					onChange={(source_id) => {
+						// A provider event ID only means something within one source (the
+						// API rejects it without source_id), so drop it with the source.
+						if (source_id) return onApply({ source_id });
+						setProvider("");
+						onApply({ source_id: undefined, provider_event_id: undefined });
+					}}
 					label="Source"
 					allowAll
 				/>

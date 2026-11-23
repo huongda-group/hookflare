@@ -179,12 +179,16 @@ export function eventRoutes() {
 			}
 			const [skip] = checked.skipped;
 			if (skip) return c.json({ error: skip.reason }, 409);
-			const [r] = await writeReplays(c, {
+			const {
+				replayed: [r],
+			} = await writeReplays(c, {
 				...checked,
 				reason: body.value.reason,
 				resourceType: "event",
 				resourceId: eventId,
 			});
+			// Lost to a concurrent replay of the same pair after precheck.
+			if (!r) return c.json({ error: "replay_in_progress" }, 409);
 			return c.json(
 				{
 					delivery_id: r.new_delivery_id,

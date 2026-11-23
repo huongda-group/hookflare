@@ -2,7 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it, vi } from "vitest";
 import { renderApp } from "../helpers/render";
-import { apiUrl, server } from "../helpers/server";
+import { apiUrl, meFor, server } from "../helpers/server";
 
 const op = {
 	username: "op",
@@ -118,8 +118,13 @@ describe("ApiTokensDialog", () => {
 
 	it("surfaces a downgrade 403 inline without a refetch storm", async () => {
 		let listCalls = 0;
+		let meCalls = 0;
 		usersList();
 		server.use(
+			http.get(apiUrl("/me"), () => {
+				meCalls++;
+				return HttpResponse.json(meFor("admin"));
+			}),
 			http.get(apiUrl("/users/op/tokens"), () => {
 				listCalls++;
 				return HttpResponse.json(
@@ -128,15 +133,19 @@ describe("ApiTokensDialog", () => {
 				);
 			}),
 		);
-		const { user } = renderApp("/settings?tab=users");
+		const { user, queryClient } = renderApp("/settings?tab=users");
 		expect(await screen.findByText("op")).toBeInTheDocument();
+		const meCallsBefore = meCalls;
 		await openTokens(user);
 		expect(await screen.findByText(/forbidden/)).toBeInTheDocument();
+		// The 403 reloads /me; once that refetch and every other request has
+		// settled, the token list was requested exactly once.
+		await waitFor(() => expect(meCalls).toBeGreaterThan(meCallsBefore));
+		await waitFor(() => expect(queryClient.isFetching()).toBe(0));
 		// The dialog stays open on readable feedback and never retries.
 		expect(
 			screen.getByRole("dialog", { name: "API tokens for op" }),
 		).toBeInTheDocument();
-		await new Promise((r) => setTimeout(r, 300));
 		expect(listCalls).toBe(1);
 	});
 
@@ -168,18 +177,20 @@ describe("ApiTokensDialog", () => {
 					return HttpResponse.json({ data: [] });
 				}),
 			);
-			renderApp("/settings?tab=users", { role });
+			const { queryClient } = renderApp("/settings?tab=users", { role });
 			// The Users tab itself is gated; retry settings render instead.
 			expect(
 				await screen.findByRole("tab", { name: "Retry defaults" }),
 			).toBeInTheDocument();
+			// The settings form has loaded and nothing else is in flight, so any
+			// users or token request would already have been sent.
+			await waitFor(() => expect(queryClient.isFetching()).toBe(0));
 			expect(
 				screen.queryByRole("tab", { name: "Users" }),
 			).not.toBeInTheDocument();
 			expect(
 				screen.queryByRole("button", { name: "API tokens for op" }),
 			).not.toBeInTheDocument();
-			await new Promise((r) => setTimeout(r, 200));
 			expect(usersCalls).not.toHaveBeenCalled();
 			expect(tokenCalls).not.toHaveBeenCalled();
 		},
@@ -202,5 +213,90 @@ describe("ApiTokensDialog", () => {
 		expect(
 			screen.getByRole("dialog", { name: "API tokens for op" }),
 		).toBeInTheDocument();
+	});
+	it("shows expiry and revocation, and revokes without asking for a reason", async () => {
+		const T0 = Date.UTC(2026, 9, 16, 3, 0, 0);
+		const revokes: { id: string; body: unknown }[] = [];
+		usersList();
+		tokensList([
+			{
+				id: "tok_1",
+				username: "op",
+				name: "ci",
+				created_at: T0,
+				expires_at: T0 + 86_400_000,
+				last_used_at: null,
+				revoked_at: null,
+			},
+			{
+				id: "tok_2",
+				username: "op",
+				name: "bench",
+				created_at: T0,
+				expires_at: null,
+				last_used_at: null,
+				revoked_at: null,
+			},
+			{
+				id: "tok_3",
+				username: "op",
+				name: "old",
+				created_at: T0,
+				expires_at: null,
+				last_used_at: null,
+				revoked_at: T0,
+			},
+		]);
+		server.use(
+			http.post(
+				apiUrl("/users/op/tokens/:id/revoke"),
+				async ({ request, params }) => {
+					const text = await request.text();
+					revokes.push({
+						id: String(params.id),
+						body: text ? JSON.parse(text) : undefined,
+					});
+					return new HttpResponse(null, { status: 204 });
+				},
+			),
+		);
+		const { user } = renderApp("/settings?tab=users");
+		expect(await screen.findByText("op")).toBeInTheDocument();
+		await openTokens(user);
+		const dialog = await screen.findByRole("dialog", {
+			name: "API tokens for op",
+		});
+		expect(await within(dialog).findByText("ci")).toBeInTheDocument();
+		const row = (name: string) =>
+			within(dialog).getByText(name).closest("li") as HTMLElement;
+		expect(row("ci")).toHaveTextContent(/· expires/);
+		expect(row("bench")).not.toHaveTextContent(/expires|revoked/);
+		expect(row("old")).toHaveTextContent(/· revoked/);
+		// A revoked token cannot be revoked again.
+		expect(
+			within(dialog).queryByRole("button", { name: "Revoke token old" }),
+		).not.toBeInTheDocument();
+
+		await user.click(
+			within(dialog).getByRole("button", { name: "Revoke token ci" }),
+		);
+		// The revoke route ignores a body, so the dialog does not ask for one.
+		await screen.findByRole("heading", { name: "Revoke token ci?" });
+		expect(
+			screen.queryByLabelText("Reason (optional)"),
+		).not.toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Revoke" }));
+		await waitFor(() => expect(revokes).toHaveLength(1));
+
+		await user.click(
+			within(dialog).getByRole("button", { name: "Revoke token bench" }),
+		);
+		await screen.findByRole("heading", { name: "Revoke token bench?" });
+		await user.click(screen.getByRole("button", { name: "Revoke" }));
+		await waitFor(() => expect(revokes).toHaveLength(2));
+		expect(revokes).toEqual([
+			{ id: "tok_1", body: undefined },
+			{ id: "tok_2", body: undefined },
+		]);
 	});
 });

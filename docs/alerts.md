@@ -4,7 +4,9 @@
 
 ## Business rules and current behavior
 
-Alert rules track operational incidents such as consecutive destination failures, newly dead deliveries, stuck pending work, D1 storage pressure, stuck archives, and stale backups. Incidents can open, resolve, and produce notifications with cooldown. Notification delivery is tracked separately from incident state.
+Alert rules track operational incidents such as consecutive destination failures, newly dead deliveries, stuck pending work, D1 storage pressure, stuck archives, and stale backups. Incidents can open, resolve, and produce notifications with cooldown. A `consecutive_failures` incident resolves only after its destination has stayed under the failure threshold for 10 minutes (`FAILURES_QUIET_MS`); a new failure streak inside that window keeps the same incident open without new opened/resolved notifications. While it waits, the incident's details carry `cleared_at`. Other rules resolve on the first run their condition is clear (`new_dead` keeps its own `dead_quiet_s`, and `d1_storage` its 5-point hysteresis).
+
+The alerts job runs inside the every-minute cron after reconcile and before session purge; it starts no new notification send after 15 seconds, leaving headroom for both in the same invocation. Notification delivery is tracked separately from incident state.
 
 Admins configure rules and Discord, Slack, or Telegram channels. Channel configuration is encrypted; secret values are not returned through read endpoints. Outbound channel requests are restricted to the supported provider endpoints.
 

@@ -38,4 +38,28 @@ describe("applyServerIssues", () => {
 		);
 		expect(errorText(new ApiError(409, "conflict"))).toBe("conflict");
 	});
+	it("keeps a pathless issue on root next to mapped fields", () => {
+		const { result } = renderHook(() =>
+			useForm({ defaultValues: { name: "" } }),
+		);
+		const mapped = applyServerIssues(
+			result.current,
+			new ApiError(400, "invalid_request", [
+				{ path: "", code: "custom", message: "Pick a different project" },
+			]),
+		);
+		expect(mapped).toBe(false);
+		expect(result.current.formState.errors.root?.message).toBe(
+			"Pick a different project",
+		);
+	});
+
+	it("never shows raw text for an unexpected error", () => {
+		const { result } = renderHook(() => useForm());
+		applyServerIssues(result.current, new TypeError("Failed to fetch"));
+		expect(result.current.formState.errors.root?.message).toBe(
+			"Something went wrong.",
+		);
+		expect(errorText("boom")).toBe("Something went wrong.");
+	});
 });
