@@ -1,0 +1,62 @@
+import { describe, expect, it } from "vitest";
+import {
+	formatBytes,
+	formatDuration,
+	formatRelative,
+	fromLocalInput,
+	groupByDay,
+	toLocalInput,
+} from "@/lib/time";
+
+const H = 3_600_000;
+const MIDNIGHT = Date.UTC(2026, 9, 15, 17);
+
+describe("time", () => {
+	it("groups hourly points into local days", () => {
+		const points = [-2, -1, 0, 1, 23, 24].map((i) => ({
+			hour: MIDNIGHT + i * H,
+			received: 1,
+			delivered: 1,
+			failed: 0,
+		}));
+		expect(groupByDay(points)).toEqual([
+			{ hour: MIDNIGHT - 24 * H, received: 2, delivered: 2, failed: 0 },
+			{ hour: MIDNIGHT, received: 3, delivered: 3, failed: 0 },
+			{ hour: MIDNIGHT + 24 * H, received: 1, delivered: 1, failed: 0 },
+		]);
+	});
+
+	it("formats relative times", () => {
+		expect(formatRelative(1_000_000 - 30_000, 1_000_000)).toBe("30 sec. ago");
+		expect(formatRelative(1_000_000 - 3 * 60_000, 1_000_000)).toBe(
+			"3 min. ago",
+		);
+		expect(formatRelative(1_000_000 + 2 * H, 1_000_000)).toBe("in 2 hr.");
+	});
+
+	it("formats byte sizes", () => {
+		expect(formatBytes(17)).toBe("17 B");
+		expect(formatBytes(65_536)).toBe("64.0 KB");
+		expect(formatBytes(3 * 1024 * 1024)).toBe("3.0 MB");
+	});
+
+	it("formats durations", () => {
+		expect(formatDuration(45_000)).toBe("45 s");
+		expect(formatDuration(12 * 60_000)).toBe("12 min");
+		expect(formatDuration(185 * 60_000)).toBe("3 h 5 min");
+		expect(formatDuration(52 * 3_600_000)).toBe("2 d 4 h");
+		expect(formatDuration(-5_000)).toBe("0 s");
+	});
+
+	it("drops a zero remainder from whole hours and days", () => {
+		expect(formatDuration(2 * H)).toBe("2 h");
+		expect(formatDuration(48 * H)).toBe("2 d");
+	});
+
+	it("round-trips datetime-local values in local time", () => {
+		const ms = MIDNIGHT + 10 * H;
+		expect(toLocalInput(ms)).toBe("2026-10-16T10:00");
+		expect(fromLocalInput("2026-10-16T10:00")).toBe(ms);
+		expect(fromLocalInput("")).toBeUndefined();
+	});
+});

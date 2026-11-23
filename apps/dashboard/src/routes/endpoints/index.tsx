@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { EndpointsPage, endpointsSearch } from "@/pages/EndpointsPage";
 
 export const Route = createFileRoute("/endpoints/")({
+	staticData: { pageTitle: "Endpoints" },
 	validateSearch: endpointsSearch,
 	component: function EndpointsRoute() {
 		const search = Route.useSearch();

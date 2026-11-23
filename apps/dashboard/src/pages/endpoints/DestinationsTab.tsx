@@ -3,7 +3,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { CursorTable } from "@/components/CursorTable";
 import { DestinationFormDialog } from "@/components/DestinationFormDialog";
-import { IdText } from "@/components/IdText";
+import { NamedResourceLink } from "@/components/ResourceLabel";
 import { SecretRevealDialog } from "@/components/SecretRevealDialog";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TimeText } from "@/components/TimeText";
@@ -15,7 +15,7 @@ import {
 } from "@/lib/queries/endpoints";
 import { DestinationActions } from "./DestinationActions";
 
-export function DestinationsTab({ projectId }: { projectId?: string }) {
+export function DestinationsTab({ projectId }: { projectId: string }) {
 	const query = useDestinationsPage({ project_id: projectId });
 	const stats = useDestinationStats(projectId).data;
 	const navigate = useNavigate();
@@ -32,10 +32,16 @@ export function DestinationsTab({ projectId }: { projectId?: string }) {
 				query={query}
 				rowKey={(d) => d.id}
 				empty="No destinations yet."
+				emptyAction={
+					<Can permission="config.write">
+						<Button onClick={() => setCreating(true)}>New destination</Button>
+					</Can>
+				}
 				onRowClick={(d) =>
 					void navigate({
 						to: "/endpoints/destinations/$destinationId",
 						params: { destinationId: d.id },
+						search: { project_id: projectId },
 					})
 				}
 				columns={[
@@ -44,6 +50,7 @@ export function DestinationsTab({ projectId }: { projectId?: string }) {
 						cell: (d) => (
 							<Link
 								to="/endpoints/destinations/$destinationId"
+								search={{ project_id: projectId }}
 								params={{ destinationId: d.id }}
 								className="font-medium hover:underline"
 								onClick={(e) => e.stopPropagation()}
@@ -56,7 +63,16 @@ export function DestinationsTab({ projectId }: { projectId?: string }) {
 						header: "URL",
 						cell: (d) => <span className="font-mono text-xs">{d.url}</span>,
 					},
-					{ header: "ID", cell: (d) => <IdText id={d.id} /> },
+					{
+						header: "Project",
+						cell: (d) => (
+							<NamedResourceLink
+								kind="project"
+								id={d.project_id}
+								href={`/projects/${d.project_id}`}
+							/>
+						),
+					},
 					{ header: "Status", cell: (d) => <StatusBadge status={d.status} /> },
 					{
 						header: "Success (24h)",
@@ -86,6 +102,7 @@ export function DestinationsTab({ projectId }: { projectId?: string }) {
 				]}
 			/>
 			<DestinationFormDialog
+				projectId={projectId}
 				open={creating}
 				onOpenChange={setCreating}
 				onCreated={setSecret}

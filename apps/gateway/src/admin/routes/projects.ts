@@ -8,7 +8,6 @@ import {
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppBindings } from "../../app";
-import { isUniqueViolation } from "../../core/db/errors";
 import { getProject, listProjects } from "../../core/db/projects";
 import { type ProjectRow, projects } from "../../core/db/schema";
 import { newId } from "../../core/ids";
@@ -19,7 +18,6 @@ export function toProject(row: ProjectRow): Project {
 	return {
 		id: row.id,
 		name: row.name,
-		slug: row.slug,
 		status: row.status,
 		created_at: row.createdAt,
 		updated_at: row.updatedAt,
@@ -42,21 +40,16 @@ export function projectRoutes() {
 			createdAt: ts,
 			updatedAt: ts,
 		};
-		try {
-			await db.batch([
-				db.insert(projects).values(row),
-				auditStmt(c, {
-					action: "project.created",
-					resourceType: "project",
-					resourceId: row.id,
-					diff: fields,
-					reason,
-				}),
-			]);
-		} catch (err) {
-			if (isUniqueViolation(err)) return c.json({ error: "conflict" }, 409);
-			throw err;
-		}
+		await db.batch([
+			db.insert(projects).values(row),
+			auditStmt(c, {
+				action: "project.created",
+				resourceType: "project",
+				resourceId: row.id,
+				diff: fields,
+				reason,
+			}),
+		]);
 		return c.json(toProject(row), 201);
 	});
 

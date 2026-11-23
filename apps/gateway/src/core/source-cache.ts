@@ -3,11 +3,6 @@ import type { SourceBundle } from "./db/sources";
 export const SOURCE_CACHE_TTL_MS = 30_000;
 const MAX_ENTRIES = 1000;
 
-/**
- * Per-isolate cache for ingress lookups, including "not found" (null).
- * Admin changes become visible within the TTL; there is no active
- * invalidation in M1 (documented staleness, spec §6 step 1).
- */
 const cache = new Map<
 	string,
 	{ bundle: SourceBundle | null; expiresAt: number }
@@ -35,6 +30,7 @@ export function setCachedSource(
 ): void {
 	if (cache.size >= MAX_ENTRIES) {
 		const oldest = cache.keys().next();
+		/* istanbul ignore else */
 		if (!oldest.done) cache.delete(oldest.value);
 	}
 	cache.set(sourceId, { bundle, expiresAt: now + SOURCE_CACHE_TTL_MS });

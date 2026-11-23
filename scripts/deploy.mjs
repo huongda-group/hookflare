@@ -1,26 +1,16 @@
 #!/usr/bin/env node
-/**
- * Deploy CLI: record a restore point, build, migrate, deploy, smoke-test,
- * and write the deploy record to `.deploy/<at>.json`. On any failure it
- * prints the manual rollback commands for the steps that started (from
- * `rollbackCommands`) and exits 1; it never runs them. On success it
- * prints the same commands in the report so the restore point is at hand.
- *
- * The smoke step needs the gateway URL in the per-Worker variable from
- * `smokeUrlVar` (`HOOKFLARE_URL`, `HOOKFLARE_STAGING_URL`), plus
- * `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET`, and `SINK_URL`. A
- * missing smoke env fails the deploy before anything runs unless
- * `--skip-smoke` is passed.
- */
 import { spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	deployPlan,
+	migrationsApplied,
+	NO_PREVIOUS_VERSION,
 	parseBookmark,
 	parseCurrentVersion,
 	rollbackCommands,
+	workerMissing,
 } from "./lib/deploy.mjs";
 import {
 	checkSmokeTarget,
@@ -33,24 +23,11 @@ import { readConfig, runWrangler } from "./lib/wrangler.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-/**
- * Value of a `--flag value` argv option.
- * @param {string[]} argv
- * @param {string} flag
- * @param {string} fallback
- * @returns {string}
- */
 function option(argv, flag, fallback) {
 	const index = argv.indexOf(flag);
 	return index !== -1 && index + 1 < argv.length ? argv[index + 1] : fallback;
 }
 
-/**
- * Run a local command (not wrangler) and resolve with its exit code.
- * @param {string} cmd
- * @param {string[]} args
- * @returns {Promise<number>}
- */
 function runLocal(cmd, args) {
 	return new Promise((resolve, reject) => {
 		const child = spawn(cmd, args, { cwd: repoRoot, stdio: "inherit" });
@@ -59,10 +36,6 @@ function runLocal(cmd, args) {
 	});
 }
 
-/**
- * Filename-safe UTC timestamp for the deploy record.
- * @returns {string}
- */
 function recordAt() {
 	return new Date().toISOString().replace(/[:.]/g, "-");
 }
@@ -81,12 +54,9 @@ try {
 	}
 } catch (err) {
 	console.error(err instanceof Error ? err.message : String(err));
-	console.error(
-		`deploy: smoke needs ${urlVar}, CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET, SINK_URL`,
-	);
+	console.error(`deploy: smoke needs ${urlVar}, HOOKFLARE_API_TOKEN, SINK_URL`);
 	process.exit(1);
 }
-/** @type {import("./lib/deploy.mjs").DeployRecord & { previousVersion: string, newVersion: string, smoke: string }} */
 const record = {
 	at: recordAt(),
 	config,
@@ -95,9 +65,9 @@ const record = {
 	previousVersion: "unknown",
 	newVersion: "unknown",
 	bookmark: "unknown",
+	bookmarkAt: "unknown",
 	smoke: skipSmoke ? "skipped" : "pending",
 };
-/** Steps that began, so `fail` lists only what they may have changed. */
 const started = [];
 
 if (skipSmoke) {
@@ -113,12 +83,6 @@ if (skipSmoke) {
 	);
 }
 
-/**
- * Print the manual rollback commands and exit 1. Never runs them.
- * @param {string} step
- * @param {string} detail
- * @returns {never}
- */
 function fail(step, detail) {
 	console.error(`deploy: step "${step}" failed: ${detail}`);
 	const commands =
@@ -148,17 +112,23 @@ for (const step of plan) {
 		const versions = await runWrangler(["deployments", "list", "--json"], {
 			config,
 		});
-		if (versions.code !== 0) {
+		const firstDeploy = workerMissing(versions);
+		if (versions.code !== 0 && !firstDeploy) {
 			fail(step, versions.stderr.trim() || "deployments list failed");
 		}
 		try {
 			record.bookmark = parseBookmark(JSON.parse(info.stdout));
-			record.previousVersion = parseCurrentVersion(JSON.parse(versions.stdout));
+			record.bookmarkAt = new Date().toISOString();
+			record.previousVersion = firstDeploy
+				? NO_PREVIOUS_VERSION
+				: parseCurrentVersion(JSON.parse(versions.stdout));
 		} catch (err) {
 			fail(step, err instanceof Error ? err.message : String(err));
 		}
 		console.log(
-			`deploy: restore point ${record.bookmark} at ${record.previousVersion}`,
+			firstDeploy
+				? `deploy: restore point ${record.bookmark}; first deploy, no live Worker version yet`
+				: `deploy: restore point ${record.bookmark} at ${record.previousVersion}`,
 		);
 	} else if (step === "build") {
 		if ((await runLocal("pnpm", ["build"])) !== 0) {
@@ -169,9 +139,15 @@ for (const step of plan) {
 			["d1", "migrations", "apply", "DB", "--remote"],
 			{ config, stream: true },
 		);
+		record.migrationsApplied = migrationsApplied(migrated);
 		if (migrated.code !== 0) {
 			fail(step, migrated.stderr.trim() || "migrations apply failed");
 		}
+		console.log(
+			record.migrationsApplied
+				? "deploy: migrations applied; a D1 restore would undo them"
+				: "deploy: no migrations applied; no D1 restore needed",
+		);
 	} else if (step === "deploy") {
 		const deployed = await runWrangler(["deploy"], { config, stream: true });
 		if (deployed.code !== 0) {
@@ -212,7 +188,7 @@ for (const step of plan) {
 			`deploy: ${record.worker} ${record.previousVersion} -> ${record.newVersion}, smoke ${record.smoke}`,
 		);
 		console.log(
-			"deploy: to undo this release (decide first, see rollback.md):",
+			"deploy: to undo this release (decide first, see docs/runbook.md#rollback):",
 		);
 		for (const command of rollback) {
 			console.log(`rollback: ${command}`);

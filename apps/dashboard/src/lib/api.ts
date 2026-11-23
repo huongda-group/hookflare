@@ -1,3 +1,6 @@
+import { toast } from "sonner";
+import { getWriteToast } from "./write-toast";
+
 export type Issue = { path: string; code: string; message: string };
 
 export class ApiError extends Error {
@@ -13,27 +16,21 @@ export class ApiError extends Error {
 }
 
 const BASE = "/api/admin/v1";
+const WRITE_METHODS = new Set(["POST", "PUT", "DELETE", "PATCH"]);
+export const PERMISSION_DENIED_MESSAGE =
+	"You do not have permission for that action.";
 
-// Spec §9.1: an expired Access session answers with a redirect to the login
-// domain. fetch either fails (CORS) or follows it to HTML; both mean "reload".
-let expired = false;
 const listeners = new Set<() => void>();
-function markExpired() {
-	if (expired) return;
-	expired = true;
+function notifyUnauthorized() {
 	for (const l of listeners) l();
 }
-export function subscribeSessionExpired(cb: () => void) {
+export function subscribeUnauthorized(cb: () => void) {
 	listeners.add(cb);
-	return () => listeners.delete(cb);
-}
-export const isSessionExpired = () => expired;
-export function resetSessionExpired() {
-	expired = false;
-	for (const l of listeners) l();
+	return () => {
+		listeners.delete(cb);
+	};
 }
 
-/** `?a=1&s=x&s=y`. Arrays repeat the key; undefined, null, and "" are skipped. */
 export function qs(query: Record<string, unknown>): string {
 	const p = new URLSearchParams();
 	for (const [k, v] of Object.entries(query)) {
@@ -46,70 +43,106 @@ export function qs(query: Record<string, unknown>): string {
 	return s ? `?${s}` : "";
 }
 
-/** Absolute URL: jsdom/undici fetch cannot resolve relative paths. */
+export function projectScopedPath(path: string, projectId: string): string {
+	const [pathname, query] = path.split(/\?(.*)/s, 2);
+	const params = new URLSearchParams(query);
+	params.set("project_id", projectId);
+	return `${pathname}?${params}`;
+}
+
 const url = (path: string) =>
 	new URL(`${BASE}${path}`, window.location.origin).toString();
 
-/** `allowHtml`: the payload endpoint returns the stored body, which may itself be HTML. */
 export async function apiRaw(
 	path: string,
 	init: RequestInit = {},
-	opts: { allowHtml?: boolean } = {},
+	body?: unknown,
 ): Promise<Response> {
+	const method = init.method?.toUpperCase() ?? "GET";
+	const isWrite = WRITE_METHODS.has(method);
+	const isPublicAuth = path.startsWith("/auth/");
+	const feedback = isWrite
+		? getWriteToast(method, path.split("?", 1)[0], body)
+		: undefined;
 	let res: Response;
 	try {
 		res = await fetch(url(path), { credentials: "same-origin", ...init });
 	} catch {
-		markExpired();
-		throw new ApiError(0, "session_expired");
+		if (isWrite) toast.error("Network error. Please try again.");
+		throw new ApiError(0, "network_error");
 	}
 	const type = res.headers.get("content-type") ?? "";
-	// The admin API never redirects, so a followed redirect is the Access login.
-	if (res.redirected || (!opts.allowHtml && type.includes("text/html"))) {
-		markExpired();
-		throw new ApiError(res.status, "session_expired");
-	}
 	if (!res.ok) {
+		if (isWrite) {
+			toast.error(
+				res.status === 403 && !isPublicAuth
+					? PERMISSION_DENIED_MESSAGE
+					: (feedback?.error ?? "Action failed."),
+			);
+		}
 		const body = type.includes("json")
 			? ((await res.json()) as Record<string, unknown>)
 			: {};
+		const code =
+			typeof body.error === "string" ? body.error : `http_${res.status}`;
+		if (res.status === 401 && !isPublicAuth && code !== "wrong_password")
+			notifyUnauthorized();
 		throw new ApiError(
 			res.status,
-			typeof body.error === "string" ? body.error : `http_${res.status}`,
+			code,
 			body.issues as Issue[] | undefined,
 			body.required as string | undefined,
 			body,
 		);
 	}
+	if (isWrite) {
+		toast.success(
+			res.status === 202 && !feedback?.queued
+				? "Request accepted."
+				: (feedback?.success ?? "Action completed."),
+		);
+	}
 	return res;
 }
 
-async function json<T>(path: string, init: RequestInit = {}): Promise<T> {
-	const res = await apiRaw(path, init);
+async function json<T>(
+	path: string,
+	init: RequestInit = {},
+	body?: unknown,
+): Promise<T> {
+	const res = await apiRaw(path, init, body);
 	return (await res.json()) as T;
 }
 
-function send<T>(method: string, path: string, body?: unknown) {
-	return json<T>(path, {
+function sendInit(method: string, body?: unknown): RequestInit {
+	return {
 		method,
 		headers: body === undefined ? {} : { "content-type": "application/json" },
 		body: body === undefined ? undefined : JSON.stringify(body),
-	});
+	};
+}
+
+function send<T>(method: string, path: string, body?: unknown) {
+	return json<T>(path, sendInit(method, body), body);
+}
+
+function sendVoid(method: string, path: string, body?: unknown): Promise<void> {
+	return apiRaw(path, sendInit(method, body)).then(() => undefined);
 }
 
 export const api = {
 	get: <T>(path: string, query: Record<string, unknown> = {}) =>
 		json<T>(`${path}${qs(query)}`),
 	post: <T>(path: string, body?: unknown) => send<T>("POST", path, body),
+	postVoid: (path: string, body?: unknown) => sendVoid("POST", path, body),
+	put: <T>(path: string, body?: unknown) => send<T>("PUT", path, body),
 	patch: <T>(path: string, body?: unknown) => send<T>("PATCH", path, body),
-	/** DELETE answers 204 with an empty body, so there is nothing to parse. */
-	delete: (path: string) =>
-		apiRaw(path, { method: "DELETE" }).then(() => undefined),
+	delete: (path: string, body?: unknown) =>
+		apiRaw(path, sendInit("DELETE", body), body).then(() => undefined),
 };
 
 export type BackupRunResult = { backup_id: string; instance_id: string };
 
-/** Starts a manual backup run (202) or throws ApiError backup_running (409). */
 export function runBackupNow(): Promise<BackupRunResult> {
 	return api.post<BackupRunResult>("/backups/run", {});
 }

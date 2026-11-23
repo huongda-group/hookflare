@@ -13,7 +13,6 @@ const STEP = {
 	timeout: "10 minutes",
 } as const;
 
-/** Spec §7.4. The orchestration lives in `runArchive`; this binds it to step.do(). */
 export class ArchiveWorkflow extends WorkflowEntrypoint<
 	Deps["env"],
 	ArchiveParams

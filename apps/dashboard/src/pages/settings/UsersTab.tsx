@@ -1,19 +1,22 @@
-import {
-	isServiceIdentity,
-	type Page,
-	ROLES,
-	type Role,
-	type User,
-} from "@hookflare/shared";
+import { type Page, ROLES, type Role, type User } from "@hookflare/shared";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { ApiTokensDialog } from "@/components/ApiTokensDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CursorTable } from "@/components/CursorTable";
+import { DirtyFormGuard } from "@/components/DirtyFormGuard";
+import { FormField } from "@/components/FormField";
+import { StatusBadge } from "@/components/StatusBadge";
 import { TimeText } from "@/components/TimeText";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
 	Select,
 	SelectContent,
@@ -27,7 +30,7 @@ import { useMe } from "@/lib/permissions";
 import { qk } from "@/lib/queries/keys";
 
 type Pending = {
-	email: string;
+	username: string;
 	body: { role?: Role; disabled?: boolean };
 	title: string;
 	label: string;
@@ -36,10 +39,24 @@ type Pending = {
 export function UsersTab() {
 	const qc = useQueryClient();
 	const me = useMe();
-	const [email, setEmail] = useState("");
+	const [username, setUsername] = useState("");
+	const [password, setPassword] = useState("");
 	const [role, setRole] = useState<Role>("viewer");
 	const [addError, setAddError] = useState<string | null>(null);
+	const [adding, setAdding] = useState(false);
 	const [pending, setPending] = useState<Pending | null>(null);
+	const [resetUser, setResetUser] = useState<string | null>(null);
+	const [tokensUser, setTokensUser] = useState<string | null>(null);
+	const tokensButton = (name: string) => (
+		<Button
+			variant="outline"
+			size="sm"
+			aria-label={`API tokens for ${name}`}
+			onClick={() => setTokensUser(name)}
+		>
+			API tokens
+		</Button>
+	);
 	const query = useInfiniteQuery({
 		queryKey: qk.users.all,
 		queryFn: ({ pageParam }) =>
@@ -49,79 +66,102 @@ export function UsersTab() {
 	});
 	const refresh = () => qc.invalidateQueries({ queryKey: qk.users.all });
 	const add = async () => {
+		setAdding(true);
 		setAddError(null);
 		try {
-			await api.post("/users", { email: email.trim(), role });
-			setEmail("");
+			await api.post("/users", {
+				username: username.trim().toLowerCase(),
+				role,
+				password,
+			});
+			setUsername("");
+			setPassword("");
 			await refresh();
 		} catch (err) {
 			setAddError(errorText(err));
+		} finally {
+			setAdding(false);
 		}
 	};
 	return (
 		<div className="space-y-4">
-			<div className="flex items-end gap-3">
-				<div>
-					<Label htmlFor="u-email">Email</Label>
-					<Input
-						id="u-email"
-						type="email"
-						className="w-72"
-						value={email}
-						onChange={(e) => setEmail(e.target.value)}
-					/>
-				</div>
-				<Select value={role} onValueChange={(v) => setRole(v as Role)}>
-					<SelectTrigger className="w-36" aria-label="Role">
-						<SelectValue />
-					</SelectTrigger>
-					<SelectContent>
-						{ROLES.map((r) => (
-							<SelectItem key={r} value={r}>
-								{r}
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
-				<Button onClick={() => void add()} disabled={!email.trim()}>
-					Add user
-				</Button>
-			</div>
-			{addError && <p className="text-sm text-red-700">{addError}</p>}
+			<DirtyFormGuard dirty={username !== "" || password !== ""}>
+				{() => (
+					<div className="flex flex-wrap items-end gap-3">
+						<FormField
+							className="w-56 max-w-full"
+							htmlFor="u-username"
+							label="Username"
+						>
+							<Input
+								id="u-username"
+								autoComplete="off"
+								value={username}
+								onChange={(e) => setUsername(e.target.value)}
+							/>
+						</FormField>
+						<FormField
+							className="w-56 max-w-full"
+							htmlFor="u-password"
+							label="Password"
+						>
+							<Input
+								id="u-password"
+								type="password"
+								autoComplete="new-password"
+								value={password}
+								onChange={(e) => setPassword(e.target.value)}
+							/>
+						</FormField>
+						<Select value={role} onValueChange={(v) => setRole(v as Role)}>
+							<SelectTrigger className="w-36" aria-label="Role">
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								{ROLES.map((r) => (
+									<SelectItem key={r} value={r}>
+										{r}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+						<Button
+							onClick={() => void add()}
+							disabled={adding || !username.trim() || !password}
+						>
+							Add user
+						</Button>
+					</div>
+				)}
+			</DirtyFormGuard>
+			{addError && <p className="text-sm text-failure">{addError}</p>}
 			<CursorTable<User>
 				query={query}
-				rowKey={(u) => u.email}
+				rowKey={(u) => u.username}
 				empty="No users."
 				columns={[
 					{
-						header: "Email",
-						cell: (u) => (
-							<span className="flex items-center gap-2">
-								{u.email}
-								{isServiceIdentity(u.email) && (
-									<Badge variant="secondary">Service token</Badge>
-								)}
-							</span>
-						),
+						header: "Username",
+						cell: (u) => u.username,
 					},
 					{
 						header: "Role",
 						cell: (u) => (
 							<Select
 								value={u.role}
-								disabled={u.email === me?.email}
+								disabled={u.username === me?.username}
 								onValueChange={(v) =>
 									setPending({
-										email: u.email,
+										username: u.username,
 										body: { role: v as Role },
-										title: `Change ${u.email} to ${v}?`,
+										title: `Change ${u.username} to ${v}?`,
 										label: "Change role",
 									})
 								}
 							>
 								<SelectTrigger
 									className="w-32"
-									aria-label={`Role of ${u.email}`}
+									aria-label={`Role of ${u.username}`}
 								>
 									<SelectValue />
 								</SelectTrigger>
@@ -137,50 +177,63 @@ export function UsersTab() {
 					},
 					{
 						header: "Status",
-						cell: (u) =>
-							u.disabled_at ? (
-								<span>
-									Disabled <TimeText ms={u.disabled_at} />
-								</span>
-							) : (
-								"Active"
-							),
+						cell: (u) => (
+							<span className="inline-flex items-center gap-2">
+								<StatusBadge status={u.disabled_at ? "disabled" : "active"} />
+								{u.disabled_at !== null && <TimeText ms={u.disabled_at} />}
+							</span>
+						),
 					},
 					{
 						header: "",
 						cell: (u) =>
-							u.email === me?.email ? null : u.disabled_at ? (
-								<Button
-									variant="outline"
-									size="sm"
-									aria-label={`Enable ${u.email}`}
-									onClick={() =>
-										setPending({
-											email: u.email,
-											body: { disabled: false },
-											title: `Enable ${u.email}?`,
-											label: "Enable",
-										})
-									}
-								>
-									Enable
-								</Button>
+							u.username === me?.username ? (
+								<div className="flex gap-2">{tokensButton(u.username)}</div>
 							) : (
-								<Button
-									variant="outline"
-									size="sm"
-									aria-label={`Disable ${u.email}`}
-									onClick={() =>
-										setPending({
-											email: u.email,
-											body: { disabled: true },
-											title: `Disable ${u.email}?`,
-											label: "Disable",
-										})
-									}
-								>
-									Disable
-								</Button>
+								<div className="flex gap-2">
+									<Button
+										variant="outline"
+										size="sm"
+										aria-label={`Reset password for ${u.username}`}
+										onClick={() => setResetUser(u.username)}
+									>
+										Reset password
+									</Button>
+									{tokensButton(u.username)}
+									{u.disabled_at ? (
+										<Button
+											variant="outline"
+											size="sm"
+											aria-label={`Enable ${u.username}`}
+											onClick={() =>
+												setPending({
+													username: u.username,
+													body: { disabled: false },
+													title: `Enable ${u.username}?`,
+													label: "Enable",
+												})
+											}
+										>
+											Enable
+										</Button>
+									) : (
+										<Button
+											variant="outline"
+											size="sm"
+											aria-label={`Disable ${u.username}`}
+											onClick={() =>
+												setPending({
+													username: u.username,
+													body: { disabled: true },
+													title: `Disable ${u.username}?`,
+													label: "Disable",
+												})
+											}
+										>
+											Disable
+										</Button>
+									)}
+								</div>
 							),
 					},
 				]}
@@ -188,6 +241,7 @@ export function UsersTab() {
 			<ConfirmDialog
 				open={pending !== null}
 				onOpenChange={(o) => {
+					/* istanbul ignore else -- @preserve */
 					if (!o) setPending(null);
 				}}
 				title={pending?.title ?? ""}
@@ -195,14 +249,122 @@ export function UsersTab() {
 				confirmLabel={pending?.label ?? "Confirm"}
 				destructive={pending?.body.disabled === true}
 				onConfirm={async (reason) => {
+					/* istanbul ignore if -- @preserve */
 					if (!pending) return;
-					await api.patch(`/users/${encodeURIComponent(pending.email)}`, {
+					await api.patch(`/users/${encodeURIComponent(pending.username)}`, {
 						...pending.body,
 						...(reason ? { reason } : {}),
 					});
 					await refresh();
 				}}
 			/>
+			<ResetPasswordDialog
+				username={resetUser}
+				onOpenChange={(o) => {
+					/* istanbul ignore else -- @preserve */
+					if (!o) setResetUser(null);
+				}}
+			/>
+			{tokensUser !== null && (
+				<ApiTokensDialog
+					username={tokensUser}
+					open
+					onOpenChange={(o) => {
+						/* istanbul ignore else -- @preserve */
+						if (!o) setTokensUser(null);
+					}}
+				/>
+			)}
 		</div>
+	);
+}
+
+function ResetPasswordDialog({
+	username,
+	onOpenChange,
+}: {
+	username: string | null;
+	onOpenChange: (o: boolean) => void;
+}) {
+	const [password, setPassword] = useState("");
+	const [error, setError] = useState<string | null>(null);
+	const [busy, setBusy] = useState(false);
+	const [saved, setSaved] = useState(false);
+	const dirty = password.length > 0 && !saved;
+	const close = () => {
+		setPassword("");
+		setError(null);
+		setSaved(false);
+		onOpenChange(false);
+	};
+	const reset = async () => {
+		/* istanbul ignore if -- @preserve */
+		if (!username) return;
+		setBusy(true);
+		setError(null);
+		try {
+			await api.postVoid(`/users/${encodeURIComponent(username)}/password`, {
+				password,
+			});
+			setSaved(true);
+		} catch (err) {
+			setError(errorText(err));
+		} finally {
+			setBusy(false);
+		}
+	};
+	return (
+		<DirtyFormGuard dirty={dirty}>
+			{(requestClose) => (
+				<Dialog
+					open={username !== null}
+					onOpenChange={(o) => {
+						/* istanbul ignore else -- @preserve */
+						if (!o) requestClose(close);
+					}}
+				>
+					<DialogContent>
+						<DialogHeader>
+							<DialogTitle>Reset password for {username}</DialogTitle>
+						</DialogHeader>
+						{saved ? (
+							<>
+								<p className="text-sm">
+									The password was reset. {username} was signed out everywhere;
+									hand over the new password out of band.
+								</p>
+								<DialogFooter>
+									<Button onClick={close}>Close</Button>
+								</DialogFooter>
+							</>
+						) : (
+							<>
+								<FormField htmlFor="reset-password" label="New password">
+									<Input
+										id="reset-password"
+										type="password"
+										autoComplete="new-password"
+										value={password}
+										onChange={(e) => setPassword(e.target.value)}
+									/>
+								</FormField>
+								{error && <p className="text-sm text-failure">{error}</p>}
+								<DialogFooter>
+									<Button variant="outline" onClick={() => requestClose(close)}>
+										Cancel
+									</Button>
+									<Button
+										disabled={busy || !password}
+										onClick={() => void reset()}
+									>
+										Reset password
+									</Button>
+								</DialogFooter>
+							</>
+						)}
+					</DialogContent>
+				</Dialog>
+			)}
+		</DirtyFormGuard>
 	);
 }

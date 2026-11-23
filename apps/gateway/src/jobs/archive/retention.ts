@@ -20,14 +20,6 @@ async function deletePrefix(deps: Deps, b: Batch): Promise<void> {
 	} while (cursor);
 }
 
-/**
- * Spec §7.4 `retention`. null archive_retention_days = keep forever.
- * Expiry counts from `purged_at`, not from the batch's day: a batch is only
- * created once its day is past hot/failed/audit retention, so a day-based
- * cut-off could expire a batch in the run that created it.
- * Files of `failed` batches are always removed: their marks were cleared
- * and the day is archived again by a later batch (with_files is then 0).
- */
 export async function expireArchives(
 	deps: Deps,
 	storage: StorageSettings,

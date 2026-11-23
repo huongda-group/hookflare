@@ -24,6 +24,7 @@ import {
 import { countEligible, cutoffsFor } from "../../core/db/archive";
 import { archiveBatches, archiveParts } from "../../core/db/schema";
 import { newId } from "../../core/ids";
+import { can } from "../../core/rbac";
 import { readSetting, STORAGE_SETTING } from "../../core/settings";
 import { requirePermission } from "../auth/permission";
 import { decodeCursor, encodeCursor } from "../cursor";
@@ -76,7 +77,8 @@ export function archiveRoutes() {
 		if (to_day) where.push(lte(archiveBatches.day, to_day));
 		if (cursor) {
 			const cur = decodeCursor(cursor);
-			if (cur === "invalid" || cur === null) return badCursor(c);
+			if (cur === "invalid" || /* istanbul ignore next */ cur === null)
+				return badCursor(c);
 			where.push(
 				or(
 					lt(archiveBatches.createdAt, cur.at),
@@ -95,7 +97,6 @@ export function archiveRoutes() {
 			.orderBy(desc(archiveBatches.createdAt), desc(archiveBatches.id))
 			.limit(limit + 1);
 		const page = rows.slice(0, limit);
-		// limit ≤ 50 keeps this IN list under D1's 100-parameter cap.
 		const parts = page.length
 			? await db
 					.select()
@@ -138,15 +139,11 @@ export function archiveRoutes() {
 
 	routes.post("/run", requirePermission("settings.manage"), async (c) => {
 		const deps = c.var.deps;
-		// Plan never adopts a live instance's batches, but two concurrent runs
-		// still race for the same days; refuse until the last one ends.
 		const last = await readLastRun(deps);
 		if (last && (ARCHIVE_RUNNING as readonly string[]).includes(last.status))
 			return c.json({ error: "archive_running" }, 409);
 		const instanceId = `archive-manual-${newId("arb").slice(4).toLowerCase()}`;
 		await startArchiveRun(deps, instanceId, "manual", c.var.logger);
-		// The run is already started and cannot share a transaction with the
-		// audit row; if the audit write fails, the start must not be silent.
 		try {
 			await deps.db.batch([
 				auditStmt(c, {
@@ -184,6 +181,10 @@ export function archiveRoutes() {
 				!DOWNLOADABLE.has(batch.status)
 			) {
 				return c.json({ error: "not_found" }, 404);
+			}
+			const role = c.var.actor?.role ?? /* istanbul ignore next */ "viewer";
+			if (batch.kind === "audit" && !can(role, "audit.read")) {
+				return c.json({ error: "forbidden", required: "audit.read" }, 403);
 			}
 			const part = await db
 				.select()

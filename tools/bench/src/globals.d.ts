@@ -1,9 +1,3 @@
-/**
- * Minimal ambient declarations for the Node APIs the bench uses. The bench
- * has no new runtime dependencies (not even @types/node), so the handful of
- * globals and `node:` imports it needs are declared here instead.
- */
-
 declare const process: {
 	argv: string[];
 	env: Record<string, string | undefined>;

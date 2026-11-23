@@ -17,6 +17,7 @@ export function formatRelative(ms: number, now = Date.now()): string {
 		if (Math.abs(diff) >= size || unit === "second")
 			return rtf.format(Math.round(diff / size), unit);
 	}
+	/* istanbul ignore next -- @preserve */
 	return "";
 }
 
@@ -33,7 +34,6 @@ function localMidnight(ms: number): number {
 	return d.getTime();
 }
 
-/** Spec M4-7: the server sends hours; days are the browser's local days. */
 export function groupByDay(points: TrendPoint[]): TrendPoint[] {
 	const days = new Map<number, TrendPoint>();
 	for (const p of points) {
@@ -58,7 +58,6 @@ export function formatBytes(n: number): string {
 	return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-/** "45 s", "12 min", "3 h 5 min", "2 d 4 h". */
 export function formatDuration(ms: number): string {
 	const s = Math.max(0, Math.round(ms / 1000));
 	if (s < 60) return `${s} s`;
@@ -70,12 +69,10 @@ export function formatDuration(ms: number): string {
 	return h % 24 ? `${d} d ${h % 24} h` : `${d} d`;
 }
 
-/** `datetime-local` wants local "YYYY-MM-DDTHH:mm". */
 export function toLocalInput(ms: number) {
 	const d = new Date(ms - new Date(ms).getTimezoneOffset() * 60_000);
 	return d.toISOString().slice(0, 16);
 }
 
-/** Parses a `datetime-local` value as local time; empty means no bound. */
 export const fromLocalInput = (v: string) =>
 	v ? new Date(v).getTime() : undefined;

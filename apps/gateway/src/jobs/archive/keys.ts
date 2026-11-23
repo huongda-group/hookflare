@@ -6,7 +6,6 @@ export function dayStartOf(day: string): number {
 	return Date.parse(`${day}T00:00:00.000Z`);
 }
 
-/** archive/YYYY/MM/DD/<batch>/ — batch-scoped because one day is archived more than once (M5-18). */
 export function batchPrefix(
 	kind: "events" | "audit",
 	day: string,

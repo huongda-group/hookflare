@@ -2,6 +2,7 @@ import type { Source } from "@hookflare/shared";
 import { Link } from "@tanstack/react-router";
 import { IdText } from "@/components/IdText";
 import { LoadError } from "@/components/LoadError";
+import { NamedResourceLink } from "@/components/ResourceLabel";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TimeText } from "@/components/TimeText";
 import { ApiError } from "@/lib/api";
@@ -15,8 +16,14 @@ import {
 } from "./detail";
 import { SourceActions } from "./SourceActions";
 
-export function SourceDetailPage({ sourceId }: { sourceId: string }) {
-	const source = useSource(sourceId);
+export function SourceDetailPage({
+	sourceId,
+	projectId,
+}: {
+	sourceId: string;
+	projectId: string;
+}) {
+	const source = useSource(sourceId, projectId);
 	if (source.error instanceof ApiError && source.error.status === 404)
 		return <p>Source {sourceId} was not found.</p>;
 	if (source.error)
@@ -28,7 +35,8 @@ export function SourceDetailPage({ sourceId }: { sourceId: string }) {
 				retrying={source.isFetching}
 			/>
 		);
-	if (!source.data) return <p className="text-neutral-500">Loading…</p>;
+	if (!source.data)
+		return <p className="p-6 text-muted-foreground">Loading…</p>;
 	const s = source.data;
 	return (
 		<div className="space-y-6">
@@ -47,15 +55,27 @@ export function SourceDetailPage({ sourceId }: { sourceId: string }) {
 						<IdText id={s.ingress_url} />
 					</Field>
 					<Field label="Project">
-						<IdText id={s.project_id} />
+						<NamedResourceLink
+							kind="project"
+							id={s.project_id}
+							href={`/projects/${s.project_id}`}
+						/>
 					</Field>
 					<Field label="Target destination">
+						<NamedResourceLink
+							kind="destination"
+							id={s.destination_id}
+							projectId={s.project_id}
+							href={`/endpoints/destinations/${s.destination_id}`}
+						/>
+					</Field>
+					<Field label="Scoped events">
 						<Link
-							to="/endpoints/destinations/$destinationId"
-							params={{ destinationId: s.destination_id }}
-							className="font-mono text-xs underline"
+							to="/events"
+							search={{ project_id: s.project_id, source_id: s.id }}
+							className="underline"
 						>
-							{s.destination_id}
+							View events for this project
 						</Link>
 					</Field>
 					<Field label="Max body size">

@@ -3,7 +3,6 @@ import { and, desc, eq, lt, or } from "drizzle-orm";
 import type { Db } from "../../deps";
 import { type TestDeliveryRow, testDeliveries } from "./schema";
 
-/** Newest first, keyset on (started_at, id); returns up to limit + 1 rows. */
 export async function listTestDeliveries(
 	db: Db,
 	destinationId: string,
@@ -33,7 +32,7 @@ export function toTestDelivery(r: TestDeliveryRow): TestDelivery {
 	return {
 		id: r.id,
 		destination_id: r.destinationId,
-		actor_email: r.actorEmail,
+		actor: r.actor,
 		started_at: r.startedAt,
 		duration_ms: r.durationMs,
 		http_status: r.httpStatus,

@@ -11,12 +11,10 @@ const HOP_BY_HOP = new Set([
 	"content-length",
 ]);
 
-/** Credential headers: stored redacted, never forwarded. */
 export const CREDENTIAL_HEADERS = ["authorization", "cookie", "x-api-key"];
 
 const DROPPED_PREFIXES = ["proxy-", "cf-"];
 
-/** Hop-by-hop, proxy-* and cf-* headers are neither stored nor forwarded. */
 export function isDroppedHeader(name: string): boolean {
 	const lower = name.toLowerCase();
 	return (
@@ -24,10 +22,6 @@ export function isDroppedHeader(name: string): boolean {
 	);
 }
 
-/**
- * Header denylist applied before storage (roadmap §7.1): dropped headers are
- * removed, credentials and the source's auth header are redacted.
- */
 export function storableHeaders(
 	headers: Headers,
 	authHeader: string | null,

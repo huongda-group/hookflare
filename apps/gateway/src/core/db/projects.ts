@@ -2,6 +2,13 @@ import { desc, eq, lt } from "drizzle-orm";
 import type { Db } from "../../deps";
 import { type ProjectRow, projects } from "./schema";
 
+export async function hasProject(db: Db): Promise<boolean> {
+	return (
+		(await db.select({ id: projects.id }).from(projects).limit(1).get()) !==
+		undefined
+	);
+}
+
 export async function getProject(
 	db: Db,
 	id: string,
@@ -9,7 +16,6 @@ export async function getProject(
 	return db.select().from(projects).where(eq(projects.id, id)).get();
 }
 
-/** Returns up to limit + 1 rows so the caller can tell whether a next page exists. */
 export async function listProjects(
 	db: Db,
 	q: { limit: number; cursor?: string },

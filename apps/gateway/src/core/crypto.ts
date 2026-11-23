@@ -3,12 +3,10 @@ export type SecretsEnv = {
 	SECRETS_KEY_PREVIOUS?: string;
 };
 
-/** SECRETS_KEY / SECRETS_KEY_PREVIOUS is missing or malformed (a config error). */
 export class SecretKeyError extends Error {
 	override name = "SecretKeyError";
 }
 
-/** A stored secret is malformed, tampered, bound to another context, or uses an unknown key. */
 export class DecryptError extends Error {
 	override name = "DecryptError";
 }
@@ -101,11 +99,6 @@ async function loadKey(b64: string, label: string): Promise<LoadedKey> {
 	return { key, kid };
 }
 
-/**
- * Encrypt a secret with AES-256-GCM. `context` is bound as AAD (e.g.
- * `sources.secret_enc:src_...`) so a ciphertext cannot be replayed under a
- * different context. Returns `v1.<kid>.<iv>.<ciphertext>` (base64url parts).
- */
 export async function encryptSecret(
 	env: SecretsEnv,
 	plaintext: string,
@@ -127,11 +120,6 @@ export async function encryptSecret(
 	return `v1.${kid}.${bytesToB64url(iv)}.${bytesToB64url(new Uint8Array(ct))}`;
 }
 
-/**
- * Decrypt a `v1.<kid>.<iv>.<ciphertext>` secret. The same `context` used at
- * encryption time is required. SECRETS_KEY_PREVIOUS is accepted for decryption
- * only (key rotation).
- */
 export async function decryptSecret(
 	env: SecretsEnv,
 	stored: string,
@@ -169,8 +157,6 @@ export async function decryptSecret(
 		);
 	}
 
-	// Load the previous key only when the current one doesn't match, so a bad
-	// SECRETS_KEY_PREVIOUS can't break decryption of current-key secrets.
 	const current = await loadKey(env.SECRETS_KEY, "SECRETS_KEY");
 	let match: LoadedKey | undefined;
 	if (current.kid === kid) {
@@ -204,7 +190,6 @@ export async function decryptSecret(
 	}
 }
 
-/** Stable non-reversible identifier for a secret value (first 8 hex of SHA-256). */
 export async function secretFingerprint(plaintext: string): Promise<string> {
 	return (await sha256Hex(plaintext)).slice(0, KID_LEN);
 }

@@ -24,11 +24,6 @@ export type Manifest = {
 	tables: ManifestTable[];
 };
 
-/**
- * The backup's table of contents: which migrations were applied, and the
- * parts (with their checksums) holding every table. The row keeps the
- * roll-up counts so the admin UI never reads R2.
- */
 export async function writeManifest(
 	deps: Pick<Deps, "db" | "backups" | "now">,
 	backupId: string,

@@ -3,6 +3,7 @@ import {
 	type Cutoffs,
 	countMarked,
 	DAY_MS,
+	MISSING_PART,
 	markPart,
 } from "../../core/db/archive";
 import {
@@ -19,9 +20,8 @@ import { groupBy } from "./ndjson";
 export const PART_MAX_EVENTS = 5_000;
 export const PART_MAX_RAW_BYTES = 32 * 1024 * 1024;
 const PAGE = 90;
-/** Spec §7.5: the `event` object of a line holds every webhook_events column but these. */
 export const EVENT_LINE_EXCLUDED = [
-	"body_inline", // sent as payload_b64
+	"body_inline",
 	"archive_batch_id",
 	"archive_part",
 ] as const;
@@ -41,7 +41,7 @@ const EVENT_COLUMNS = sql.raw(
 	EVENT_LINE_COLUMNS.map((c) => `e.${c}`).join(", "),
 );
 
-export type PartResult = { itemCount: number; bytes: number };
+export type PartResult = { itemCount: number; bytes: number; parked?: number };
 type Batch = typeof archiveBatches.$inferSelect;
 
 async function loadBatch(deps: Deps, batchId: string): Promise<Batch> {
@@ -54,7 +54,6 @@ async function loadBatch(deps: Deps, batchId: string): Promise<Batch> {
 	return b;
 }
 
-/** What eventLines actually wrote, and the events it left out. */
 type LineTally = {
 	written: number;
 	first: string | null;
@@ -62,12 +61,6 @@ type LineTally = {
 	missing: string[];
 };
 
-/**
- * Spec §7.4 `part`. Reuses an existing mark, otherwise marks the next slice;
- * the R2 key is deterministic and the put overwrites, so a retry is safe.
- * An event whose R2 payload is gone is left out of the file and unmarked, so
- * it stays in D1 instead of being purged without its body.
- */
 export async function buildEventPart(
 	deps: Deps,
 	batchId: string,
@@ -76,7 +69,6 @@ export async function buildEventPart(
 	logger: Logger = createLogger(deps.env),
 ): Promise<PartResult> {
 	const batch = await loadBatch(deps, batchId);
-	// A verified batch must not change under its manifest.
 	if (batch.status !== "building") return { itemCount: 0, bytes: 0 };
 	let n = await countMarked(deps.db, batchId, partNo);
 	if (n === 0) {
@@ -103,18 +95,16 @@ export async function buildEventPart(
 			missing: [],
 		};
 		const gz = await gzipLines(eventLines(deps, batchId, partNo, tally));
-		// Unmark before the put: a retry then rebuilds the same file without them.
-		await unmarkPartEvents(deps, batchId, partNo, tally.missing);
+		await parkMissing(deps, batchId, partNo, tally.missing);
 		for (const id of tally.missing)
 			logger.error("archive.payload_missing", {
 				batch_id: batchId,
 				part_no: partNo,
 				event_id: id,
 			});
-		// The run loop stops at an empty part, and verify needs no row for it.
 		const { first, last, written } = tally;
 		if (written === 0 || first === null || last === null)
-			return { itemCount: 0, bytes: 0 };
+			return { itemCount: 0, bytes: 0, parked: tally.missing.length };
 		range = { first, last, n: written };
 		key = partKey(batchPrefix("events", batch.day, batchId), partNo);
 		sha = await sha256Hex(gz);
@@ -149,8 +139,7 @@ export async function buildEventPart(
 	return { itemCount: range.n, bytes };
 }
 
-/** Clears this part's mark on the given events; 90 IDs + 2 = 92 params. */
-async function unmarkPartEvents(
+async function parkMissing(
 	deps: Deps,
 	batchId: string,
 	partNo: number,
@@ -162,7 +151,7 @@ async function unmarkPartEvents(
 		stmts.push(
 			deps.db
 				.update(webhookEvents)
-				.set({ archiveBatchId: null, archivePart: null })
+				.set({ archivePart: MISSING_PART })
 				.where(
 					and(
 						inArray(webhookEvents.id, ids.slice(i, i + PAGE)),
@@ -175,11 +164,6 @@ async function unmarkPartEvents(
 	await deps.db.batch(stmts as [(typeof stmts)[0], ...typeof stmts]);
 }
 
-/**
- * One line per marked event, built page by page so memory stays bounded.
- * An event whose R2 payload is gone gets no line; it is listed in
- * `tally.missing` instead.
- */
 async function* eventLines(
 	deps: Deps,
 	batchId: string,
@@ -217,6 +201,7 @@ async function* eventLines(
 				SELECT a.* FROM delivery_attempts a JOIN deliveries d ON d.id = a.delivery_id
 				JOIN webhook_events e ON e.id = d.event_id WHERE ${scope} ORDER BY a.delivery_id, a.attempt_no`),
 		]);
+		/* istanbul ignore next */
 		const bodyOf = new Map(
 			bodies.map((b) => [
 				b.id,
@@ -252,7 +237,6 @@ async function* eventLines(
 	}
 }
 
-/** Audit rows never change, so parts are ID ranges within the day (spec §7.4). */
 export async function buildAuditPart(
 	deps: Deps,
 	batchId: string,

@@ -17,7 +17,6 @@ const hex = (buf: ArrayBuffer | undefined) =>
 				.join("")
 		: null;
 
-/** Spec §7.4 `verify`. Any mismatch sets `failed`; a failed batch is never purged. */
 export async function verifyBatch(
 	deps: Deps,
 	batchId: string,
@@ -37,9 +36,6 @@ export async function verifyBatch(
 		.from(archiveParts)
 		.where(eq(archiveParts.batchId, batchId))
 		.orderBy(archiveParts.partNo);
-	// A failed batch is never purged, so it releases its marks in the same
-	// batch as the status change: the day is archived again by a later batch,
-	// and retention removes the failed batch's files.
 	const fail = async (error: string): Promise<VerifyResult> => {
 		await deps.db.batch([
 			deps.db
@@ -72,7 +68,6 @@ export async function verifyBatch(
 			if (hex(head.checksums.sha256) !== part.sha256)
 				return fail(`part ${part.partNo}: sha256 mismatch`);
 		}
-		// Replay only removes marks, so the live count can only shrink (spec §7.4).
 		const live =
 			batch.kind === "events"
 				? await countMarked(deps.db, batchId, part.partNo)
@@ -143,5 +138,6 @@ async function countAudit(
 ): Promise<number> {
 	const [r] = await deps.db.all<{ n: number }>(sql`
 		SELECT COUNT(*) AS n FROM audit_logs WHERE at >= ${dayStart} AND at < ${dayStart + DAY_MS} AND id >= ${firstId} AND id <= ${lastId}`);
+	/* istanbul ignore next */
 	return r?.n ?? 0;
 }

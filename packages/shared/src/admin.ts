@@ -5,22 +5,23 @@ export const PROJECT_STATUSES = ["active", "disabled"] as const;
 export const SOURCE_STATUSES = ["active", "disabled"] as const;
 export const AUTH_TYPES = ["none", "hmac", "token"] as const;
 export const EVENT_ID_FROM = ["none", "header", "json_path"] as const;
-/** `paused` is set only by `POST /destinations/:id/pause`. */
 const DESTINATION_PATCH_STATUSES = ["active", "disabled"] as const;
 
 const HEADER_NAME = /^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,100}$/;
 
 const name = z.string().trim().min(1).max(100);
 const projectId = z.string().startsWith("prj_").max(64);
+
+export const projectScopeQuery = z.object({
+	project_id: projectId.optional(),
+});
 const destinationId = z.string().startsWith("dst_").max(64);
 const url = z.url().max(2048);
 const timeoutMs = z.number().int().min(1000).max(30000);
 const maxAttempts = z.number().int().min(1).max(50);
 const backoffBaseS = z.number().int().min(1).max(3600);
-/** Queues cap delaySeconds at 12 h. ≥ backoff_base_s is checked by the route after defaults. */
 const backoffMaxS = z.number().int().min(1).max(43_200);
 const maxBodyBytes = z.number().int().min(1).max(10_485_760);
-/** M5a: NULL = unlimited. Not part of retry_defaults (limits describe one backend). */
 export const destinationLimit = z.number().int().min(1).max(1000);
 const secret = z.string().min(16).max(512);
 
@@ -38,7 +39,6 @@ export const tokenAuthConfig = z
 		in: z.enum(["header", "query"]),
 		name: z.string().min(1).max(100),
 	})
-	// An invalid header name would make Headers.get() throw on every request.
 	.refine((cfg) => cfg.in !== "header" || HEADER_NAME.test(cfg.name), {
 		path: ["name"],
 		message: "name must be a valid header name when in is header",
@@ -62,7 +62,6 @@ export function authConfigSchemaFor(
 			: noneAuthConfig;
 }
 
-/** null when the pair is valid, otherwise a human-readable reason (§6.2). */
 export function eventIdConfigError(
 	from: string,
 	selector: string | null | undefined,
@@ -87,11 +86,11 @@ export function eventIdConfigError(
 }
 
 function refineEventId(
-	value: { event_id_from?: string; event_id_selector?: string | null },
+	value: { event_id_from: string; event_id_selector?: string | null },
 	ctx: z.RefinementCtx,
 ) {
 	const error = eventIdConfigError(
-		value.event_id_from ?? "none",
+		value.event_id_from,
 		value.event_id_selector,
 	);
 	if (error) {
@@ -111,7 +110,6 @@ export const listQuery = z.object({
 
 export const createProjectRequest = z.strictObject({
 	name,
-	slug: z.string().regex(/^[a-z0-9][a-z0-9-]{1,62}$/),
 	...optionalReason,
 });
 export const patchProjectRequest = z.strictObject({
@@ -177,10 +175,6 @@ export const createSourceRequest = z
 	])
 	.superRefine((v, ctx) => refineEventId(v, ctx));
 
-/**
- * auth_config is checked against the stored auth_type, and event_id_* against
- * the merged row, in the route (both need the existing source).
- */
 export const patchSourceRequest = z.strictObject({
 	name: name.optional(),
 	status: z.enum(SOURCE_STATUSES).optional(),
@@ -195,12 +189,10 @@ export const patchSourceRequest = z.strictObject({
 export type CreateSourceRequest = z.infer<typeof createSourceRequest>;
 export type PatchSourceRequest = z.infer<typeof patchSourceRequest>;
 
-// Response shapes (§9.2). The gateway builds them; the dashboard (M4) reads them.
 export type Page<T> = { data: T[]; next_cursor: string | null };
 export type Project = {
 	id: string;
 	name: string;
-	slug: string;
 	status: (typeof PROJECT_STATUSES)[number];
 	created_at: number;
 	updated_at: number;
@@ -279,8 +271,6 @@ export type WebhookEvent = {
 	deliveries: Delivery[];
 };
 
-// ---- M3: roles, permissions, and the new endpoints (spec §6–§12) ----
-
 export const ROLES = ["admin", "operator", "viewer"] as const;
 export type Role = (typeof ROLES)[number];
 export const PERMISSIONS = [
@@ -312,28 +302,31 @@ const deliveryId = z.string().startsWith("dlv_").max(64);
 const epochMs = z.coerce.number().int().min(0);
 const pageLimit = z.coerce.number().int().min(1).max(100).default(50);
 const cursor = z.string().max(512).optional();
-/** Query flags arrive as strings. */
 const queryBool = z.enum(["true", "false"]).transform((v) => v === "true");
-const email = z.string().trim().toLowerCase().pipe(z.email().max(254));
-
-/** Service-token identities (`svc:`) authenticate like users (§6.1). */
-export function isServiceIdentity(id: string): boolean {
-	return id.startsWith("svc:");
-}
-
-/** The only `svc:` identities a users row can be created for. */
-export const SERVICE_IDENTITY_PATTERN = /^svc:[a-z0-9._-]{1,200}$/;
-
-const serviceIdentity = z
+export const USERNAME_PATTERN = /^[a-z0-9][a-z0-9._@+-]{2,63}$/;
+export const username = z.string().trim().toLowerCase().regex(USERNAME_PATTERN);
+export const PASSWORD_MIN_LENGTH = 6;
+export const PASSWORD_MAX_LENGTH = 256;
+export const password = z
 	.string()
-	.trim()
-	.toLowerCase()
-	.regex(SERVICE_IDENTITY_PATTERN);
-/** Either a user email or a service-token identity. */
-export const userId = z.union([email, serviceIdentity]);
-const graceHours = z.number().int().min(0).max(168).default(24);
+	.min(PASSWORD_MIN_LENGTH)
+	.max(PASSWORD_MAX_LENGTH);
 
-/** `status` and `destination_id`-style filters may repeat (`?status=a&status=b`). */
+export const loginRequest = z.strictObject({
+	username: z.string().trim().toLowerCase().min(1).max(254),
+	password: z.string().min(1).max(256),
+	turnstile_token: z.string().max(2048).optional(),
+});
+export const setupRequest = z.strictObject({
+	username,
+	password,
+	turnstile_token: z.string().max(2048).optional(),
+});
+export type AuthState = {
+	setup_required: boolean;
+	turnstile_site_key: string | null;
+};
+const graceHours = z.number().int().min(0).max(168).default(24);
 export const eventSearchQuery = z
 	.object({
 		project_id: projectId.optional(),
@@ -364,7 +357,7 @@ export const failuresQuery = z.object({
 });
 
 export const auditLogQuery = z.object({
-	actor_email: userId.optional(),
+	actor: z.string().trim().toLowerCase().min(1).max(254).optional(),
 	resource_type: z.string().min(1).max(50).optional(),
 	resource_id: z.string().min(1).max(64).optional(),
 	action: z.string().min(1).max(100).optional(),
@@ -387,7 +380,6 @@ export const bulkReplayRequest = z.strictObject({
 });
 
 export const testDeliveryRequest = z.strictObject({
-	/** Any JSON; the 64 KiB admin body cap bounds its serialized size. */
 	payload: z.unknown().optional(),
 	...optionalReason,
 });
@@ -402,12 +394,12 @@ export const rotateDestinationSecretRequest = z.strictObject({
 	...optionalReason,
 });
 
-/** Pause/Resume take an optional body. */
 export const operateRequest = z.strictObject({ ...optionalReason });
 
 export const createUserRequest = z.strictObject({
-	email: userId,
+	username,
 	role: z.enum(ROLES),
+	password,
 	...optionalReason,
 });
 export const patchUserRequest = z
@@ -419,6 +411,19 @@ export const patchUserRequest = z
 	.refine((v) => v.role !== undefined || v.disabled !== undefined, {
 		message: "role or disabled is required",
 	});
+export const resetPasswordRequest = z.strictObject({
+	password,
+	...optionalReason,
+});
+export const changePasswordRequest = z.strictObject({
+	current_password: z.string().min(1).max(256),
+	new_password: password,
+});
+export const createApiTokenRequest = z.strictObject({
+	name,
+	expires_in_days: z.number().int().min(1).max(365).optional(),
+	...optionalReason,
+});
 
 export type DeliveryStatusValue = (typeof DELIVERY_STATUS_VALUES)[number];
 export type EventSummary = {
@@ -455,6 +460,7 @@ export type BulkReplayResult = {
 	replayed: {
 		delivery_id: string;
 		new_delivery_id: string;
+		status: string;
 		enqueued: boolean;
 	}[];
 	skipped: { delivery_id: string; reason: string }[];
@@ -462,7 +468,7 @@ export type BulkReplayResult = {
 export type TestDelivery = {
 	id: string;
 	destination_id: string;
-	actor_email: string;
+	actor: string;
 	started_at: number;
 	duration_ms: number;
 	http_status: number | null;
@@ -471,16 +477,32 @@ export type TestDelivery = {
 	response_snippet: string | null;
 };
 export type User = {
-	email: string;
+	username: string;
 	role: Role;
 	created_at: number;
 	updated_at: number;
 	disabled_at: number | null;
+	has_password: boolean;
 };
-export type Me = { email: string; role: Role; permissions: Permission[] };
+export type Me = {
+	username: string;
+	role: Role;
+	permissions: Permission[];
+	project_required: boolean;
+};
+export type ApiToken = {
+	id: string;
+	username: string;
+	name: string;
+	created_at: number;
+	expires_at: number | null;
+	last_used_at: number | null;
+	revoked_at: number | null;
+};
+export type CreatedApiToken = ApiToken & { token: string };
 export type AuditLog = {
 	id: string;
-	actor_email: string;
+	actor: string;
 	action: string;
 	resource_type: string;
 	resource_id: string | null;
@@ -488,8 +510,6 @@ export type AuditLog = {
 	diff: Record<string, unknown> | null;
 	at: number;
 };
-
-// ---- M4: overview, destination stats, and settings (spec §7) ----
 
 export const STATS_RANGES = ["24h", "7d", "30d"] as const;
 export type StatsRange = (typeof STATS_RANGES)[number];
@@ -499,13 +519,18 @@ export const RANGE_HOURS: Record<StatsRange, number> = {
 	"30d": 720,
 };
 
-/** For GET /overview and GET /destinations/stats. */
 export const statsQuery = z.object({
 	project_id: projectId.optional(),
 	range: z.enum(STATS_RANGES).default("24h"),
 });
 
-/** Same bounds as the destination policy fields (spec §7.3). */
+export const overviewQuery = statsQuery
+	.extend({ alert_scope: z.literal("project").optional() })
+	.refine((v) => !v.alert_scope || v.project_id !== undefined, {
+		path: ["project_id"],
+		message: "Project alert scope requires a project",
+	});
+
 export const retryDefaultsSchema = z
 	.strictObject({
 		timeout_ms: timeoutMs,
@@ -529,7 +554,6 @@ export const ALERT_RULES = [
 ] as const;
 export type AlertRule = (typeof ALERT_RULES)[number];
 
-/** Spec §6.2. reminder_s = 0 means "never remind". */
 export const alertRulesSchema = z.strictObject({
 	failure_threshold: z.number().int().min(2).max(100),
 	stuck_after_s: z.number().int().min(60).max(86_400),
@@ -554,7 +578,6 @@ export const DEFAULT_ALERT_RULES: AlertRules = {
 export const ALERT_CHANNEL_TYPES = ["discord", "slack", "telegram"] as const;
 export type AlertChannelType = (typeof ALERT_CHANNEL_TYPES)[number];
 
-/** M5-10: alerts only ever go to these endpoints. */
 interface ParsedAlertUrl {
 	protocol: string;
 	username: string;
@@ -563,7 +586,6 @@ interface ParsedAlertUrl {
 	hostname: string;
 	pathname: string;
 }
-/** The shared package typechecks without the DOM lib; at runtime this is the global URL. */
 declare const URL: new (url: string) => ParsedAlertUrl;
 export function isAllowedAlertUrl(
 	type: "discord" | "slack",
@@ -630,7 +652,6 @@ export const createAlertChannelRequest = z.strictObject({
 	project_ids: channelRoutes.project_ids.default([]),
 	...optionalReason,
 });
-/** `config` replaces the stored one; its type must match the channel's. */
 export const patchAlertChannelRequest = z.strictObject({
 	name: name.optional(),
 	enabled: z.boolean().optional(),
@@ -640,10 +661,25 @@ export const patchAlertChannelRequest = z.strictObject({
 	...optionalReason,
 });
 
-export const alertsQuery = listQuery.extend({
-	status: z.enum(["open", "resolved"]).optional(),
-	rule: z.enum(ALERT_RULES).optional(),
-});
+const alertScopeFields = { scope: z.literal("deployment").optional() };
+const validAlertScope = (v: { scope?: "deployment"; project_id?: string }) =>
+	!v.scope || v.project_id === undefined;
+const alertScopeIssue = {
+	path: ["scope"],
+	message: "Deployment alert scope cannot be combined with a project",
+};
+
+export const alertScopeQuery = projectScopeQuery
+	.extend(alertScopeFields)
+	.refine(validAlertScope, alertScopeIssue);
+
+export const alertsQuery = listQuery
+	.extend({
+		...alertScopeFields,
+		status: z.enum(["open", "resolved"]).optional(),
+		rule: z.enum(ALERT_RULES).optional(),
+	})
+	.refine(validAlertScope, alertScopeIssue);
 
 export type AlertChannel = {
 	id: string;
@@ -662,7 +698,6 @@ export type Alert = {
 	rule: AlertRule;
 	resource_type: "destination" | "system";
 	resource_id: string;
-	/** Destination name, or null for system incidents and deleted destinations. */
 	resource_name: string | null;
 	project_id: string | null;
 	status: "open" | "resolved";
@@ -685,7 +720,6 @@ export type AlertNotification = {
 export type AlertDetail = Alert & { notifications: AlertNotification[] };
 export type ChannelTestResult = { ok: boolean; error: string | null };
 
-/** Spec §7.2. */
 export const storageSettingsSchema = z
 	.strictObject({
 		archive_enabled: z.boolean(),
@@ -766,7 +800,6 @@ export type ArchiveLastRun = {
 	started_at: number;
 };
 
-/** `expiring`: retention started deleting its objects; never restorable again. */
 export const BACKUP_STATUSES = [
 	"running",
 	"verified",
@@ -804,7 +837,6 @@ export const patchSettingsRequest = z
 	);
 export type Settings = {
 	retry_defaults: RetryDefaults;
-	/** retry_defaults' version (kept for M4 clients). */
 	updated_at: number | null;
 	alert_rules: AlertRules;
 	alert_rules_updated_at: number | null;
@@ -813,7 +845,6 @@ export type Settings = {
 	archive_last_run: ArchiveLastRun | null;
 };
 
-/** Non-terminal statuses counted live by the Overview. */
 export const LIVE_STATUSES = [
 	"pending",
 	"queued",

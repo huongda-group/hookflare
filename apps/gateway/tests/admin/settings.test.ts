@@ -1,0 +1,285 @@
+import {
+	DEFAULT_ALERT_RULES,
+	DEFAULT_STORAGE_SETTINGS,
+	type Settings,
+} from "@hookflare/shared";
+import { eq } from "drizzle-orm";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { startArchiveRun } from "../../src/core/archive-run";
+import { auditLogs, settings } from "../../src/core/db/schema";
+import { createLogger } from "../../src/core/log";
+import {
+	ALERT_RULES_SETTING,
+	clearSettingsCache,
+	RETRY_DEFAULTS_KEY,
+	STORAGE_SETTING,
+	upsertRetryDefaults,
+} from "../../src/core/settings";
+import {
+	adminApp,
+	auditRows,
+	beforeNextBatch,
+	seedAdminProject,
+} from "../helpers/admin";
+import { fakeArchive, testDeps, withFailingBatch } from "../helpers/deps";
+
+const next = {
+	timeout_ms: 5000,
+	max_attempts: 5,
+	backoff_base_s: 10,
+	backoff_max_s: 600,
+};
+
+beforeEach(async () => {
+	await seedAdminProject();
+	clearSettingsCache();
+	const deps = testDeps();
+	await deps.db.delete(settings).where(eq(settings.key, RETRY_DEFAULTS_KEY));
+	await deps.db
+		.delete(settings)
+		.where(eq(settings.key, ALERT_RULES_SETTING.key));
+	await deps.db.delete(settings).where(eq(settings.key, STORAGE_SETTING.key));
+	await deps.db
+		.delete(auditLogs)
+		.where(eq(auditLogs.resourceId, RETRY_DEFAULTS_KEY));
+	await deps.db
+		.delete(auditLogs)
+		.where(eq(auditLogs.resourceId, ALERT_RULES_SETTING.key));
+});
+
+describe("GET /settings", () => {
+	it("returns DEFAULT_POLICY to a viewer when nothing is stored", async () => {
+		const api = await adminApp(testDeps(), { role: "viewer" });
+		const res = await api.request("GET", "/settings");
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({
+			retry_defaults: {
+				timeout_ms: 10_000,
+				max_attempts: 20,
+				backoff_base_s: 30,
+				backoff_max_s: 21_600,
+			},
+			updated_at: null,
+			alert_rules: DEFAULT_ALERT_RULES,
+			alert_rules_updated_at: null,
+			storage: DEFAULT_STORAGE_SETTINGS,
+			storage_updated_at: null,
+			archive_last_run: null,
+		} satisfies Settings);
+	});
+});
+
+describe("GET /settings with corrupt rows", () => {
+	it("falls back to defaults and logs a warning per corrupt section", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const deps = testDeps();
+		for (const key of [
+			RETRY_DEFAULTS_KEY,
+			ALERT_RULES_SETTING.key,
+			STORAGE_SETTING.key,
+		]) {
+			await deps.db
+				.insert(settings)
+				.values({ key, valueJson: "not json", updatedAt: 1 });
+		}
+		try {
+			const api = await adminApp(deps, { role: "viewer" });
+			const res = await api.request("GET", "/settings");
+			expect(res.status).toBe(200);
+			expect(await res.json()).toMatchObject({
+				retry_defaults: { max_attempts: 20 },
+				alert_rules: DEFAULT_ALERT_RULES,
+				storage: DEFAULT_STORAGE_SETTINGS,
+			});
+			const msgs = warn.mock.calls.map((c) => JSON.parse(String(c[0])).msg);
+			expect(msgs).toEqual(
+				expect.arrayContaining([
+					"settings.retry_defaults_invalid",
+					"settings.alert_rules_invalid",
+					"settings.storage_invalid",
+				]),
+			);
+		} finally {
+			warn.mockRestore();
+		}
+	});
+});
+
+describe("PATCH /settings", () => {
+	it("stores the defaults and audits before/after in one batch", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps);
+		const res = await api.request("PATCH", "/settings", {
+			retry_defaults: next,
+			reason: "tighter retries",
+		});
+		expect(res.status).toBe(200);
+		const body = await res.json<Settings>();
+		expect(body.retry_defaults).toEqual(next);
+		expect(body.updated_at).toEqual(expect.any(Number));
+		const get = await (await api.request("GET", "/settings")).json<Settings>();
+		expect(get).toEqual(body);
+		const [audit] = await auditRows(deps, RETRY_DEFAULTS_KEY);
+		expect(audit).toMatchObject({
+			action: "settings.updated",
+			resourceType: "settings",
+			reason: "tighter retries",
+			diffJson: {
+				before: { max_attempts: 20, backoff_max_s: 21_600 },
+				after: next,
+			},
+		});
+	});
+
+	it("forbids operators", async () => {
+		const api = await adminApp(testDeps(), { role: "operator" });
+		const res = await api.request("PATCH", "/settings", {
+			retry_defaults: next,
+		});
+		expect(res.status).toBe(403);
+		expect(await res.json()).toMatchObject({
+			error: "forbidden",
+			required: "settings.manage",
+		});
+	});
+
+	it("rejects base above max with the field path", async () => {
+		const api = await adminApp(testDeps());
+		const res = await api.request("PATCH", "/settings", {
+			retry_defaults: { ...next, backoff_base_s: 900 },
+		});
+		expect(res.status).toBe(400);
+		const body = await res.json<{ issues: { path: string }[] }>();
+		expect(body.issues.map((i) => i.path)).toContain(
+			"retry_defaults.backoff_max_s",
+		);
+	});
+
+	it("advances updated_at when two updates land in the same millisecond", async () => {
+		const deps = testDeps({ now: () => 1_000 });
+		const api = await adminApp(deps);
+		const first = await api.request("PATCH", "/settings", {
+			retry_defaults: next,
+		});
+		expect((await first.json<Settings>()).updated_at).toBe(1_000);
+		const second = await api.request("PATCH", "/settings", {
+			retry_defaults: { ...next, max_attempts: 6 },
+		});
+		expect(second.status).toBe(200);
+		expect((await second.json<Settings>()).updated_at).toBe(1_001);
+	});
+
+	it("answers 409 and writes no audit row when another update wins the race", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps);
+		await api.request("GET", "/me");
+		beforeNextBatch(deps, () =>
+			upsertRetryDefaults(deps.db, { ...next, max_attempts: 9 }, 1),
+		);
+		const res = await api.request("PATCH", "/settings", {
+			retry_defaults: next,
+		});
+		expect(res.status).toBe(409);
+		expect(await auditRows(deps, RETRY_DEFAULTS_KEY)).toEqual([]);
+		const stored = await (
+			await api.request("GET", "/settings")
+		).json<Settings>();
+		expect(stored.retry_defaults.max_attempts).toBe(9);
+	});
+
+	it("writes no section when only one of two sections conflicts", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps);
+		await api.request("GET", "/me");
+		beforeNextBatch(deps, () =>
+			upsertRetryDefaults(deps.db, { ...next, max_attempts: 9 }, 1),
+		);
+		const res = await api.request("PATCH", "/settings", {
+			alert_rules: { ...DEFAULT_ALERT_RULES, failure_threshold: 7 },
+			retry_defaults: next,
+		});
+		expect(res.status).toBe(409);
+		expect(await auditRows(deps, RETRY_DEFAULTS_KEY)).toEqual([]);
+		expect(await auditRows(deps, ALERT_RULES_SETTING.key)).toEqual([]);
+		const stored = await (
+			await api.request("GET", "/settings")
+		).json<Settings>();
+		expect(stored.alert_rules.failure_threshold).toBe(
+			DEFAULT_ALERT_RULES.failure_threshold,
+		);
+		expect(stored.retry_defaults.max_attempts).toBe(9);
+	});
+
+	it("writes neither the setting nor the audit row when the batch fails", async () => {
+		const deps = testDeps();
+		const failing = { ...deps, db: withFailingBatch(deps.db) };
+		const api = await adminApp(failing);
+		const res = await api.request("PATCH", "/settings", {
+			retry_defaults: next,
+		});
+		expect(res.status).toBe(500);
+		expect(
+			await deps.db
+				.select()
+				.from(settings)
+				.where(eq(settings.key, RETRY_DEFAULTS_KEY)),
+		).toEqual([]);
+		expect(await auditRows(deps, RETRY_DEFAULTS_KEY)).toEqual([]);
+	});
+
+	it("returns alert_rules defaults and patches them independently", async () => {
+		const deps = testDeps();
+		const app = await adminApp(deps);
+		const got = await (await app.request("GET", "/settings")).json<Settings>();
+		expect(got.alert_rules).toEqual(DEFAULT_ALERT_RULES);
+		expect(got.alert_rules_updated_at).toBeNull();
+
+		const next = { ...DEFAULT_ALERT_RULES, failure_threshold: 8 };
+		const res = await app.request("PATCH", "/settings", { alert_rules: next });
+		expect(res.status).toBe(200);
+		const body = await res.json<Settings>();
+		expect(body.alert_rules).toEqual(next);
+		expect(body.alert_rules_updated_at).toEqual(expect.any(Number));
+		expect(body.updated_at).toBeNull();
+		const audits = await auditRows(deps, "alert_rules");
+		expect(audits.map((a) => a.action)).toEqual(["settings.updated"]);
+	});
+
+	it("rejects an empty PATCH", async () => {
+		const api = await adminApp(testDeps());
+		const res = await api.request("PATCH", "/settings", {});
+		expect(res.status).toBe(400);
+	});
+
+	it("returns storage defaults and validates failed ≥ hot", async () => {
+		const app = await adminApp(testDeps());
+		const got = await (await app.request("GET", "/settings")).json<Settings>();
+		expect(got.storage).toEqual(DEFAULT_STORAGE_SETTINGS);
+		const bad = await app.request("PATCH", "/settings", {
+			storage: { ...DEFAULT_STORAGE_SETTINGS, hot_retention_days: 100 },
+		});
+		expect(bad.status).toBe(400);
+		const ok = await app.request("PATCH", "/settings", {
+			storage: { ...DEFAULT_STORAGE_SETTINGS, archive_enabled: false },
+		});
+		expect((await ok.json<Settings>()).storage.archive_enabled).toBe(false);
+	});
+
+	it("reports the last archive run", async () => {
+		const archive = fakeArchive("running");
+		const d = testDeps({ archive });
+		await startArchiveRun(
+			d,
+			"archive-2027-01-01",
+			"cron",
+			createLogger({ LOG_LEVEL: "error" }),
+		);
+		const body = await (
+			await (await adminApp(d)).request("GET", "/settings")
+		).json<Settings>();
+		expect(body.archive_last_run).toMatchObject({
+			instance_id: "archive-2027-01-01",
+			status: "running",
+		});
+	});
+});

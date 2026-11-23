@@ -1,8 +1,8 @@
 import {
 	type AlertRule,
 	type Overview,
+	overviewQuery,
 	RANGE_HOURS,
-	statsQuery,
 	type TrendPoint,
 } from "@hookflare/shared";
 import { and, eq, isNull, or, sql } from "drizzle-orm";
@@ -20,7 +20,6 @@ import {
 import { requirePermission } from "../auth/permission";
 import { readQuery } from "../http";
 
-/** null when nothing completed: 0 % would claim every delivery failed. */
 export function successRate(delivered: number, failed: number): number | null {
 	const done = delivered + failed;
 	return done === 0 ? null : delivered / done;
@@ -30,7 +29,7 @@ export function overviewRoutes() {
 	const routes = new Hono<AppBindings>();
 
 	routes.get("/", requirePermission("events.read"), async (c) => {
-		const q = readQuery(c, statsQuery);
+		const q = readQuery(c, overviewQuery);
 		if (!q.ok) return q.response;
 		const { db, now } = c.var.deps;
 		const generatedAt = now();
@@ -39,6 +38,13 @@ export function overviewRoutes() {
 			...statsWindow(generatedAt, hours),
 			projectId: q.value.project_id,
 		};
+		const projectAlert = scope.projectId
+			? eq(alerts.projectId, scope.projectId)
+			: undefined;
+		const alertScope =
+			projectAlert && !q.value.alert_scope
+				? or(projectAlert, isNull(alerts.projectId))
+				: projectAlert;
 		const [totals, trend, failing, live, openAlerts] = await Promise.all([
 			overviewTotals(db, scope),
 			trendRows(db, scope),
@@ -47,19 +53,7 @@ export function overviewRoutes() {
 			db
 				.select({ rule: alerts.rule, n: sql<number>`COUNT(*)` })
 				.from(alerts)
-				.where(
-					and(
-						eq(alerts.status, "open"),
-						// System alerts (no project) concern every project, so a
-						// project-scoped overview still counts them.
-						q.value.project_id
-							? or(
-									eq(alerts.projectId, q.value.project_id),
-									isNull(alerts.projectId),
-								)
-							: undefined,
-					),
-				)
+				.where(and(eq(alerts.status, "open"), alertScope))
 				.groupBy(alerts.rule),
 		]);
 		const byHour = new Map(trend.map((t) => [t.hour, t]));

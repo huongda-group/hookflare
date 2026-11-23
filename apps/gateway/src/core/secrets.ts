@@ -5,7 +5,6 @@ import type { SecretsEnv } from "./crypto";
 import { decryptSecret, encryptSecret } from "./crypto";
 import type { DestinationRow } from "./db/schema";
 
-/** AAD binds each ciphertext to its column (spec §11.3). */
 export const aad = {
 	source: (id: string) => `sources.secret_enc:${id}`,
 	sourcePrev: (id: string) => `sources.secret_prev_enc:${id}`,
@@ -13,7 +12,6 @@ export const aad = {
 	destinationPrev: (id: string) => `destinations.signing_secret_prev_enc:${id}`,
 };
 
-/** An expired prev is ignored; its columns are cleared on the next write. */
 export function activeSecrets(
 	row: { enc: string; prevEnc: string | null; prevExpiresAt: number | null },
 	now: number,
@@ -25,7 +23,6 @@ export function activeSecrets(
 	return { enc: row.enc, prevEnc: live ? row.prevEnc : null };
 }
 
-/** Decrypted signing secrets, current first (spec M3-3). */
 export async function destinationSigningSecrets(
 	env: SecretsEnv,
 	d: DestinationRow,
@@ -47,10 +44,6 @@ export async function destinationSigningSecrets(
 
 const HOUR_MS = 3_600_000;
 
-/**
- * Spec §11.3: the current secret moves to the prev column under the prev
- * AAD; any older prev is dropped. grace 0 keeps no prev at all.
- */
 export async function rotationColumns(input: {
 	env: AppEnv;
 	currentEnc: string;
@@ -80,10 +73,6 @@ export async function rotationColumns(input: {
 	};
 }
 
-/**
- * SET values that clear an expired prev. Decided inside the UPDATE, not from
- * an earlier read, so a rotation that lands in between keeps its fresh prev.
- */
 export function clearExpiredPrev(
 	prevEnc: SQLiteColumn,
 	prevExpiresAt: SQLiteColumn,

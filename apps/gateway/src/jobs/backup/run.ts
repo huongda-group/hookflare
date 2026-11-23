@@ -13,14 +13,12 @@ import { verifyBackup } from "./verify";
 
 export type BackupLimits = { stepBudget: number };
 export const DEFAULT_BACKUP_LIMITS: BackupLimits = { stepBudget: 900 };
-/** manifest, verify, retention: the steps a continuation must leave room for. */
 const FINAL_STEPS = 3;
 
 function sidecarKey(prefix: string, table: string, partNo: number): string {
 	return `${prefix}parts/${table}-${String(partNo).padStart(4, "0")}.json`;
 }
 
-/** `<base>` is the instance ID without any `-cont-N` suffix. */
 function continuationOf(instanceId: string): { base: string; n: number } {
 	const m = /-cont-(\d+)$/.exec(instanceId);
 	return m
@@ -28,11 +26,6 @@ function continuationOf(instanceId: string): { base: string; n: number } {
 		: { base: instanceId, n: 1 };
 }
 
-/**
- * One backup part plus its sidecar: the sidecar (`<prefix>parts/…`) lets
- * the manifest step rebuild the parts list from R2, so a continuation's
- * fresh Workflow carries no large state.
- */
 export async function dumpPart(
 	d: Pick<Deps, "db" | "backups">,
 	table: TableInfo,
@@ -47,8 +40,6 @@ export async function dumpPart(
 			new TextEncoder().encode(JSON.stringify(r.part)),
 		);
 	} else {
-		// A retry that finds the rows gone: drop what an earlier try wrote, or
-		// the manifest (built from sidecars) would list a part the run ended.
 		await d.backups.delete([
 			sidecarKey(prefix, table.name, partNo),
 			partKey(prefix, table.name, partNo),
@@ -57,7 +48,6 @@ export async function dumpPart(
 	return r;
 }
 
-/** Every part sidecar, oldest first, so the manifest covers continued runs. */
 async function readPartSidecars(
 	d: Pick<Deps, "backups">,
 	prefix: string,
@@ -79,12 +69,6 @@ async function readPartSidecars(
 	return parts;
 }
 
-/**
- * Restricts the live table list to the names the first instance pinned, in
- * that order. A pinned table that no longer exists fails the run; tables
- * created since are left out (and reported as `added`) so every instance of
- * one backup covers the same list.
- */
 function pinTables(
 	live: TableInfo[],
 	pinned: string[] | undefined,
@@ -106,11 +90,6 @@ function pinTables(
 	};
 }
 
-/**
- * Spec M6. Orchestration only: every step is a plain function over Deps.
- * Code outside a step is deterministic (Workflows replays it), so the
- * table list, cursor, and part numbers come from persisted step results.
- */
 export async function runBackup(
 	step: StepFn,
 	deps: () => Deps,
@@ -174,8 +153,6 @@ export async function runBackup(
 						: following
 							? { tableName: following.name, cursor: null, partNo: 1 }
 							: undefined;
-				// After the last table only the final steps remain, and the
-				// budget always leaves room for them: no continuation needed.
 				if (resume && used >= limits.stepBudget - FINAL_STEPS) {
 					const { base, n } = continuationOf(instanceId);
 					await at("continue", () =>
@@ -225,9 +202,7 @@ export async function runBackup(
 					.set({ status: "failed", error: String(err) })
 					.where(eq(backups.id, params.backupId)),
 			);
-		} catch {
-			// Marking failed must not hide the original error.
-		}
+		} catch {}
 		throw err;
 	}
 }

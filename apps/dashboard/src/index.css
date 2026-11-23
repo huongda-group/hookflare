@@ -1,1 +1,186 @@
 @import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+	--font-sans:
+		ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+		"Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji",
+		"Segoe UI Emoji";
+	--font-mono:
+		ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono",
+		monospace;
+}
+
+:root {
+	--canvas: #f7f8fa;
+	--surface: #ffffff;
+	--sidebar: #f1f3f7;
+	--brand: #253b69;
+	--avatar: #dfe5ef;
+	--avatar-foreground: #4a5974;
+
+	--border: #e3e7ed;
+	--input: #d4dce7;
+
+	--foreground: #202733;
+	--muted-foreground: #667080;
+
+	--action: #245bdb;
+	--action-hover: #1c4cbd;
+	--action-foreground: #ffffff;
+
+	--selected: #e1e9fb;
+	--selected-foreground: #244da7;
+
+	--success: #23704d;
+	--success-surface: #e9f5ed;
+	--warning: #805316;
+	--warning-surface: #fff2da;
+	--failure: #a43737;
+	--failure-surface: #fbe6e5;
+	--info: #244da7;
+	--info-surface: #edf2ff;
+	--chart-received: #426ccc;
+	--chart-delivered: #47a083;
+	--chart-failed: #d0847e;
+
+	--accent: #e8ecf3;
+
+	--focus: #245bdb;
+
+	--radius-control: 0.5rem;
+	--radius-panel: 0.625rem;
+}
+
+@theme inline {
+	--color-canvas: var(--canvas);
+	--color-surface: var(--surface);
+	--color-sidebar: var(--sidebar);
+	--color-brand: var(--brand);
+	--color-avatar: var(--avatar);
+	--color-avatar-foreground: var(--avatar-foreground);
+	--color-chart-received: var(--chart-received);
+	--color-chart-delivered: var(--chart-delivered);
+	--color-chart-failed: var(--chart-failed);
+	--color-border: var(--border);
+	--color-input: var(--input);
+	--color-foreground: var(--foreground);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-action: var(--action);
+	--color-action-hover: var(--action-hover);
+	--color-action-foreground: var(--action-foreground);
+	--color-selected: var(--selected);
+	--color-selected-foreground: var(--selected-foreground);
+	--color-success: var(--success);
+	--color-success-surface: var(--success-surface);
+	--color-warning: var(--warning);
+	--color-warning-surface: var(--warning-surface);
+	--color-failure: var(--failure);
+	--color-failure-surface: var(--failure-surface);
+	--color-info: var(--info);
+	--color-info-surface: var(--info-surface);
+
+	--color-background: var(--canvas);
+	--color-card: var(--surface);
+	--color-card-foreground: var(--foreground);
+	--color-popover: var(--surface);
+	--color-popover-foreground: var(--foreground);
+	--color-primary: var(--action);
+	--color-primary-foreground: var(--action-foreground);
+	--color-secondary: var(--sidebar);
+	--color-secondary-foreground: var(--foreground);
+	--color-muted: var(--sidebar);
+	--color-accent: var(--accent);
+	--color-accent-foreground: var(--foreground);
+	--color-destructive: var(--failure);
+	--color-ring: var(--focus);
+
+	--radius-sm: 0.375rem;
+	--radius-md: var(--radius-control);
+	--radius-lg: var(--radius-panel);
+}
+
+@layer base {
+	*,
+	::before,
+	::after {
+		border-color: var(--border);
+	}
+
+	html {
+		color-scheme: light;
+	}
+
+	body {
+		background-color: var(--canvas);
+		color: var(--foreground);
+		font-family: var(--font-sans);
+		font-size: 0.875rem;
+		line-height: 1.5;
+		-webkit-font-smoothing: antialiased;
+	}
+
+	@media (max-width: 767px) {
+		body {
+			font-size: 0.9375rem;
+		}
+	}
+
+	:focus-visible {
+		outline: 2px solid var(--focus);
+		outline-offset: 2px;
+	}
+
+	::selection {
+		background: #dce6ff;
+		color: #193d91;
+	}
+
+	button,
+	input,
+	textarea,
+	select {
+		caret-color: var(--action);
+	}
+	:where(button, a) {
+		touch-action: manipulation;
+	}
+	:where(a) {
+		text-underline-offset: 3px;
+	}
+	:where(.tabular-nums) {
+		font-variant-numeric: tabular-nums;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	::before,
+	::after {
+		/* biome-ignore-start lint/complexity/noImportantStyles: reduced motion must override every component transition */
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+		/* biome-ignore-end lint/complexity/noImportantStyles: reduced motion */
+	}
+}
+
+@media (pointer: coarse) {
+	[data-slot="button"],
+	[data-slot="input"],
+	[data-slot="select-trigger"],
+	button:not([data-slot="checkbox"]):not([data-slot="radio"]),
+	input:not([type="checkbox"]):not([type="radio"]),
+	select,
+	textarea {
+		min-height: 44px;
+		min-width: 44px;
+	}
+
+	[data-slot="checkbox"]::after,
+	[data-slot="radio"]::after {
+		inset: -0.75rem;
+	}
+}

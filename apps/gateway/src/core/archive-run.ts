@@ -14,7 +14,6 @@ export const ARCHIVE_RUNNING = [
 ] as const;
 export type ArchiveParams = { trigger: "cron" | "manual" };
 
-/** A duplicate instance ID means today's run already started (M5-16). */
 export async function startArchiveRun(
 	deps: Deps,
 	instanceId: string,
@@ -40,12 +39,6 @@ export async function startArchiveRun(
 	return "started";
 }
 
-/**
- * Unknown instances (expired from Workflows retention) count as not running.
- * Any other error, and the Workflows status `unknown`, count as running:
- * adopting a live instance's batches would let two instances work on the
- * same batch.
- */
 export async function isArchiveRunning(
 	deps: Deps,
 	instanceId: string,
@@ -75,8 +68,6 @@ export async function readLastRun(deps: Deps): Promise<ArchiveLastRun | null> {
 	let status = "unknown";
 	try {
 		status = (await (await deps.archive.get(v.instance_id)).status()).status;
-	} catch {
-		// Instance expired from Workflows retention.
-	}
+	} catch {}
 	return { instance_id: v.instance_id, started_at: v.started_at, status };
 }

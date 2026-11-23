@@ -3,6 +3,7 @@ import {
 	bulkReplayRequest,
 	type Failure,
 	failuresQuery,
+	projectScopeQuery,
 } from "@hookflare/shared";
 import { Hono } from "hono";
 import type { AppBindings } from "../../app";
@@ -59,7 +60,10 @@ export function failureRoutes() {
 			}),
 			next_cursor:
 				rows.length > q.value.limit && last
-					? encodeCursor(last.completedAt ?? 0, last.id)
+					? encodeCursor(
+							last.completedAt ?? /* istanbul ignore next */ 0,
+							last.id,
+						)
 					: null,
 		});
 	});
@@ -67,11 +71,19 @@ export function failureRoutes() {
 	routes.post("/replay", requirePermission("deliveries.replay"), async (c) => {
 		const body = await readJson(c, bulkReplayRequest);
 		if (!body.ok) return body.response;
+		const q = readQuery(c, projectScopeQuery);
+		if (!q.ok) return q.response;
 		const deps = c.var.deps;
 		const ids = body.value.delivery_ids;
+		const project = q.value.project_id;
 		const found = new Map(
 			(await getDeliveriesByIds(deps.db, ids)).map((d) => [d.id, d]),
 		);
+		if (
+			project !== undefined &&
+			[...found.values()].some((d) => d.projectId !== project)
+		)
+			return c.json({ error: "not_found" }, 404);
 		const skipped: Skip[] = [];
 		const targets: ReplayTarget[] = [];
 		for (const id of ids) {
@@ -97,7 +109,7 @@ export function failureRoutes() {
 			return c.json({ error: "unavailable" }, 503);
 		}
 		const allSkipped = [...skipped, ...checked.skipped];
-		const replayed = await writeReplays(c, {
+		const { replayed, lost } = await writeReplays(c, {
 			ready: checked.ready,
 			skipped: allSkipped,
 			reason: body.value.reason,
@@ -108,9 +120,10 @@ export function failureRoutes() {
 			replayed: replayed.map((r) => ({
 				delivery_id: r.source_delivery_id,
 				new_delivery_id: r.new_delivery_id,
+				status: r.status,
 				enqueued: r.enqueued,
 			})),
-			skipped: allSkipped,
+			skipped: [...allSkipped, ...lost],
 		} satisfies BulkReplayResult);
 	});
 

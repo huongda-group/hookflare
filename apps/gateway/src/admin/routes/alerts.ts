@@ -2,9 +2,10 @@ import {
 	type Alert,
 	type AlertDetail,
 	type AlertRule,
+	alertScopeQuery,
 	alertsQuery,
 } from "@hookflare/shared";
-import { and, desc, eq, lt, or, type SQL } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, or, type SQL } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppBindings } from "../../app";
 import {
@@ -21,6 +22,11 @@ type Joined = {
 	alert: typeof alerts.$inferSelect;
 	destinationName: string | null;
 };
+
+function scopeCondition(q: { scope?: "deployment"; project_id?: string }) {
+	if (q.scope) return isNull(alerts.projectId);
+	if (q.project_id) return eq(alerts.projectId, q.project_id);
+}
 
 function toAlert({ alert: a, destinationName }: Joined): Alert {
 	return {
@@ -45,13 +51,14 @@ export function alertRoutes() {
 	routes.get("/", guard, async (c) => {
 		const q = readQuery(c, alertsQuery);
 		if (!q.ok) return q.response;
-		const { status, rule, project_id, limit, cursor } = q.value;
+		const { status, rule, limit, cursor } = q.value;
 		const after = decodeCursor(cursor);
 		if (after === "invalid") return badCursor(c);
 		const where: SQL[] = [];
 		if (status) where.push(eq(alerts.status, status));
 		if (rule) where.push(eq(alerts.rule, rule));
-		if (project_id) where.push(eq(alerts.projectId, project_id));
+		const scope = scopeCondition(q.value);
+		if (scope) where.push(scope);
 		if (after) {
 			where.push(
 				or(
@@ -87,6 +94,8 @@ export function alertRoutes() {
 	});
 
 	routes.get("/:id", guard, async (c) => {
+		const q = readQuery(c, alertScopeQuery);
+		if (!q.ok) return q.response;
 		const { db } = c.var.deps;
 		const [row] = await db
 			.select({ alert: alerts, destinationName: destinations.name })
@@ -98,7 +107,7 @@ export function alertRoutes() {
 					eq(destinations.id, alerts.resourceId),
 				),
 			)
-			.where(eq(alerts.id, c.req.param("id")));
+			.where(and(eq(alerts.id, c.req.param("id")), scopeCondition(q.value)));
 		if (!row) return c.json({ error: "not_found" }, 404);
 		const notes = await db
 			.select({ n: alertNotifications, channelName: alertChannels.name })

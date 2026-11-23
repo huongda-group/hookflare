@@ -6,7 +6,6 @@ import { z } from "zod";
 import { CursorTable } from "@/components/CursorTable";
 import { DestinationSelect } from "@/components/DestinationSelect";
 import { IdText } from "@/components/IdText";
-import { ProjectSelect } from "@/components/ProjectSelect";
 import { ReplayDialog } from "@/components/ReplayDialog";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TimeRangeFilter } from "@/components/TimeRangeFilter";
@@ -32,9 +31,11 @@ export type FailuresSearch = z.infer<typeof failuresSearch>;
 const MAX_BULK = 100;
 
 export function FailuresPage({
+	projectId,
 	search,
 	setSearch,
 }: {
+	projectId: string;
 	search: FailuresSearch;
 	setSearch: (s: Partial<FailuresSearch>) => void;
 }) {
@@ -42,7 +43,7 @@ export function FailuresPage({
 	const [selected, setSelected] = useState<Set<string>>(new Set());
 	const [replaying, setReplaying] = useState(false);
 	const { tab, ...filters } = search;
-	const q = { ...filters, status: [tab] };
+	const q = { ...filters, project_id: projectId, status: [tab] };
 	const query = useInfiniteQuery({
 		queryKey: qk.failures.list(q),
 		queryFn: ({ pageParam }) =>
@@ -58,6 +59,12 @@ export function FailuresPage({
 		setSelected(new Set());
 		setSearch(s);
 	};
+	const loadedRows = query.data?.pages.flatMap((p) => p.data) ?? [];
+	const eventsByDelivery = Object.fromEntries(
+		loadedRows
+			.filter((f) => selected.has(f.id))
+			.map((f) => [f.id, f.event_id] as const),
+	);
 	return (
 		<div className="space-y-4">
 			<div className="flex items-center justify-between">
@@ -81,27 +88,29 @@ export function FailuresPage({
 				</TabsList>
 			</Tabs>
 			<div className="flex flex-wrap items-center gap-4">
-				<ProjectSelect
-					value={search.project_id}
-					onChange={(project_id) =>
-						// A destination belongs to one project; keep the pair consistent.
-						set({ project_id, destination_id: undefined })
-					}
-				/>
 				<DestinationSelect
-					projectId={search.project_id}
+					projectId={projectId}
 					value={search.destination_id}
 					onChange={(destination_id) => set({ destination_id })}
 				/>
-				<div className="flex items-center gap-2">
-					<Checkbox
-						id="unresolved"
-						checked={search.unresolved}
-						onCheckedChange={(v) => set({ unresolved: v === true })}
-					/>
-					<Label htmlFor="unresolved">
-						Unresolved only (no successful replay)
-					</Label>
+				<div>
+					<div className="flex items-center gap-2">
+						<Checkbox
+							id="unresolved"
+							checked={search.unresolved}
+							onCheckedChange={(v) => set({ unresolved: v === true })}
+							aria-describedby="unresolved-hint"
+						/>
+						<Label htmlFor="unresolved">
+							Unresolved only (no successful replay)
+						</Label>
+					</div>
+					<p
+						id="unresolved-hint"
+						className="mt-1 text-xs text-muted-foreground"
+					>
+						Shows only failures with no successful replay.
+					</p>
 				</div>
 			</div>
 			<TimeRangeFilter
@@ -110,9 +119,28 @@ export function FailuresPage({
 				onChange={(r) => set(r)}
 			/>
 			{canReplay && (
-				<p className="text-xs text-neutral-500">
+				<p className="text-xs text-muted-foreground">
 					Select up to {MAX_BULK} rows per bulk replay.
 				</p>
+			)}
+			{canReplay && selected.size > 0 && (
+				<div
+					role="status"
+					className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm"
+				>
+					<p>
+						{selected.size} of up to {MAX_BULK} selected. Select loaded covers
+						only loaded rows — failures on pages you have not loaded are never
+						included.
+					</p>
+					<Button
+						variant="ghost"
+						size="sm"
+						onClick={() => setSelected(new Set())}
+					>
+						Clear selection
+					</Button>
+				</div>
 			)}
 			<CursorTable<Failure>
 				query={query}
@@ -135,6 +163,7 @@ export function FailuresPage({
 							<Link
 								to="/events/$eventId"
 								params={{ eventId: f.event_id }}
+								search={{ project_id: projectId }}
 								className="font-mono text-xs underline"
 							>
 								{f.event_id}
@@ -172,9 +201,14 @@ export function FailuresPage({
 				]}
 			/>
 			<ReplayDialog
+				projectId={projectId}
 				open={replaying}
 				onOpenChange={setReplaying}
-				target={{ kind: "bulk", deliveryIds: [...selected] }}
+				target={{
+					kind: "bulk",
+					deliveryIds: [...selected],
+					eventsByDelivery,
+				}}
 				onDone={() => setSelected(new Set())}
 			/>
 		</div>

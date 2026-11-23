@@ -34,7 +34,6 @@ export function toRetryDefaults(p: Policy): RetryDefaults {
 	};
 }
 
-/** A missing, unparsable, or out-of-bounds row means DEFAULT_POLICY: deliveries never fail on it. */
 export async function readRetryDefaults(
 	db: Db,
 ): Promise<{ policy: Policy; updatedAt: number | null; corrupt: boolean }> {
@@ -60,7 +59,6 @@ export async function readRetryDefaults(
 
 let cached: { policy: Policy; expiresAt: number } | null = null;
 
-/** Per-isolate, like the source cache: a change applies within the TTL (spec M4-8). */
 export async function loadRetryDefaults(
 	deps: Pick<Deps, "db" | "now">,
 ): Promise<Policy> {
@@ -75,11 +73,6 @@ export function clearRetryDefaultsCache(): void {
 	cached = null;
 }
 
-/**
- * Unexecuted: batch it with the audit row (M3-7). With `expectedUpdatedAt`
- * (null = no row yet) the write only lands if nobody changed the row since
- * it was read; `.returning()` is then empty and the caller answers 409.
- */
 export function upsertRetryDefaults(
 	db: Db,
 	value: RetryDefaults,
@@ -108,10 +101,8 @@ export const STORAGE_SETTING: SettingSpec<StorageSettings> = {
 	schema: storageSettingsSchema,
 	fallback: DEFAULT_STORAGE_SETTINGS,
 };
-/** { instance_id, started_at }; the status is read live from Workflows. */
 export const ARCHIVE_LAST_RUN_KEY = "archive.last_run";
 
-/** A missing, unparsable, or out-of-bounds row means the fallback; callers decide whether corrupt matters. */
 export async function readSetting<T>(
 	db: Db,
 	spec: SettingSpec<T>,
@@ -134,11 +125,6 @@ export async function readSetting<T>(
 		: { value: spec.fallback, updatedAt: row.updatedAt, corrupt: true };
 }
 
-/**
- * Unexecuted: batch it with the audit row (M3-7). With `expectedUpdatedAt`
- * (null = no row yet) the write only lands if nobody changed the row since
- * it was read; `.returning()` is then empty and the caller answers 409.
- */
 export function upsertSetting(
 	db: Db,
 	key: string,
@@ -167,7 +153,6 @@ export function upsertSetting(
 
 const caches: { clear(): void }[] = [];
 
-/** Per-isolate, like retry_defaults: a change applies within the TTL (spec M4-8). */
 export function cachedSetting<T>(spec: SettingSpec<T>) {
 	let cached: { value: T; expiresAt: number } | null = null;
 	const cache = {

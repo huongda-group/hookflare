@@ -54,6 +54,7 @@ import {
 	type PolicyFields,
 	resolvePolicy,
 } from "../../core/policy";
+import { can } from "../../core/rbac";
 import {
 	aad,
 	clearExpiredPrev,
@@ -65,28 +66,41 @@ import { buildOutboundHeaders, signWebhookAll } from "../../core/sign";
 import { checkUrl } from "../../core/ssrf";
 import type { AppEnv } from "../../env";
 import { requirePermission } from "../auth/permission";
+import { sha256Hex } from "../auth/secrets";
 import { decodeCursor, encodeCursor } from "../cursor";
 import {
 	auditStmt,
 	badCursor,
+	checkCreateProject,
 	guardUrl,
 	paginate,
 	readJson,
 	readOptionalJson,
+	readProjectResource,
 	readQuery,
 } from "../http";
 import { successRate } from "./overview";
 
-/** Standard Webhooks secret: whsec_ + base64(32 random bytes). */
 function generateSigningSecret(): string {
 	const bytes = crypto.getRandomValues(new Uint8Array(32));
 	return `whsec_${btoa(String.fromCharCode(...bytes))}`;
+}
+
+export function maskUrl(url: string): string {
+	const u = new URL(url);
+	return u.pathname !== "/" || u.search || u.hash ? `${u.origin}/…` : u.origin;
+}
+
+function canWriteConfig(c: Context<AppBindings>): boolean {
+	const role = c.var.actor?.role ?? /* istanbul ignore next */ "viewer";
+	return can(role, "config.write");
 }
 
 export async function toDestination(
 	env: AppEnv,
 	row: DestinationRow,
 	now: number = Date.now(),
+	showUrl = false,
 ): Promise<Destination> {
 	const live =
 		row.signingSecretPrevEnc &&
@@ -96,7 +110,7 @@ export async function toDestination(
 		id: row.id,
 		project_id: row.projectId,
 		name: row.name,
-		url: row.url,
+		url: showUrl ? row.url : maskUrl(row.url),
 		status: row.status,
 		timeout_ms: row.timeoutMs,
 		max_attempts: row.maxAttempts,
@@ -122,7 +136,6 @@ export async function toDestination(
 	};
 }
 
-/** backoff_max_s must not be below backoff_base_s once defaults apply (spec §8.4). */
 function backoffConflict(
 	c: Context<AppBindings>,
 	row: PolicyFields,
@@ -147,7 +160,6 @@ function backoffConflict(
 		: null;
 }
 
-/** Re-reads after a lost conditional update: the row may be missing or disabled. */
 async function settled(
 	c: Context<AppBindings>,
 	id: string,
@@ -177,6 +189,8 @@ export function destinationRoutes() {
 		const body = await readJson(c, createDestinationRequest);
 		if (!body.ok) return body.response;
 		const { reason, ...fields } = body.value;
+		const mismatch = checkCreateProject(c, fields.project_id);
+		if (mismatch) return mismatch;
 		const { db, now, env } = c.var.deps;
 		if (!(await getProject(db, fields.project_id))) {
 			return c.json({ error: "invalid_reference", field: "project_id" }, 422);
@@ -227,7 +241,10 @@ export function destinationRoutes() {
 			}),
 		]);
 		return c.json(
-			{ ...(await toDestination(env, row, ts)), signing_secret: signingSecret },
+			{
+				...(await toDestination(env, row, ts, canWriteConfig(c))),
+				signing_secret: signingSecret,
+			},
 			201,
 		);
 	});
@@ -245,7 +262,9 @@ export function destinationRoutes() {
 			q.value.limit,
 		);
 		const ts = now();
-		const data = await Promise.all(rows.map((r) => toDestination(env, r, ts)));
+		const data = await Promise.all(
+			rows.map((r) => toDestination(env, r, ts, canWriteConfig(c))),
+		);
 		return c.json({
 			data,
 			next_cursor: nextCursor,
@@ -276,10 +295,19 @@ export function destinationRoutes() {
 	});
 
 	routes.get("/:id", requirePermission("events.read"), async (c) => {
-		const row = await getDestination(c.var.deps.db, c.req.param("id"));
-		return row
-			? c.json(await toDestination(c.var.deps.env, row, c.var.deps.now()))
-			: c.json({ error: "not_found" }, 404);
+		const found = await readProjectResource(c, () =>
+			getDestination(c.var.deps.db, c.req.param("id")),
+		);
+		return found.ok
+			? c.json(
+					await toDestination(
+						c.var.deps.env,
+						found.value,
+						c.var.deps.now(),
+						canWriteConfig(c),
+					),
+				)
+			: found.response;
 	});
 
 	routes.patch("/:id", requirePermission("config.write"), async (c) => {
@@ -287,8 +315,9 @@ export function destinationRoutes() {
 		if (!body.ok) return body.response;
 		const { db, now, env } = c.var.deps;
 		const id = c.req.param("id");
-		const existing = await getDestination(db, id);
-		if (!existing) return c.json({ error: "not_found" }, 404);
+		const found = await readProjectResource(c, () => getDestination(db, id));
+		if (!found.ok) return found.response;
+		const existing = found.value;
 		if (body.value.url !== undefined) {
 			const unsafe = await guardUrl(c, body.value.url);
 			if (unsafe) return unsafe;
@@ -312,14 +341,11 @@ export function destinationRoutes() {
 			...(v.rate_limit_per_s !== undefined
 				? { rateLimitPerS: v.rate_limit_per_s }
 				: {}),
-			// A new URL or a resume starts the failure streak over.
 			...((v.url !== undefined && v.url !== existing.url) ||
 			(v.status === "active" && existing.status !== "active")
 				? { consecutiveFailures: 0 }
 				: {}),
 		};
-		// Only a patch that touches backoff is validated: raised defaults must not
-		// block unrelated edits (the delivery path clamps via resolvePolicy).
 		const touchesBackoff =
 			v.backoff_base_s !== undefined || v.backoff_max_s !== undefined;
 		const conflict = touchesBackoff
@@ -355,7 +381,7 @@ export function destinationRoutes() {
 				reason,
 			}),
 		]);
-		return c.json(await toDestination(env, row, ts));
+		return c.json(await toDestination(env, row, ts, canWriteConfig(c)));
 	});
 
 	routes.post(
@@ -366,8 +392,9 @@ export function destinationRoutes() {
 			if (!body.ok) return body.response;
 			const { db, now, env } = c.var.deps;
 			const id = c.req.param("id");
-			const existing = await getDestination(db, id);
-			if (!existing) return c.json({ error: "not_found" }, 404);
+			const found = await readProjectResource(c, () => getDestination(db, id));
+			if (!found.ok) return found.response;
+			const existing = found.value;
 			const ts = now();
 			const secret = generateSigningSecret();
 			const cols = await rotationColumns({
@@ -381,7 +408,6 @@ export function destinationRoutes() {
 				now: ts,
 			});
 			const fingerprint = await secretFingerprint(secret);
-			// Fenced on the ciphertext we read: a concurrent rotation makes this a no-op.
 			const [[row]] = await db.batch([
 				db
 					.update(destinations)
@@ -399,7 +425,7 @@ export function destinationRoutes() {
 					)
 					.returning(),
 				auditInsertIfChanged(db, {
-					actor: c.var.actor?.email ?? "",
+					actor: c.var.actor?.username ?? /* istanbul ignore next */ "",
 					at: ts,
 					action: "destination.secret_rotated",
 					resourceType: "destination",
@@ -414,7 +440,7 @@ export function destinationRoutes() {
 			]);
 			if (!row) return c.json({ error: "conflict" }, 409);
 			return c.json({
-				...(await toDestination(env, row, ts)),
+				...(await toDestination(env, row, ts, canWriteConfig(c))),
 				signing_secret: secret,
 			});
 		},
@@ -428,15 +454,15 @@ export function destinationRoutes() {
 			if (!body.ok) return body.response;
 			const { db, now, env } = c.var.deps;
 			const id = c.req.param("id");
-			const existing = await getDestination(db, id);
-			if (!existing) return c.json({ error: "not_found" }, 404);
-			// Only an actual transition is audited; a repeat Pause is a no-op.
+			const found = await readProjectResource(c, () => getDestination(db, id));
+			if (!found.ok) return found.response;
+			const existing = found.value;
 			if (existing.status === "active") {
 				const ts = now();
 				const [[row]] = await db.batch([
 					transitionDestinationStmt(db, id, "active", "paused", ts),
 					auditInsertIfChanged(db, {
-						actor: c.var.actor?.email ?? "",
+						actor: c.var.actor?.username ?? /* istanbul ignore next */ "",
 						at: ts,
 						action: "destination.paused",
 						resourceType: "destination",
@@ -444,11 +470,12 @@ export function destinationRoutes() {
 						reason: body.value.reason,
 					}),
 				]);
-				if (row) return c.json(await toDestination(env, row, ts));
+				if (row)
+					return c.json(await toDestination(env, row, ts, canWriteConfig(c)));
 			}
 			const s = await settled(c, id, "paused");
 			if (s.response) return s.response;
-			return c.json(await toDestination(env, s.row, now()));
+			return c.json(await toDestination(env, s.row, now(), canWriteConfig(c)));
 		},
 	);
 
@@ -460,15 +487,15 @@ export function destinationRoutes() {
 			if (!body.ok) return body.response;
 			const deps = c.var.deps;
 			const id = c.req.param("id");
-			const existing = await getDestination(deps.db, id);
-			if (!existing) return c.json({ error: "not_found" }, 404);
-			// Only an actual transition is audited; a repeat Resume is a no-op.
+			const found = await readProjectResource(c, () =>
+				getDestination(deps.db, id),
+			);
+			if (!found.ok) return found.response;
+			const existing = found.value;
 			let row: DestinationRow | undefined;
 			if (existing.status === "paused") {
 				const ts = deps.now();
 				const [[transitioned]] = await deps.db.batch([
-					// A fresh start: failures from before the pause must not re-trigger
-					// consecutive_failures on the first post-resume error.
 					deps.db
 						.update(destinations)
 						.set({ status: "active", consecutiveFailures: 0, updatedAt: ts })
@@ -477,7 +504,7 @@ export function destinationRoutes() {
 						)
 						.returning(),
 					auditInsertIfChanged(deps.db, {
-						actor: c.var.actor?.email ?? "",
+						actor: c.var.actor?.username ?? /* istanbul ignore next */ "",
 						at: ts,
 						action: "destination.resumed",
 						resourceType: "destination",
@@ -492,13 +519,17 @@ export function destinationRoutes() {
 				if (s.response) return s.response;
 				row = s.row;
 			}
-			// The rest is picked up by reconcile rule (e); a failed send by rule (a).
 			const moved = await releasePausedDeliveries(deps, id, RESUME_BATCH);
 			await enqueueThenMark(deps, moved, (chunk) =>
 				markQueuedMany(deps, chunk),
 			);
 			return c.json({
-				destination: await toDestination(deps.env, row, deps.now()),
+				destination: await toDestination(
+					deps.env,
+					row,
+					deps.now(),
+					canWriteConfig(c),
+				),
 				resumed: moved.length,
 			});
 		},
@@ -510,10 +541,16 @@ export function destinationRoutes() {
 		async (c) => {
 			const body = await readOptionalJson(c, testDeliveryRequest);
 			if (!body.ok) return body.response;
+			if (body.value.payload !== undefined && !canWriteConfig(c)) {
+				return c.json({ error: "forbidden", required: "config.write" }, 403);
+			}
 			const deps = c.var.deps;
 			const id = c.req.param("id");
-			const destination = await getDestination(deps.db, id);
-			if (!destination) return c.json({ error: "not_found" }, 404);
+			const found = await readProjectResource(c, () =>
+				getDestination(deps.db, id),
+			);
+			if (!found.ok) return found.response;
+			const destination = found.value;
 			if (destination.status === "disabled") {
 				return c.json({ error: "destination_disabled" }, 409);
 			}
@@ -526,17 +563,14 @@ export function destinationRoutes() {
 			}
 			const startedAt = deps.now();
 			const testId = newId("tst", startedAt);
-			const payload = new Uint8Array(
-				new TextEncoder().encode(
-					JSON.stringify(
-						body.value.payload ?? {
-							type: "hookflare.test",
-							destination_id: id,
-							timestamp: startedAt,
-						},
-					),
-				),
+			const payloadText = JSON.stringify(
+				body.value.payload ?? {
+					type: "hookflare.test",
+					destination_id: id,
+					timestamp: startedAt,
+				},
 			);
+			const payload = new Uint8Array(new TextEncoder().encode(payloadText));
 
 			let outcome: {
 				durationMs: number;
@@ -577,15 +611,17 @@ export function destinationRoutes() {
 					body: payload,
 					secrets,
 				});
+				const headers = buildOutboundHeaders({
+					storedHeaders: {},
+					contentType: "application/json",
+					deliveryId: testId,
+					timestampSec,
+					signature,
+				});
+				headers.set("x-hookflare-test", "1");
 				const sent = await sendSigned(deps, {
 					url: destination.url,
-					headers: buildOutboundHeaders({
-						storedHeaders: {},
-						contentType: "application/json",
-						deliveryId: testId,
-						timestampSec,
-						signature,
-					}),
+					headers,
 					body: payload,
 					timeoutMs,
 				});
@@ -604,7 +640,7 @@ export function destinationRoutes() {
 				id: testId,
 				destinationId: id,
 				projectId: destination.projectId,
-				actorEmail: c.var.actor?.email ?? "",
+				actor: c.var.actor?.username ?? /* istanbul ignore next */ "",
 				startedAt,
 				durationMs: outcome.durationMs,
 				httpStatus: outcome.httpStatus,
@@ -623,6 +659,7 @@ export function destinationRoutes() {
 						test_delivery_id: testId,
 						http_status: outcome.httpStatus,
 						error_kind: outcome.errorKind,
+						payload_sha256: await sha256Hex(payloadText),
 					},
 				}),
 			]);
@@ -645,8 +682,8 @@ export function destinationRoutes() {
 		if (after === "invalid") return badCursor(c);
 		const { db } = c.var.deps;
 		const id = c.req.param("id");
-		if (!(await getDestination(db, id)))
-			return c.json({ error: "not_found" }, 404);
+		const found = await readProjectResource(c, () => getDestination(db, id));
+		if (!found.ok) return found.response;
 		const rows = await listTestDeliveries(db, id, {
 			after: after ?? undefined,
 			limit: q.value.limit,

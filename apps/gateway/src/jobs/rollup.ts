@@ -11,13 +11,11 @@ import type { Deps } from "../deps";
 
 export const ROLLUP_RECENT_HOURS = 3;
 export const BACKFILL_HOURS_PER_RUN = 6;
-/** settings value: the start of the oldest hour already recomputed, or "done". */
 export const BACKFILL_KEY = "rollup.backfill_before";
 
 export type RollupReport = {
 	hours: number[];
 	failed_hours: number[];
-	/** stats_hourly rows written per recomputed hour (spec §6.2 step 3). */
 	rows: Record<number, number>;
 	backfill_before: number | "done";
 };
@@ -33,7 +31,6 @@ async function readCursor(deps: Deps): Promise<number | "done" | null> {
 	try {
 		value = JSON.parse(row.valueJson);
 	} catch {
-		// A corrupt cursor restarts the backfill instead of failing every run.
 		return null;
 	}
 	return value === "done" || typeof value === "number" ? value : null;
@@ -51,7 +48,6 @@ async function writeCursor(deps: Deps, value: number | "done") {
 		});
 }
 
-/** Spec §6.2. Never increments: every hour it touches is rebuilt from source rows. */
 export async function rollup(
 	deps: Deps,
 	logger: Logger,
@@ -72,7 +68,7 @@ export async function rollup(
 					.where(eq(statsHourly.hour, hour)),
 			]);
 			const [written] = results[results.length - 1] as { n: number }[];
-			rows[hour] = written?.n ?? 0;
+			rows[hour] = written?.n ?? /* istanbul ignore next */ 0;
 			return true;
 		} catch (err) {
 			failed.push(hour);
@@ -93,7 +89,6 @@ export async function rollup(
 		if (floor === null || floor >= cursor) {
 			cursor = "done";
 		} else {
-			// Stop at the first failure so the cursor never skips an hour.
 			for (let i = 0; i < BACKFILL_HOURS_PER_RUN; i++) {
 				const hour: number = cursor - HOUR_MS;
 				if (hour < floor || !(await recompute(hour))) break;

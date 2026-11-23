@@ -3,7 +3,26 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import { qk } from "./keys";
 
-/** For selects: one page of up to 200 (listQuery max) is enough for an internal tool. */
+export function useProjectCatalog(enabled: boolean) {
+	return useQuery({
+		queryKey: qk.projects.list({ catalog: true }),
+		enabled,
+		queryFn: async () => {
+			const projects: Project[] = [];
+			let cursor: string | undefined;
+			do {
+				const page: Page<Project> = await api.get("/projects", {
+					limit: 200,
+					cursor,
+				});
+				projects.push(...page.data);
+				cursor = page.next_cursor ?? undefined;
+			} while (cursor);
+			return projects;
+		},
+	});
+}
+
 export function useProjectsList() {
 	return useQuery({
 		queryKey: qk.projects.list({ all: true }),

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { ProjectDetailPage } from "@/pages/ProjectDetailPage";
 
 export const Route = createFileRoute("/projects/$projectId")({
+	staticData: { pageTitle: "Project details" },
 	validateSearch: z.object({
 		range: z.enum(STATS_RANGES).default("24h").catch("24h"),
 	}),

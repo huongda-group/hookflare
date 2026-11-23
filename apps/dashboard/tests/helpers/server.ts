@@ -1,0 +1,114 @@
+import type { Me, Permission, Role, Settings } from "@hookflare/shared";
+import { HttpResponse, http } from "msw";
+import { setupServer } from "msw/node";
+import { project } from "./fixtures";
+
+export const ORIGIN = "http://localhost:3000";
+export const apiUrl = (path: string) => `${ORIGIN}/api/admin/v1${path}`;
+
+const VIEWER: Permission[] = ["events.read"];
+const OPERATOR: Permission[] = [
+	...VIEWER,
+	"payload.read",
+	"deliveries.replay",
+	"destinations.operate",
+];
+const ADMIN: Permission[] = [
+	...OPERATOR,
+	"config.write",
+	"users.manage",
+	"audit.read",
+	"settings.manage",
+];
+const BY_ROLE: Record<Role, Permission[]> = {
+	viewer: VIEWER,
+	operator: OPERATOR,
+	admin: ADMIN,
+};
+
+export function meFor(role: Role): Me {
+	return {
+		username: `${role}@example.com`,
+		role,
+		permissions: BY_ROLE[role],
+		project_required: false,
+	};
+}
+
+export const DEFAULT_AUTH_STATE = {
+	setup_required: false,
+	turnstile_site_key: null,
+};
+
+export const DEFAULT_SETTINGS: Settings = {
+	retry_defaults: {
+		timeout_ms: 10_000,
+		max_attempts: 20,
+		backoff_base_s: 30,
+		backoff_max_s: 21_600,
+	},
+	updated_at: null,
+	alert_rules: {
+		failure_threshold: 5,
+		stuck_after_s: 300,
+		dead_quiet_s: 1800,
+		d1_warn_pct: 80,
+		reminder_s: 3600,
+	},
+	alert_rules_updated_at: null,
+	storage: {
+		archive_enabled: true,
+		hot_retention_days: 30,
+		failed_retention_days: 90,
+		archive_retention_days: null,
+		audit_retention_days: 365,
+		backup_enabled: true,
+		backup_retention_days: 35,
+	},
+	storage_updated_at: null,
+	archive_last_run: null,
+};
+
+const empty = { data: [], next_cursor: null };
+
+export const server = setupServer(
+	http.get(apiUrl("/me"), () => HttpResponse.json(meFor("admin"))),
+	http.get(apiUrl("/auth/state"), () => HttpResponse.json(DEFAULT_AUTH_STATE)),
+	http.post(
+		apiUrl("/auth/login"),
+		() => new HttpResponse(null, { status: 204 }),
+	),
+	http.post(apiUrl("/auth/setup"), () =>
+		HttpResponse.json({ username: "admin", role: "admin" }, { status: 201 }),
+	),
+	http.post(
+		apiUrl("/auth/logout"),
+		() => new HttpResponse(null, { status: 204 }),
+	),
+	http.post(
+		apiUrl("/me/password"),
+		() => new HttpResponse(null, { status: 204 }),
+	),
+	http.get(apiUrl("/settings"), () => HttpResponse.json(DEFAULT_SETTINGS)),
+	http.get(apiUrl("/projects"), ({ request }) =>
+		HttpResponse.json(
+			new URL(request.url).searchParams.get("limit") === "200"
+				? { data: [project()], next_cursor: null }
+				: empty,
+		),
+	),
+	...[
+		"/sources",
+		"/destinations",
+		"/events",
+		"/failures",
+		"/users",
+		"/audit-logs",
+		"/alerts",
+		"/archives",
+	].map((p) => http.get(apiUrl(p), () => HttpResponse.json(empty))),
+	http.get(apiUrl("/alert-channels"), () => HttpResponse.json({ data: [] })),
+	http.get(apiUrl("/destinations/stats"), () =>
+		HttpResponse.json({ data: [] }),
+	),
+);

@@ -1,9 +1,7 @@
 import { sql } from "drizzle-orm";
 import type { Db } from "../../deps";
 
-/** Rows per part for tables without BLOB columns. */
 export const PAGE_SIZE = 5000;
-/** Rows per part when any column is a BLOB: bodies can be 64 KiB each. */
 export const BLOB_PAGE_SIZE = 250;
 
 export type TableInfo = {
@@ -26,22 +24,33 @@ type PragmaFk = {
 	to: string;
 };
 
-/** Table names come from sqlite_schema, so quoting them back is safe. */
 function ident(name: string): string {
 	return `"${name.replace(/"/g, '""')}"`;
 }
 
-/** Pragma table functions take the table name as a string literal. */
 function literal(name: string): string {
 	return `'${name.replace(/'/g, "''")}'`;
 }
 
-/**
- * Every user table in this D1, sorted by name: internal `sqlite_*` tables,
- * Cloudflare `_cf_*` bookkeeping, and the migration journal are skipped.
- * A table pages by its single-column primary key, or by rowid when it has
- * none (or a composite one, whose leading column alone is not unique).
- */
+export function parentsFirst(tables: TableInfo[]): TableInfo[] {
+	const names = new Set(tables.map((t) => t.name));
+	const pending = [...tables].sort((a, b) => a.name.localeCompare(b.name));
+	const done = new Set<string>();
+	const order: TableInfo[] = [];
+	while (pending.length > 0) {
+		const i = pending.findIndex((t) =>
+			t.foreignKeys.every(
+				(fk) =>
+					fk.table === t.name || !names.has(fk.table) || done.has(fk.table),
+			),
+		);
+		const [next] = pending.splice(i === -1 ? 0 : i, 1);
+		done.add(next.name);
+		order.push(next);
+	}
+	return order;
+}
+
 export async function listTables(db: Db): Promise<TableInfo[]> {
 	const rows = await db.all<{ name: string }>(
 		sql`SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name`,
@@ -81,7 +90,7 @@ export async function listTables(db: Db): Promise<TableInfo[]> {
 			pageSize: columns.some((c) => c.blob) ? BLOB_PAGE_SIZE : PAGE_SIZE,
 		});
 	}
-	return tables;
+	return parentsFirst(tables);
 }
 
 export { ident };

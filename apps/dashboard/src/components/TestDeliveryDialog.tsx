@@ -1,6 +1,7 @@
 import type { TestDelivery } from "@hookflare/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { FormField } from "@/components/FormField";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -10,10 +11,10 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { api } from "@/lib/api";
+import { api, projectScopedPath } from "@/lib/api";
 import { errorText } from "@/lib/forms";
+import { useCan } from "@/lib/permissions";
 import { qk } from "@/lib/queries/keys";
 
 const MAX = 64 * 1024;
@@ -22,25 +23,26 @@ export function TestDeliveryDialog({
 	open,
 	onOpenChange,
 	destinationId,
+	projectId,
 }: {
 	open: boolean;
 	onOpenChange: (o: boolean) => void;
 	destinationId: string;
+	projectId: string;
 }) {
 	const qc = useQueryClient();
+	const canCustomize = useCan("config.write");
 	const [text, setText] = useState("");
 	const [invalid, setInvalid] = useState<string | null>(null);
 	const m = useMutation({
 		mutationFn: (payload: unknown) =>
-			api.post<
-				Omit<TestDelivery, "destination_id" | "actor_email" | "started_at">
-			>(
-				`/destinations/${destinationId}/test`,
+			api.post<Omit<TestDelivery, "destination_id" | "actor" | "started_at">>(
+				projectScopedPath(`/destinations/${destinationId}/test`, projectId),
 				payload === undefined ? {} : { payload },
 			),
 		onSuccess: () =>
 			void qc.invalidateQueries({
-				queryKey: qk.destinations.tests(destinationId),
+				queryKey: qk.destinations.tests(destinationId, projectId),
 			}),
 	});
 	const send = () => {
@@ -61,6 +63,7 @@ export function TestDeliveryDialog({
 		<Dialog
 			open={open}
 			onOpenChange={(o) => {
+				/* istanbul ignore else -- @preserve */
 				if (!o) m.reset();
 				onOpenChange(o);
 			}}
@@ -69,23 +72,28 @@ export function TestDeliveryDialog({
 				<DialogHeader>
 					<DialogTitle>Send test delivery</DialogTitle>
 					<DialogDescription>
-						Signed like a real delivery. Leave empty for the default test event.
+						{canCustomize
+							? "Signed like a real delivery. Leave empty for the default test event."
+							: "Sends the default test event, signed like a real delivery."}
 					</DialogDescription>
 				</DialogHeader>
-				<Label htmlFor="test-payload">JSON payload (optional)</Label>
-				<Textarea
-					id="test-payload"
-					className="font-mono"
-					rows={8}
-					value={text}
-					onChange={(e) => setText(e.target.value)}
-				/>
-				{invalid && <p className="text-sm text-red-700">{invalid}</p>}
+				{canCustomize && (
+					<FormField htmlFor="test-payload" label="JSON payload (optional)">
+						<Textarea
+							id="test-payload"
+							className="font-mono"
+							rows={8}
+							value={text}
+							onChange={(e) => setText(e.target.value)}
+						/>
+						{invalid && <p className="text-sm text-failure">{invalid}</p>}
+					</FormField>
+				)}
 				{m.error && (
-					<p className="text-sm text-red-700">{errorText(m.error)}</p>
+					<p className="text-sm text-failure">{errorText(m.error)}</p>
 				)}
 				{m.data && (
-					<div className="rounded bg-neutral-50 p-3 text-sm">
+					<div className="rounded bg-muted p-3 text-sm">
 						<div>
 							{m.data.http_status !== null
 								? `HTTP ${m.data.http_status}`
@@ -93,7 +101,7 @@ export function TestDeliveryDialog({
 							· {m.data.duration_ms} ms
 						</div>
 						{m.data.error_message && (
-							<div className="text-red-700">{m.data.error_message}</div>
+							<div className="text-failure">{m.data.error_message}</div>
 						)}
 						{m.data.response_snippet && (
 							<pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap text-xs">

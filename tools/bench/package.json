@@ -8,9 +8,11 @@
 		"typecheck": "tsc --noEmit",
 		"run": "node src/run.ts",
 		"seed": "node src/seed.ts",
-		"queries": "node src/queries.ts"
+		"queries": "node src/queries.ts",
+		"test:coverage": "vitest run --coverage"
 	},
 	"devDependencies": {
+		"@vitest/coverage-istanbul": "5.0.5",
 		"typescript": "7.0.2",
 		"vitest": "^5.0.4"
 	}

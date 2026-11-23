@@ -2,7 +2,6 @@ import type { Permission, Role } from "@hookflare/shared";
 
 export type { Permission, Role };
 
-/** Spec §6.2. Each role is a superset of the one before it. */
 const VIEWER: readonly Permission[] = ["events.read"];
 const OPERATOR: readonly Permission[] = [
 	...VIEWER,

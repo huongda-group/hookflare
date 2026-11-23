@@ -1,7 +1,6 @@
 export type SmokeEnv = {
 	url: string;
-	clientId: string;
-	clientSecret: string;
+	token: string;
 	sinkUrl: string;
 };
 

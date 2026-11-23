@@ -1,0 +1,602 @@
+import type { BulkReplayResult, ReplayResult } from "@hookflare/shared";
+import { asc, eq } from "drizzle-orm";
+import { describe, expect, it, vi } from "vitest";
+import {
+	auditLogs,
+	deliveries,
+	destinations,
+	webhookEvents,
+} from "../../src/core/db/schema";
+import { newId } from "../../src/core/ids";
+import { adminApp, auditRows } from "../helpers/admin";
+import { type RecordingQueue, recordingQueue, testDeps } from "../helpers/deps";
+import { faultyDeps } from "../helpers/faults";
+import { seedDelivery, seedPipeline } from "../helpers/seed";
+
+const reason = "backend fixed";
+
+it("does not partially replay IDs spanning projects", async () => {
+	const queue = recordingQueue();
+	const deps = testDeps({ queue });
+	const a = await seedPipeline(deps);
+	const b = await seedPipeline(deps);
+	const first = await seedDelivery(deps, a, { status: "dead" });
+	const second = await seedDelivery(deps, b, { status: "dead" });
+	const api = await adminApp(deps, { role: "operator" });
+	const scope = `project_id=${a.project.id}`;
+	const before = await deps.db.select().from(auditLogs);
+	const single = await api.request(
+		"POST",
+		`/events/${second.eventId}/replay?${scope}`,
+		{ reason },
+	);
+	const bulk = await api.request("POST", `/failures/replay?${scope}`, {
+		reason,
+		delivery_ids: [first.deliveryId, second.deliveryId],
+	});
+	for (const res of [single, bulk]) {
+		expect.soft(res.status).toBe(404);
+		expect.soft(await res.json()).toEqual({ error: "not_found" });
+	}
+	expect.soft(await eventDeliveries(deps, first.eventId)).toHaveLength(1);
+	expect.soft(await eventDeliveries(deps, second.eventId)).toHaveLength(1);
+	expect.soft(await deps.db.select().from(auditLogs)).toEqual(before);
+	expect(queue.sent).toEqual([]);
+});
+
+async function eventDeliveries(
+	deps: ReturnType<typeof testDeps>,
+	eventId: string,
+) {
+	return deps.db
+		.select()
+		.from(deliveries)
+		.where(eq(deliveries.eventId, eventId))
+		.orderBy(asc(deliveries.id));
+}
+
+describe("POST /events/:id/replay", () => {
+	it("creates a new replay delivery, enqueues it, and audits it", async () => {
+		const deps = testDeps({ queue: recordingQueue() });
+		const p = await seedPipeline(deps);
+		const { eventId, deliveryId } = await seedDelivery(deps, p, {
+			status: "delivered",
+		});
+		const api = await adminApp(deps, { role: "operator" });
+		const res = await api.request("POST", `/events/${eventId}/replay`, {
+			reason,
+		});
+		expect(res.status).toBe(201);
+		const body = await res.json<ReplayResult>();
+		expect(body).toMatchObject({ status: "pending", enqueued: true });
+		expect((deps.queue as RecordingQueue).sent).toEqual([
+			{ deliveryId: body.delivery_id },
+		]);
+		const rows = await eventDeliveries(deps, eventId);
+		expect(rows.map((r) => [r.id, r.kind, r.status])).toEqual([
+			[deliveryId, "initial", "delivered"],
+			[body.delivery_id, "replay", "queued"],
+		]);
+		expect(rows[1]).toMatchObject({ createdBy: api.username, attemptCount: 0 });
+		const audits = await auditRows(deps, eventId);
+		expect(audits).toHaveLength(1);
+		expect(audits[0]).toMatchObject({
+			action: "delivery.replayed",
+			resourceType: "event",
+			reason,
+			diffJson: {
+				replayed: [
+					{ source_delivery_id: deliveryId, new_delivery_id: body.delivery_id },
+				],
+				skipped: [],
+			},
+		});
+	});
+
+	it("rejects a whitespace-only reason", async () => {
+		const deps = testDeps();
+		const p = await seedPipeline(deps);
+		const { eventId } = await seedDelivery(deps, p, { status: "dead" });
+		const api = await adminApp(deps, { role: "operator" });
+		const res = await api.request("POST", `/events/${eventId}/replay`, {
+			reason: "   ",
+		});
+		expect(res.status).toBe(400);
+		expect(await eventDeliveries(deps, eventId)).toHaveLength(1);
+		expect(await auditRows(deps, eventId)).toEqual([]);
+	});
+
+	it("stores a replay to a paused destination as paused without enqueueing", async () => {
+		const deps = testDeps({ queue: recordingQueue() });
+		const p = await seedPipeline(deps, { destination: { status: "paused" } });
+		const { eventId } = await seedDelivery(deps, p, { status: "dead" });
+		const api = await adminApp(deps, { role: "operator" });
+		const body = await (
+			await api.request("POST", `/events/${eventId}/replay`, { reason })
+		).json<ReplayResult>();
+		expect(body).toMatchObject({ status: "paused", enqueued: false });
+		expect((deps.queue as RecordingQueue).sent).toEqual([]);
+	});
+
+	it("reports a bulk replay to a paused destination as paused and not enqueued", async () => {
+		const deps = testDeps({ queue: recordingQueue() });
+		const p = await seedPipeline(deps, { destination: { status: "paused" } });
+		const { deliveryId } = await seedDelivery(deps, p, { status: "dead" });
+		const api = await adminApp(deps, { role: "operator" });
+		const body = await (
+			await api.request("POST", "/failures/replay", {
+				delivery_ids: [deliveryId],
+				reason,
+			})
+		).json<BulkReplayResult>();
+		expect(body.replayed).toEqual([
+			expect.objectContaining({
+				delivery_id: deliveryId,
+				status: "paused",
+				enqueued: false,
+			}),
+		]);
+		expect((deps.queue as RecordingQueue).sent).toEqual([]);
+	});
+
+	it("answers 404, 409 destination_disabled, and 409 replay_in_progress", async () => {
+		const deps = testDeps();
+		const p = await seedPipeline(deps);
+		const { eventId } = await seedDelivery(deps, p, { status: "dead" });
+		const api = await adminApp(deps, { role: "operator" });
+		expect(
+			(await api.request("POST", "/events/evt_missing/replay", { reason }))
+				.status,
+		).toBe(404);
+		expect(
+			(await api.request("POST", `/events/${eventId}/replay`, { reason }))
+				.status,
+		).toBe(201);
+		const again = await api.request("POST", `/events/${eventId}/replay`, {
+			reason,
+		});
+		expect(again.status).toBe(409);
+		expect(await again.json()).toEqual({ error: "replay_in_progress" });
+
+		await deps.db
+			.update(destinations)
+			.set({ status: "disabled" })
+			.where(eq(destinations.id, p.destination.id));
+		const other = await seedDelivery(deps, p, { status: "dead" });
+		const disabled = await api.request(
+			"POST",
+			`/events/${other.eventId}/replay`,
+			{
+				reason,
+			},
+		);
+		expect(disabled.status).toBe(409);
+		expect(await disabled.json()).toEqual({ error: "destination_disabled" });
+	});
+
+	it("answers 409 payload_missing and 503 on an R2 error, writing nothing", async () => {
+		const base = testDeps();
+		const p = await seedPipeline(base);
+		const { eventId } = await seedDelivery(base, p, {
+			status: "dead",
+			body: new Uint8Array(),
+			event: { r2Key: `payloads/${crypto.randomUUID()}` },
+		});
+		const op = await adminApp(base, { role: "operator" });
+		const missing = await op.request("POST", `/events/${eventId}/replay`, {
+			reason,
+		});
+		expect(missing.status).toBe(409);
+		expect(await missing.json()).toEqual({ error: "payload_missing" });
+
+		const broken = await adminApp(
+			faultyDeps(base, { r2: [{ match: /^head / }] }),
+			{
+				username: op.username,
+			},
+		);
+		expect(
+			(await broken.request("POST", `/events/${eventId}/replay`, { reason }))
+				.status,
+		).toBe(503);
+		expect(await eventDeliveries(base, eventId)).toHaveLength(1);
+		expect(await auditRows(base, eventId)).toEqual([]);
+	});
+
+	it("reports enqueued:false and keeps the row pending when the queue fails", async () => {
+		const deps = testDeps({ queue: recordingQueue({ fail: true }) });
+		const p = await seedPipeline(deps);
+		const { eventId } = await seedDelivery(deps, p, { status: "dead" });
+		const api = await adminApp(deps, { role: "operator" });
+		const res = await api.request("POST", `/events/${eventId}/replay`, {
+			reason,
+		});
+		expect(res.status).toBe(201);
+		const body = await res.json<ReplayResult>();
+		expect(body).toMatchObject({ status: "pending", enqueued: false });
+		const rows = await eventDeliveries(deps, eventId);
+		expect(rows[1].status).toBe("pending");
+	});
+
+	it("forbids a viewer", async () => {
+		const deps = testDeps();
+		const p = await seedPipeline(deps);
+		const { eventId } = await seedDelivery(deps, p, { status: "dead" });
+		const api = await adminApp(deps, { role: "viewer" });
+		expect(
+			(await api.request("POST", `/events/${eventId}/replay`, { reason }))
+				.status,
+		).toBe(403);
+	});
+
+	it("clears the archive mark of replayed events in the same batch (spec §7.4)", async () => {
+		const deps = testDeps();
+		const p = await seedPipeline(deps);
+		const { eventId } = await seedDelivery(deps, p, { status: "dead" });
+		await deps.db
+			.update(webhookEvents)
+			.set({ archiveBatchId: "arb_r", archivePart: 1 })
+			.where(eq(webhookEvents.id, eventId));
+		const api = await adminApp(deps, { role: "operator" });
+		const res = await api.request("POST", `/events/${eventId}/replay`, {
+			reason,
+		});
+		expect(res.status).toBeLessThan(300);
+		const [e] = await deps.db
+			.select()
+			.from(webhookEvents)
+			.where(eq(webhookEvents.id, eventId));
+		expect(e.archiveBatchId).toBeNull();
+		expect(e.archivePart).toBeNull();
+	});
+});
+
+describe("POST /failures/replay", () => {
+	it("replays failures, skips the rest with reasons, and writes one audit row", async () => {
+		const deps = testDeps({ queue: recordingQueue() });
+		const p = await seedPipeline(deps);
+		const dead = await seedDelivery(deps, p, { status: "dead" });
+		const final = await seedDelivery(deps, p, { status: "failed_final" });
+		const ok = await seedDelivery(deps, p, { status: "delivered" });
+		const missing = newId("dlv");
+		const api = await adminApp(deps, { role: "operator" });
+		const res = await api.request("POST", "/failures/replay", {
+			delivery_ids: [dead.deliveryId, final.deliveryId, ok.deliveryId, missing],
+			reason,
+		});
+		expect(res.status).toBe(200);
+		const body = await res.json<BulkReplayResult>();
+		expect(body.replayed.map((r) => [r.delivery_id, r.enqueued])).toEqual([
+			[dead.deliveryId, true],
+			[final.deliveryId, true],
+		]);
+		expect(body.skipped).toEqual([
+			{ delivery_id: ok.deliveryId, reason: "not_failed" },
+			{ delivery_id: missing, reason: "not_found" },
+		]);
+		expect((deps.queue as RecordingQueue).sent).toHaveLength(2);
+		const audits = (await deps.db.query.auditLogs.findMany()).filter(
+			(a) => a.action === "delivery.replayed" && a.actor === api.username,
+		);
+		expect(audits).toHaveLength(1);
+		expect(audits[0]).toMatchObject({
+			resourceType: "delivery",
+			resourceId: null,
+		});
+		expect(audits[0].diffJson).toMatchObject({
+			skipped: body.skipped,
+			replayed: body.replayed.map((r) => ({
+				source_delivery_id: r.delivery_id,
+				new_delivery_id: r.new_delivery_id,
+			})),
+		});
+	});
+
+	it("deduplicates repeated delivery ids", async () => {
+		const deps = testDeps({ queue: recordingQueue() });
+		const p = await seedPipeline(deps);
+		const dead = await seedDelivery(deps, p, { status: "dead" });
+		const api = await adminApp(deps, { role: "operator" });
+		const body = await (
+			await api.request("POST", "/failures/replay", {
+				delivery_ids: [dead.deliveryId, dead.deliveryId],
+				reason,
+			})
+		).json<BulkReplayResult>();
+		expect(body.replayed).toHaveLength(1);
+		expect(body.skipped).toEqual([]);
+		expect(await eventDeliveries(deps, dead.eventId)).toHaveLength(2);
+	});
+
+	it("skips a second failure of the same event and destination as replay_in_progress", async () => {
+		const deps = testDeps({ queue: recordingQueue() });
+		const p = await seedPipeline(deps);
+		const first = await seedDelivery(deps, p, { status: "dead" });
+		const retryOfSame = newId("dlv");
+		await deps.db.insert(deliveries).values({
+			id: retryOfSame,
+			eventId: first.eventId,
+			destinationId: p.destination.id,
+			projectId: p.project.id,
+			kind: "replay",
+			status: "dead",
+			attemptCount: 3,
+			createdAt: deps.now(),
+		});
+		const api = await adminApp(deps, { role: "operator" });
+		const body = await (
+			await api.request("POST", "/failures/replay", {
+				delivery_ids: [first.deliveryId, retryOfSame],
+				reason,
+			})
+		).json<BulkReplayResult>();
+		expect(body.replayed.map((r) => r.delivery_id)).toEqual([first.deliveryId]);
+		expect(body.skipped).toEqual([
+			{ delivery_id: retryOfSame, reason: "replay_in_progress" },
+		]);
+	});
+
+	it("writes nothing and creates no audit row when every id is skipped", async () => {
+		const deps = testDeps();
+		await seedPipeline(deps);
+		const api = await adminApp(deps, { role: "operator" });
+		const missing = newId("dlv");
+		const body = await (
+			await api.request("POST", "/failures/replay", {
+				delivery_ids: [missing],
+				reason,
+			})
+		).json<BulkReplayResult>();
+		expect(body).toEqual({
+			replayed: [],
+			skipped: [{ delivery_id: missing, reason: "not_found" }],
+		});
+		const audits = (await deps.db.query.auditLogs.findMany()).filter(
+			(a) => a.actor === api.username && a.action === "delivery.replayed",
+		);
+		expect(audits).toEqual([]);
+	});
+
+	it("fails the whole request with 503 when R2 head errors", async () => {
+		const base = testDeps({ queue: recordingQueue() });
+		const p = await seedPipeline(base);
+		const inline = await seedDelivery(base, p, { status: "dead" });
+		const inR2 = await seedDelivery(base, p, {
+			status: "dead",
+			body: new Uint8Array(),
+			event: { r2Key: `payloads/${crypto.randomUUID()}` },
+		});
+		const op = await adminApp(base, { role: "operator" });
+		const api = await adminApp(
+			faultyDeps(base, { r2: [{ match: /^head / }] }),
+			{
+				username: op.username,
+			},
+		);
+		const res = await api.request("POST", "/failures/replay", {
+			delivery_ids: [inline.deliveryId, inR2.deliveryId],
+			reason,
+		});
+		expect(res.status).toBe(503);
+		expect(await eventDeliveries(base, inline.eventId)).toHaveLength(1);
+		expect((base.queue as RecordingQueue).sent).toEqual([]);
+	});
+	it("checks an R2 payload once per event and replays when it is present", async () => {
+		const base = testDeps({ queue: recordingQueue() });
+		const head = vi.fn((key: string) => base.payloads.head(key));
+		const deps = {
+			...base,
+			payloads: new Proxy(base.payloads, {
+				get(target, prop) {
+					if (prop === "head") return head;
+					const v = Reflect.get(target, prop, target);
+					return typeof v === "function" ? v.bind(target) : v;
+				},
+			}),
+		};
+		const p = await seedPipeline(deps);
+		const first = await seedDelivery(deps, p, {
+			status: "dead",
+			body: new Uint8Array(65 * 1024),
+		});
+		const second = newId("dlv");
+		await deps.db.insert(deliveries).values({
+			id: second,
+			eventId: first.eventId,
+			destinationId: p.destination.id,
+			projectId: p.project.id,
+			kind: "replay",
+			status: "dead",
+			attemptCount: 1,
+			createdAt: deps.now(),
+		});
+		const api = await adminApp(deps, { role: "operator" });
+		const res = await api.request("POST", "/failures/replay", {
+			delivery_ids: [first.deliveryId, second],
+			reason,
+		});
+		expect(res.status).toBe(200);
+		const body = await res.json<BulkReplayResult>();
+		expect(body.replayed.map((r) => r.delivery_id)).toEqual([first.deliveryId]);
+		expect(body.skipped).toEqual([
+			{ delivery_id: second, reason: "replay_in_progress" },
+		]);
+		expect(head).toHaveBeenCalledTimes(1);
+	});
+});
+
+function replayBarrier(deps: ReturnType<typeof testDeps>, n: number) {
+	const batch = deps.db.batch.bind(deps.db);
+	const waiting: (() => void)[] = [];
+	deps.db.batch = (async (queries: Parameters<typeof batch>[0]) => {
+		const isReplay = queries.some((q) =>
+			/^insert into "deliveries"/.test(
+				(q as unknown as { toSQL(): { sql: string } }).toSQL().sql,
+			),
+		);
+		if (isReplay && waiting.length < n) {
+			await new Promise<void>((resolve) => {
+				waiting.push(resolve);
+				if (waiting.length === n) for (const r of waiting) r();
+			});
+		}
+		return batch(queries);
+	}) as unknown as typeof batch;
+}
+
+async function replayAudits(deps: ReturnType<typeof testDeps>, actor: string) {
+	return (
+		await deps.db.query.auditLogs.findMany({ orderBy: asc(auditLogs.id) })
+	).filter((a) => a.action === "delivery.replayed" && a.actor === actor);
+}
+
+describe("concurrent replays", () => {
+	it("creates one replay when two replays of the same failure race", async () => {
+		const queue = recordingQueue();
+		const deps = testDeps({ queue });
+		const p = await seedPipeline(deps);
+		const dead = await seedDelivery(deps, p, { status: "dead" });
+		const api = await adminApp(deps, { role: "operator" });
+		replayBarrier(deps, 2);
+		const bodies = await Promise.all(
+			[0, 1].map(async () =>
+				(
+					await api.request("POST", "/failures/replay", {
+						delivery_ids: [dead.deliveryId],
+						reason,
+					})
+				).json<BulkReplayResult>(),
+			),
+		);
+		const rows = (await eventDeliveries(deps, dead.eventId)).filter(
+			(r) => r.kind === "replay",
+		);
+		expect(rows).toHaveLength(1);
+		const winner = bodies.find((b) => b.replayed.length === 1);
+		const loser = bodies.find((b) => b.replayed.length === 0);
+		expect(winner?.replayed).toEqual([
+			{
+				delivery_id: dead.deliveryId,
+				new_delivery_id: rows[0].id,
+				status: "pending",
+				enqueued: true,
+			},
+		]);
+		expect(loser).toEqual({
+			replayed: [],
+			skipped: [{ delivery_id: dead.deliveryId, reason: "replay_in_progress" }],
+		});
+		expect(queue.sent).toEqual([{ deliveryId: rows[0].id }]);
+		const audits = await replayAudits(deps, api.username);
+		expect(audits).toHaveLength(1);
+		expect(audits[0].diffJson).toEqual({
+			replayed: [
+				{ source_delivery_id: dead.deliveryId, new_delivery_id: rows[0].id },
+			],
+			skipped: [],
+		});
+	});
+
+	it("reports only the lost pair as skipped in a partially raced bulk replay", async () => {
+		const queue = recordingQueue();
+		const deps = testDeps({ queue });
+		const p = await seedPipeline(deps);
+		const shared = await seedDelivery(deps, p, { status: "dead" });
+		const own = await seedDelivery(deps, p, { status: "failed_final" });
+		const missing = newId("dlv");
+		const api = await adminApp(deps, { role: "operator" });
+		const batch = deps.db.batch.bind(deps.db);
+		let bulkArrived: () => void = () => {};
+		const bulkWaiting = new Promise<void>((r) => {
+			bulkArrived = r;
+		});
+		let singleCommitted: () => void = () => {};
+		const singleDone = new Promise<void>((r) => {
+			singleCommitted = r;
+		});
+		let calls = 0;
+		deps.db.batch = (async (queries: Parameters<typeof batch>[0]) => {
+			const isReplay = queries.some((q) =>
+				/^insert into "deliveries"/.test(
+					(q as unknown as { toSQL(): { sql: string } }).toSQL().sql,
+				),
+			);
+			if (!isReplay) return batch(queries);
+			calls++;
+			if (queries.length > 3) {
+				bulkArrived();
+				await singleDone;
+				return batch(queries);
+			}
+			await bulkWaiting;
+			const out = await batch(queries);
+			singleCommitted();
+			return out;
+		}) as unknown as typeof batch;
+		const [single, bulk] = await Promise.all([
+			api.request("POST", "/failures/replay", {
+				delivery_ids: [shared.deliveryId],
+				reason,
+			}),
+			api.request("POST", "/failures/replay", {
+				delivery_ids: [shared.deliveryId, own.deliveryId, missing],
+				reason,
+			}),
+		]);
+		expect(calls).toBe(2);
+		const s = await single.json<BulkReplayResult>();
+		const b = await bulk.json<BulkReplayResult>();
+		expect(s.replayed.map((r) => r.delivery_id)).toEqual([shared.deliveryId]);
+		expect(b.replayed.map((r) => r.delivery_id)).toEqual([own.deliveryId]);
+		expect(b.skipped).toEqual([
+			{ delivery_id: missing, reason: "not_found" },
+			{ delivery_id: shared.deliveryId, reason: "replay_in_progress" },
+		]);
+		const ownReplay = b.replayed[0].new_delivery_id;
+		expect(queue.sent).toEqual([
+			{ deliveryId: s.replayed[0].new_delivery_id },
+			{ deliveryId: ownReplay },
+		]);
+		const audits = await replayAudits(deps, api.username);
+		expect(audits.map((a) => a.diffJson)).toEqual([
+			{
+				replayed: [
+					{
+						source_delivery_id: shared.deliveryId,
+						new_delivery_id: s.replayed[0].new_delivery_id,
+					},
+				],
+				skipped: [],
+			},
+			{
+				replayed: [
+					{ source_delivery_id: own.deliveryId, new_delivery_id: ownReplay },
+				],
+				skipped: b.skipped,
+			},
+		]);
+	});
+
+	it("answers 409 replay_in_progress to the loser of a raced event replay", async () => {
+		const queue = recordingQueue();
+		const deps = testDeps({ queue });
+		const p = await seedPipeline(deps);
+		const { eventId } = await seedDelivery(deps, p, { status: "delivered" });
+		const api = await adminApp(deps, { role: "operator" });
+		replayBarrier(deps, 2);
+		const responses = await Promise.all(
+			[0, 1].map(() =>
+				api.request("POST", `/events/${eventId}/replay`, { reason }),
+			),
+		);
+		expect(responses.map((r) => r.status).sort()).toEqual([201, 409]);
+		const loser = responses.find((r) => r.status === 409) as Response;
+		expect(await loser.json()).toEqual({ error: "replay_in_progress" });
+		const replays = (await eventDeliveries(deps, eventId)).filter(
+			(r) => r.kind === "replay",
+		);
+		expect(replays).toHaveLength(1);
+		expect(queue.sent).toEqual([{ deliveryId: replays[0].id }]);
+		expect(await replayAudits(deps, api.username)).toHaveLength(1);
+	});
+});

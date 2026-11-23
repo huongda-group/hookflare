@@ -1,13 +1,14 @@
 {
 	"name": "@huongda-group/hookflare",
 	"version": "1.0.0",
-	"private": true,
-	"packageManager": "pnpm@12.13.0",
+	"private": false,
+	"packageManager": "pnpm@12.22.0",
 	"scripts": {
 		"dev": "node scripts/ensure-dashboard-dist.mjs && wrangler dev --config apps/gateway/wrangler.jsonc",
 		"dev:dashboard": "pnpm --filter dashboard dev",
 		"build": "pnpm --filter dashboard build",
-		"test": "pnpm --recursive --if-present run test && node --test scripts/test/*.test.mjs",
+		"test": "pnpm --recursive --if-present run test && node --test scripts/tests/*.test.mjs",
+		"test:coverage": "pnpm --recursive --if-present run test:coverage && node --test --experimental-test-coverage --test-coverage-include='scripts/lib/**' --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 scripts/tests/*.test.mjs",
 		"typecheck": "pnpm --recursive --if-present run typecheck",
 		"lint": "biome check .",
 		"format": "biome check --write .",
@@ -22,8 +23,13 @@
 		"smoke:staging": "node scripts/smoke.mjs --config apps/gateway/wrangler.staging.jsonc"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "2.5.15",
+		"@biomejs/biome": "2.6.8",
 		"typescript": "7.0.2",
-		"wrangler": "4.151.0"
-	}
+		"wrangler": "4.166.0"
+	},
+	"workspaces": [
+		"apps/*",
+		"packages/*",
+		"tools/*"
+	]
 }

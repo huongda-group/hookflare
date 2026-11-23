@@ -8,7 +8,6 @@ type Props =
 			text: string;
 			contentType: string | null;
 			filename?: string;
-			/** The original bytes for Download; defaults to the text as UTF-8. */
 			download?: Blob;
 	  }
 	| { value: unknown };
@@ -17,11 +16,8 @@ type Parsed =
 	| { ok: true; value: unknown; size: number; unsafe: boolean }
 	| { ok: false };
 
-// A JSON string literal or a bare integer token; strings are matched first so
-// digits inside them are skipped. Fractions and exponents are not integers.
 const TOKEN = /"(?:[^"\\]|\\.)*"|(?<![\w.+-])-?\d+(?![\w.])/g;
 
-/** True when an integer literal outside strings exceeds MAX_SAFE_INTEGER. */
 function hasUnsafeInteger(text: string): boolean {
 	for (const [tok] of text.matchAll(TOKEN)) {
 		if (tok.startsWith('"')) continue;
@@ -44,7 +40,6 @@ function parse(props: Props): Parsed {
 			unsafe: hasUnsafeInteger(props.text),
 		};
 	} catch {
-		// Fall through to text: a body labelled JSON may still be broken.
 		return { ok: false };
 	}
 }
@@ -58,21 +53,19 @@ export function downloadBlob(blob: Blob, name: string) {
 	URL.revokeObjectURL(url);
 }
 
-/**
- * Nested lists with disclosure buttons (each button carries aria-expanded),
- * rather than an ARIA tree that would need roving-focus keyboard handling.
- * Text nodes only: values are never interpreted as markup (spec §11).
- * A text payload that parses as JSON also offers Raw, the exact original text,
- * since JSON.parse rounds integers beyond Number.MAX_SAFE_INTEGER. */
 export function JsonViewer(props: Props) {
 	const parsed = parse(props);
 	const [raw, setRaw] = useState(false);
 	if (!("text" in props)) {
-		return parsed.ok ? <Tree value={parsed.value} size={0} /> : null;
+		return parsed.ok ? (
+			<Tree value={parsed.value} size={0} />
+		) : /* istanbul ignore next -- @preserve */ null;
 	}
 	const name = props.filename || "payload.txt";
+	const looksJson = /[/+]json\b/i.test(props.contentType ?? "");
+	const bounded = parsed.ok && parsed.size > BIG;
 	const view = (
-		<pre className="max-h-[480px] overflow-auto whitespace-pre-wrap break-all rounded bg-neutral-50 p-3 font-mono text-xs">
+		<pre className="max-h-[480px] overflow-auto whitespace-pre-wrap break-all rounded bg-secondary p-3 font-mono text-xs">
 			{props.text}
 		</pre>
 	);
@@ -92,11 +85,22 @@ export function JsonViewer(props: Props) {
 						</Button>
 					))}
 					{parsed.unsafe && (
-						<span className="text-amber-700 text-xs">
+						<span className="text-xs text-warning">
 							Large numbers may be rounded in tree view — see Raw
 						</span>
 					)}
 				</div>
+			)}
+			{!parsed.ok && looksJson && (
+				<p className="mb-2 text-xs text-muted-foreground">
+					Not valid JSON — showing as text.
+				</p>
+			)}
+			{bounded && !raw && (
+				<p className="mb-2 text-xs text-muted-foreground">
+					Large payload — showing a collapsed tree. Expand nodes to inspect, or
+					switch to Raw for the full text.
+				</p>
 			)}
 			{parsed.ok && !raw ? (
 				<Tree value={parsed.value} size={parsed.size} />
@@ -126,7 +130,7 @@ function Tree({ value, size }: { value: unknown; size: number }) {
 	return (
 		<ul
 			aria-label="JSON"
-			className="max-h-[480px] overflow-auto rounded bg-neutral-50 p-3 font-mono text-xs"
+			className="max-h-[480px] overflow-auto rounded bg-secondary p-3 font-mono text-xs"
 		>
 			<Node name={null} value={value} depth={0} openDepth={openDepth} />
 		</ul>

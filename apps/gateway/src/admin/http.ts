@@ -1,3 +1,4 @@
+import { projectScopeQuery } from "@hookflare/shared";
 import type { Context } from "hono";
 import type { z } from "zod";
 import type { AppBindings } from "../app";
@@ -28,10 +29,8 @@ export function badCursor(c: Context<AppBindings>): Response {
 	]);
 }
 
-/** Admin payloads are small config objects; anything bigger is a mistake. */
 export const MAX_ADMIN_BODY_BYTES = 65_536;
 
-/** Malformed JSON and schema failures are both 400 invalid_request. */
 export async function readJson<S extends z.ZodType>(
 	c: Context<AppBindings>,
 	schema: S,
@@ -66,7 +65,6 @@ export async function readJson<S extends z.ZodType>(
 		: { ok: false, response: invalid(c, issuesOf(result.error)) };
 }
 
-/** For endpoints whose whole body is optional (e.g. `{reason?}`). */
 export function readOptionalJson<S extends z.ZodType>(
 	c: Context<AppBindings>,
 	schema: S,
@@ -79,7 +77,6 @@ export function readQuery<S extends z.ZodType>(
 	schema: S,
 	arrays: string[] = [],
 ): Parsed<z.infer<S>> {
-	/** Keys in `arrays` may repeat (`?status=a&status=b`) and are passed as string[]. */
 	const raw: Record<string, unknown> = { ...c.req.query() };
 	for (const key of arrays) {
 		const values = c.req.queries(key);
@@ -91,7 +88,32 @@ export function readQuery<S extends z.ZodType>(
 		: { ok: false, response: invalid(c, issuesOf(result.error)) };
 }
 
-/** rows holds up to limit + 1 entries (see list* helpers). */
+export async function readProjectResource<R extends { projectId: string }>(
+	c: Context<AppBindings>,
+	load: () => Promise<R | null | undefined>,
+): Promise<Parsed<R>> {
+	const q = readQuery(c, projectScopeQuery);
+	if (!q.ok) return q;
+	const row = await load();
+	const scope = q.value.project_id;
+	return row && (scope === undefined || scope === row.projectId)
+		? { ok: true, value: row }
+		: { ok: false, response: c.json({ error: "not_found" }, 404) };
+}
+
+export function checkCreateProject(c: Context<AppBindings>, projectId: string) {
+	const q = readQuery(c, projectScopeQuery);
+	if (!q.ok) return q.response;
+	if (q.value.project_id !== undefined && q.value.project_id !== projectId)
+		return invalid(c, [
+			{
+				path: "project_id",
+				code: "custom",
+				message: "Project must match the query scope",
+			},
+		]);
+}
+
 export function paginate<R extends { id: string }>(
 	rows: R[],
 	limit: number,
@@ -99,16 +121,13 @@ export function paginate<R extends { id: string }>(
 	const page = rows.slice(0, limit);
 	return {
 		rows: page,
-		nextCursor: rows.length > limit ? (page.at(-1)?.id ?? null) : null,
+		nextCursor:
+			rows.length > limit
+				? (page.at(-1)?.id ?? /* istanbul ignore next */ null)
+				: null,
 	};
 }
 
-/** Destination URLs may carry credentials in the path or query, so audit diffs keep only the origin. */
-export function auditUrl(url: string): string {
-	return new URL(url).origin;
-}
-
-/** Unexecuted audit insert for the request's actor; batch it with the mutation (M3-7). */
 export function auditStmt(
 	c: Context<AppBindings>,
 	e: Omit<AuditEntry, "actor" | "at">,
@@ -117,12 +136,11 @@ export function auditStmt(
 	if (!actor) throw new Error("auditStmt called without an actor");
 	return auditInsert(c.var.deps.db, {
 		...e,
-		actor: actor.email,
+		actor: actor.username,
 		at: c.var.deps.now(),
 	});
 }
 
-/** SSRF check on save (§8). Returns an error response, or null when the url is allowed. */
 export async function guardUrl(
 	c: Context<AppBindings>,
 	url: string,

@@ -5,7 +5,10 @@ import {
 } from "@hookflare/shared";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
-import { Controller, useForm } from "react-hook-form";
+import { useForm } from "react-hook-form";
+import { DirtyFormGuard } from "@/components/DirtyFormGuard";
+import { FormField } from "@/components/FormField";
+import { FormSection } from "@/components/FormSection";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -15,19 +18,10 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
-import { api } from "@/lib/api";
+import { api, projectScopedPath } from "@/lib/api";
 import { applyServerIssues, nullableNumber, optionalNumber } from "@/lib/forms";
 import { useSettings } from "@/lib/queries/endpoints";
-import { qk } from "@/lib/queries/keys";
-import { useProjectsList } from "@/lib/queries/projects";
+import { invalidateEndpointViews } from "@/lib/queries/invalidate-endpoint-views";
 import { FieldError } from "./ProjectFormDialog";
 
 const POLICY = [
@@ -54,22 +48,44 @@ type Values = {
 	rate_limit_per_s?: number | null;
 };
 
-/** Empty policy fields mean "use the default"; on edit, emptying sends null (spec §10). */
 export function DestinationFormDialog({
 	open,
 	onOpenChange,
+	projectId,
 	destination,
 	onCreated,
 }: {
 	open: boolean;
 	onOpenChange: (o: boolean) => void;
+	projectId: string;
 	destination?: Destination;
+	onCreated?: (secret: string) => void;
+}) {
+	if (!open) return null;
+	return (
+		<DestinationForm
+			projectId={projectId}
+			destination={destination}
+			onDone={() => onOpenChange(false)}
+			onCreated={onCreated}
+		/>
+	);
+}
+
+function DestinationForm({
+	projectId,
+	destination,
+	onDone,
+	onCreated,
+}: {
+	projectId: string;
+	destination?: Destination;
+	onDone: () => void;
 	onCreated?: (secret: string) => void;
 }) {
 	const qc = useQueryClient();
 	const editing = destination !== undefined;
 	const defaults = useSettings().data?.retry_defaults;
-	const projects = useProjectsList();
 	const form = useForm<Values>({
 		resolver: zodResolver(
 			(editing ? patchDestinationRequest : createDestinationRequest) as never,
@@ -85,129 +101,120 @@ export function DestinationFormDialog({
 					max_in_flight: destination.max_in_flight,
 					rate_limit_per_s: destination.rate_limit_per_s,
 				}
-			: { name: "", url: "" },
+			: { project_id: projectId, name: "", url: "" },
 	});
 	const submit = form.handleSubmit(async (values) => {
 		try {
 			if (editing) {
-				await api.patch(`/destinations/${destination.id}`, values);
+				await api.patch(
+					projectScopedPath(`/destinations/${destination.id}`, projectId),
+					values,
+				);
 			} else {
 				const res = await api.post<{ signing_secret: string }>(
-					"/destinations",
+					projectScopedPath("/destinations", projectId),
 					values,
 				);
 				onCreated?.(res.signing_secret);
 			}
-			await qc.invalidateQueries({ queryKey: qk.destinations.all });
-			form.reset();
-			onOpenChange(false);
+			await invalidateEndpointViews(qc, "destination", projectId);
+			onDone();
 		} catch (err) {
 			applyServerIssues(form, err);
 		}
 	});
 	const e = form.formState.errors;
 	return (
-		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent>
-				<DialogHeader>
-					<DialogTitle>
-						{editing ? "Edit destination" : "New destination"}
-					</DialogTitle>
-				</DialogHeader>
-				<form onSubmit={submit} className="space-y-3">
-					{!editing && (
-						<div>
-							<Label htmlFor="dst-project">Project</Label>
-							<Controller
-								control={form.control}
-								name="project_id"
-								render={({ field }) => (
-									<Select value={field.value} onValueChange={field.onChange}>
-										<SelectTrigger id="dst-project" aria-label="Project">
-											<SelectValue placeholder="Choose a project" />
-										</SelectTrigger>
-										<SelectContent>
-											{projects.data?.data.map((p) => (
-												<SelectItem key={p.id} value={p.id}>
-													{p.name}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								)}
-							/>
-							<FieldError message={e.project_id?.message} />
-						</div>
-					)}
-					<div>
-						<Label htmlFor="dst-name">Name</Label>
-						<Input id="dst-name" {...form.register("name")} />
-						<FieldError message={e.name?.message} />
-					</div>
-					<div>
-						<Label htmlFor="dst-url">URL</Label>
-						<Input
-							id="dst-url"
-							placeholder="https://…"
-							{...form.register("url")}
-						/>
-						<FieldError message={e.url?.message} />
-					</div>
-					<fieldset className="grid grid-cols-2 gap-3">
-						<legend className="mb-1 text-sm font-medium">
-							Retry policy (empty = default)
-						</legend>
-						{POLICY.map(([key, label]) => {
-							const fallback = defaults?.[key];
-							return (
-								<div key={key}>
-									<Label htmlFor={`dst-${key}`}>{label}</Label>
+		<DirtyFormGuard dirty={form.formState.isDirty}>
+			{(requestClose) => (
+				<Dialog open onOpenChange={(o) => !o && requestClose(onDone)}>
+					<DialogContent>
+						<DialogHeader>
+							<DialogTitle>
+								{editing ? "Edit destination" : "New destination"}
+							</DialogTitle>
+						</DialogHeader>
+						<form onSubmit={submit} className="space-y-3">
+							<FormSection title="Destination">
+								<FormField htmlFor="dst-name" label="Name">
+									<Input id="dst-name" {...form.register("name")} />
+									<FieldError message={e.name?.message} />
+								</FormField>
+								<FormField htmlFor="dst-url" label="URL">
 									<Input
-										id={`dst-${key}`}
-										type="number"
-										placeholder={
-											fallback === undefined
-												? "default"
-												: `default: ${fallback}`
-										}
-										{...form.register(
-											key,
-											editing ? nullableNumber : optionalNumber,
-										)}
+										id="dst-url"
+										placeholder="https://…"
+										{...form.register("url")}
 									/>
-									<FieldError message={e[key]?.message} />
+									<FieldError message={e.url?.message} />
+								</FormField>
+							</FormSection>
+							<FormSection
+								title="Retry policy"
+								description="Empty means inherit the workspace default."
+							>
+								<div className="grid grid-cols-2 gap-3">
+									{POLICY.map(([key, label]) => {
+										const fallback = defaults?.[key];
+										return (
+											<FormField key={key} htmlFor={`dst-${key}`} label={label}>
+												<Input
+													id={`dst-${key}`}
+													type="number"
+													placeholder={
+														fallback === undefined
+															? "default"
+															: `default: ${fallback}`
+													}
+													{...form.register(
+														key,
+														editing ? nullableNumber : optionalNumber,
+													)}
+												/>
+												<FieldError message={e[key]?.message} />
+											</FormField>
+										);
+									})}
 								</div>
-							);
-						})}
-					</fieldset>
-					<fieldset className="grid grid-cols-2 gap-3">
-						<legend className="mb-1 text-sm font-medium">
-							Delivery limits (empty = unlimited)
-						</legend>
-						{LIMITS.map(([key, label]) => (
-							<div key={key}>
-								<Label htmlFor={`dst-${key}`}>{label}</Label>
-								<Input
-									id={`dst-${key}`}
-									type="number"
-									placeholder="Unlimited"
-									{...form.register(
-										key,
-										editing ? nullableNumber : optionalNumber,
-									)}
-								/>
-								<FieldError message={e[key]?.message} />
-							</div>
-						))}
-					</fieldset>
-					<FieldError message={e.root?.message} />
-					<DialogFooter>
-						<Button type="submit" disabled={form.formState.isSubmitting}>
-							{editing ? "Save" : "Create"}
-						</Button>
-					</DialogFooter>
-				</form>
-			</DialogContent>
-		</Dialog>
+							</FormSection>
+							<FormSection
+								title="Delivery limits"
+								description="Empty means unlimited."
+							>
+								<div className="grid grid-cols-2 gap-3">
+									{LIMITS.map(([key, label]) => (
+										<FormField key={key} htmlFor={`dst-${key}`} label={label}>
+											<Input
+												id={`dst-${key}`}
+												type="number"
+												placeholder="Unlimited"
+												{...form.register(
+													key,
+													editing ? nullableNumber : optionalNumber,
+												)}
+											/>
+											<FieldError message={e[key]?.message} />
+										</FormField>
+									))}
+								</div>
+							</FormSection>
+							<FieldError message={e.root?.message} />
+							<DialogFooter>
+								<Button
+									type="button"
+									variant="outline"
+									onClick={() => requestClose(onDone)}
+								>
+									Cancel
+								</Button>
+								<Button type="submit" disabled={form.formState.isSubmitting}>
+									{editing ? "Save" : "Create"}
+								</Button>
+							</DialogFooter>
+						</form>
+					</DialogContent>
+				</Dialog>
+			)}
+		</DirtyFormGuard>
 	);
 }

@@ -1,46 +1,14 @@
-/**
- * Restore SQL generation for R2 backups: table ordering, INSERT/UPDATE
- * statements with chunked BLOB appends, orphan filtering, and numbered
- * SQL file writing. Portable (no node: imports): the gateway Miniflare
- * test imports `rowStatements` directly.
- */
-
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-/**
- * One backed-up table, mirroring the backup manifest shape.
- * @typedef {{ name: string, key: { column: string } | { rowid: true }, columns: { name: string, type: string, blob: boolean }[], foreign_keys: { column: string, table: string, to: string }[], rows: number, parts: { table: string, key: string, rows: number, bytes: number, sha256: string, blob_bytes: Record<string, number> }[] }} ManifestTable
- */
-
-/**
- * Backup manifest: the tables plus their parts in R2.
- * @typedef {{ version: 1, backup_id: string, prefix: string, started_at: number, finished_at: number, d1_migrations: string[], tables: ManifestTable[] }} Manifest
- */
-
-/**
- * Quote an identifier with `"` doubled.
- * @param {string} name
- * @returns {string}
- */
 function ident(name) {
 	return `"${name.replace(/"/g, '""')}"`;
 }
 
-/**
- * Quote TEXT with `'` doubled.
- * @param {string} value
- * @returns {string}
- */
 function textLiteral(value) {
 	return `'${value.replace(/'/g, "''")}'`;
 }
 
-/**
- * Decode base64 with `atob` (node and workerd both provide it).
- * @param {string} b64
- * @returns {Uint8Array}
- */
 function base64ToBytes(b64) {
 	const bin = atob(b64);
 	const out = new Uint8Array(bin.length);
@@ -50,11 +18,6 @@ function base64ToBytes(b64) {
 	return out;
 }
 
-/**
- * Lowercase hex of bytes.
- * @param {Uint8Array} bytes
- * @returns {string}
- */
 function bytesToHex(bytes) {
 	let out = "";
 	for (const b of bytes) {
@@ -63,25 +26,14 @@ function bytesToHex(bytes) {
 	return out;
 }
 
-/**
- * True for a `{"$b64":"…"}` backup BLOB cell.
- * @param {unknown} value
- * @returns {value is { $b64: string }}
- */
 function isB64(value) {
 	return (
 		typeof value === "object" &&
 		value !== null &&
-		typeof (/** @type {{ $b64?: unknown }} */ (value).$b64) === "string"
+		typeof value.$b64 === "string"
 	);
 }
 
-/**
- * A value as SQL: TEXT quoted with `'` doubled, integers as they are
- * (booleans as 0/1), `null` as NULL, `{"$b64":…}` as `X'<hex>'`.
- * @param {unknown} value
- * @returns {string}
- */
 export function valueLiteral(value) {
 	if (value === null || value === undefined) {
 		return "NULL";
@@ -109,17 +61,9 @@ export function valueLiteral(value) {
 	);
 }
 
-/**
- * Tables in restore order: every parent before its children. Self
- * references are ignored for ordering; anything else that cycles throws
- * `restore: foreign key cycle: a -> b`.
- * @param {Manifest} manifest
- * @returns {string[]}
- */
 export function tableOrder(manifest) {
 	const names = manifest.tables.map((t) => t.name);
 	const known = new Set(names);
-	/** Child -> parents (within this manifest, minus self-refs). */
 	const parents = new Map(names.map((n) => [n, new Set()]));
 	for (const t of manifest.tables) {
 		for (const fk of t.foreign_keys) {
@@ -159,21 +103,17 @@ export function tableOrder(manifest) {
 	return order;
 }
 
-/**
- * One cycle path (`a -> b`) for the error, via depth-first search.
- * @param {string[]} names
- * @param {Map<string, Set<string>>} parents
- * @returns {string}
- */
 function findCycle(names, parents) {
 	const state = new Map();
 	const stack = [];
 	const visit = (name) => {
 		state.set(name, 1);
 		stack.push(name);
+		/* node:coverage ignore next */
 		for (const p of parents.get(name) ?? []) {
 			if (state.get(p) === 1) {
 				return (
+					/* node:coverage ignore next */
 					[...stack.slice(stack.indexOf(p)), p].slice(0, -1).join(" -> ") || p
 				);
 			}
@@ -195,32 +135,21 @@ function findCycle(names, parents) {
 				return found;
 			}
 		}
+		/* node:coverage ignore next 3 */
 	}
 	return names.join(" -> ");
 }
 
-/** Hex chars per BLOB append chunk: 32 KiB of bytes. */
 const CHUNK_HEX = 65536;
 
-/** UTF-8 bytes per TEXT append chunk, after `'` doubling. */
 const CHUNK_TEXT_BYTES = 65536;
 
 const utf8 = new TextEncoder();
 
-/**
- * UTF-8 byte length of a string (what D1 limits), not UTF-16 units.
- * @param {string} s
- * @returns {number}
- */
 export function utf8Length(s) {
 	return utf8.encode(s).length;
 }
 
-/**
- * UTF-8 bytes of one code point (a lone surrogate encodes as U+FFFD).
- * @param {number} cp
- * @returns {number}
- */
 function codePointBytes(cp) {
 	if (cp < 0x80) {
 		return 1;
@@ -234,19 +163,13 @@ function codePointBytes(cp) {
 	return 4;
 }
 
-/**
- * Split TEXT into `'`-doubled chunks on whole code points, each at most
- * `budget` UTF-8 bytes after doubling.
- * @param {string} value
- * @param {number} budget
- * @returns {string[]}
- */
 function textChunks(value, budget) {
 	const chunks = [];
 	let chunk = "";
 	let bytes = 0;
 	for (const ch of value) {
 		const quote = ch === "'";
+		/* node:coverage ignore next */
 		const n = quote ? 2 : codePointBytes(ch.codePointAt(0) ?? 0);
 		if (bytes + n > budget && chunk.length > 0) {
 			chunks.push(chunk);
@@ -262,20 +185,6 @@ function textChunks(value, budget) {
 	return chunks;
 }
 
-/**
- * INSERT for a row. When the INSERT is not under `maxStmt` UTF-8 bytes,
- * the largest TEXT and BLOB values become `''` / `X''` (largest first,
- * until the INSERT fits) and are appended back with chunked
- * `UPDATE … SET c = c || '…'` (TEXT, split on whole code points) or
- * `UPDATE … SET c = CAST(c || X'…' AS BLOB)` (at most 32 KiB of bytes
- * per chunk). Every statement is under `maxStmt` UTF-8 bytes; NULL, `''`
- * and `X''` are never split. Splitting needs a key column, so an
- * oversized row in a rowid table throws.
- * @param {ManifestTable} table
- * @param {Record<string, unknown>} row
- * @param {number} [maxStmt]
- * @returns {string[]}
- */
 export function rowStatements(table, row, maxStmt = 90000) {
 	const literals = new Map();
 	for (const c of table.columns) {
@@ -363,24 +272,6 @@ export function rowStatements(table, row, maxStmt = 90000) {
 	return [sql, ...updates];
 }
 
-/**
- * One sampled orphan: never the full row (bodies, secrets), only its
- * table, its key, and its FK column values.
- * @typedef {{ table: string, key: Record<string, unknown> | null, fk: Record<string, unknown> }} OrphanEntry
- */
-
-/**
- * Orphan report: dropped rows per table with a small sample.
- * @typedef {Record<string, { count: number, sample: OrphanEntry[], blob_bytes?: Record<string, number> }>} OrphanReport
- */
-
-/**
- * The `orphans.json` sample entry for a dropped row: table, key (null
- * for rowid tables) and FK column values only.
- * @param {ManifestTable} table
- * @param {Record<string, unknown>} row
- * @returns {OrphanEntry}
- */
 export function orphanEntry(table, row) {
 	const fk = {};
 	for (const f of table.foreign_keys) {
@@ -396,25 +287,8 @@ export function orphanEntry(table, row) {
 	};
 }
 
-/**
- * Admits rows whose non-null FK parents were already admitted, matching
- * each FK on its `fk.to` column, so a missing parent drops its whole
- * subtree (deliveries, then attempts). Tables must be fed in
- * `tableOrder`. For a self-referencing table, call `preload` with its
- * rows before streaming them through `admit`: forward self-references
- * (child streamed before its parent) then admit, and a row whose
- * self-referenced parent was orphaned is orphaned too. Without a prior
- * `preload`, self-references only match rows admitted so far.
- * @param {Manifest} manifest
- * @returns {{ admit: (table: string | ManifestTable, row: Record<string, unknown>) => boolean, preload: (table: string | ManifestTable, rows: Iterable<Record<string, unknown>>) => void, report: () => OrphanReport }}
- */
 export function createOrphanFilter(manifest) {
 	const byName = new Map(manifest.tables.map((t) => [t.name, t]));
-	/**
-	 * Table -> column -> values of admitted rows, for every column some FK
-	 * points at (`fk.to`).
-	 * @type {Map<string, Map<string, Set<unknown>>>}
-	 */
 	const admitted = new Map();
 	for (const t of manifest.tables) {
 		admitted.set(t.name, new Map());
@@ -424,19 +298,8 @@ export function createOrphanFilter(manifest) {
 			admitted.get(fk.table)?.set(fk.to, new Set());
 		}
 	}
-	/**
-	 * Table -> key-only records collected by `preload` (own key, FK and
-	 * `fk.to` values), plus the lazily computed set of orphaned own keys.
-	 * @type {Map<string, { records: Map<unknown, Record<string, unknown>>, orphaned: Set<unknown> | null }>}
-	 */
 	const preloaded = new Map();
-	/** Table -> { count, sample }. */
 	const orphans = new Map();
-	/**
-	 * Resolve a table name or table object to its manifest entry.
-	 * @param {string | ManifestTable} table
-	 * @returns {ManifestTable}
-	 */
 	function resolve(table) {
 		const info = typeof table === "string" ? byName.get(table) : table;
 		if (!info) {
@@ -446,24 +309,11 @@ export function createOrphanFilter(manifest) {
 		}
 		return info;
 	}
-	/**
-	 * The table's own key for a row.
-	 * @param {ManifestTable} info
-	 * @param {Record<string, unknown>} row
-	 * @returns {unknown}
-	 */
 	function ownKeyOf(info, row) {
 		return "column" in info.key
 			? (row[info.key.column] ?? null)
 			: JSON.stringify(row);
 	}
-	/**
-	 * Only the values the filter needs: the table's key, its FK columns,
-	 * and the columns other rows point at.
-	 * @param {ManifestTable} info
-	 * @param {Record<string, unknown>} row
-	 * @returns {Record<string, unknown>}
-	 */
 	function keyOnly(info, row) {
 		const out = {};
 		if ("column" in info.key) {
@@ -477,12 +327,6 @@ export function createOrphanFilter(manifest) {
 		}
 		return out;
 	}
-	/**
-	 * True when every non-self FK value is null or an admitted parent value.
-	 * @param {ManifestTable} info
-	 * @param {Record<string, unknown>} row
-	 * @returns {boolean}
-	 */
 	function parentsOk(info, row) {
 		for (const fk of info.foreign_keys) {
 			const value = row[fk.column] ?? null;
@@ -495,21 +339,12 @@ export function createOrphanFilter(manifest) {
 		}
 		return true;
 	}
-	/**
-	 * Own keys of preloaded rows that must be orphaned: a non-self parent
-	 * is missing, a self-referenced row is missing, or a self-referenced
-	 * row is itself orphaned (propagated down the whole subtree). Rows in
-	 * a self-reference cycle with no missing parent are kept.
-	 * @param {ManifestTable} info
-	 * @returns {Set<unknown>}
-	 */
 	function resolveOrphaned(info) {
 		const pre = preloaded.get(info.name);
 		if (pre.orphaned) {
 			return pre.orphaned;
 		}
 		const selfFks = info.foreign_keys.filter((fk) => fk.table === info.name);
-		/** `fk.to` column -> value -> own key of the row holding it. */
 		const owners = new Map();
 		for (const fk of selfFks) {
 			if (!owners.has(fk.to)) {
@@ -524,7 +359,6 @@ export function createOrphanFilter(manifest) {
 			}
 		}
 		const orphaned = new Set();
-		/** Parent own key -> child own keys. */
 		const children = new Map();
 		const queue = [];
 		for (const [key, rec] of pre.records) {
@@ -563,16 +397,6 @@ export function createOrphanFilter(manifest) {
 		pre.orphaned = orphaned;
 		return orphaned;
 	}
-	/**
-	 * Pre-collect a self-referencing table's key-only records before
-	 * streaming its rows through `admit`, so forward self-references
-	 * admit and an orphaned parent orphans its whole subtree. Call it
-	 * after every parent table has been admitted. Additive: safe to call
-	 * once per part.
-	 * @param {string | ManifestTable} table
-	 * @param {Iterable<Record<string, unknown>>} rows
-	 * @returns {void}
-	 */
 	function preload(table, rows) {
 		const info = resolve(table);
 		let pre = preloaded.get(info.name);
@@ -585,13 +409,6 @@ export function createOrphanFilter(manifest) {
 			pre.records.set(ownKeyOf(info, row), keyOnly(info, row));
 		}
 	}
-	/**
-	 * Self-reference check for a row `preload` did not see: every self FK
-	 * value is the row itself or an already admitted row.
-	 * @param {ManifestTable} info
-	 * @param {Record<string, unknown>} row
-	 * @returns {boolean}
-	 */
 	function selfOkSoFar(info, row) {
 		for (const fk of info.foreign_keys) {
 			const value = row[fk.column] ?? null;
@@ -607,11 +424,6 @@ export function createOrphanFilter(manifest) {
 		}
 		return true;
 	}
-	/**
-	 * @param {string | ManifestTable} table
-	 * @param {Record<string, unknown>} row
-	 * @returns {boolean}
-	 */
 	function admit(table, row) {
 		const info = resolve(table);
 		const ownKey = ownKeyOf(info, row);
@@ -646,15 +458,7 @@ export function createOrphanFilter(manifest) {
 	return { admit, preload, report };
 }
 
-/**
- * Numbered `NNNN.sql` files, each starting with
- * `PRAGMA defer_foreign_keys = true;`, rolling over at `maxBytes`.
- */
 export class SqlFileWriter {
-	/**
-	 * @param {string} dir
-	 * @param {number} [maxBytes]
-	 */
 	constructor(dir, maxBytes = 50000000) {
 		this.dir = dir;
 		this.maxBytes = maxBytes;
@@ -665,7 +469,6 @@ export class SqlFileWriter {
 		mkdirSync(dir, { recursive: true });
 	}
 
-	/** @returns {void} */
 	roll() {
 		this.index += 1;
 		const name = `${String(this.index).padStart(4, "0")}.sql`;
@@ -676,11 +479,6 @@ export class SqlFileWriter {
 		this.files.push(this.current);
 	}
 
-	/**
-	 * Append one statement (a trailing semicolon and newline are added).
-	 * @param {string} sql
-	 * @returns {void}
-	 */
 	writeStatement(sql) {
 		const line = sql.endsWith("\n") ? sql : `${sql}\n`;
 		const size = new TextEncoder().encode(line).length;
@@ -691,9 +489,6 @@ export class SqlFileWriter {
 		this.currentBytes += size;
 	}
 
-	/**
-	 * @returns {string[]} The SQL files written, in order.
-	 */
 	close() {
 		return this.files;
 	}

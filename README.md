@@ -2,12 +2,9 @@
 
 **A reliable inbound webhook gateway that runs entirely on Cloudflare.**
 
-Hookflare sits between webhook providers (Stripe, GitHub, Shopify, your own services…) and your backends. It verifies each incoming webhook, persists it durably, and acknowledges it, all before your backend is involved. It then delivers the webhook with automatic retries, keeps a full delivery log, and lets you replay anything from a dashboard.
+Hookflare sits between webhook providers (Stripe, GitHub, Shopify, your own services…) and your backends. It authenticates incoming webhooks according to source configuration, persists them, and delivers them asynchronously. The dashboard lets operators inspect attempts and replay eligible events.
 
-> [!NOTE]
-> **1.0.0 — first release.** The full pipeline, admin API, dashboard, alerts, archival, backups, and the operations runbook are in place. See [`CHANGELOG.md`](CHANGELOG.md). The live staging drills (rollback, restore, canary) are still pending; runbook steps not yet run live are marked **(verify on staging in drill)**.
-
-Operations runbook: [`docs/runbook/`](docs/runbook/).
+[Feature documentation](docs/README.md) · [Operations runbook](docs/runbook.md) · [Release index](CHANGELOG.md)
 
 ---
 
@@ -15,22 +12,20 @@ Operations runbook: [`docs/runbook/`](docs/runbook/).
 
 When your backend goes down, deploys, or gets overloaded, webhook providers retry only for a limited time and then drop events. Hookflare decouples **receiving** a webhook from **processing** it:
 
-- **Never lose a webhook.** An event is acknowledged with `202 Accepted` only after it is stored in D1 (and R2 for large payloads) **and** enqueued. If any of those steps fails, the provider gets a `503` and retries.
-- **Survive long outages.** Exponential backoff with jitter keeps retrying for roughly 62 hours by default, so a backend that is down for two days still receives every event.
-- **See everything.** Every delivery attempt is logged with its HTTP status, latency, and error. You can search events, inspect payloads, and replay one or many from the dashboard.
-- **Zero servers to run.** It is built only on Cloudflare managed services: Workers, D1, Queues, R2, Durable Objects, and Access.
+- **Decouple intake from delivery.** Accepted events are stored before delivery; the [wire contract](docs/contract.md) explains enqueue failures and paused destinations.
+- **Recover from outages.** Retryable failures use [configurable backoff and attempt limits](docs/delivery.md). Operators can investigate and replay eligible events after fixing the backend.
+- **Inspect delivery history.** Search events, inspect attempt outcomes, and reveal stored payloads with the appropriate permissions.
+- **Zero servers to run.** It is built only on Cloudflare managed services: Workers, D1, Queues, R2, Durable Objects, and Workflows.
 
 ## Features
 
 | Area | What you get |
 |---|---|
-| **Ingress** | One public URL per source; `hmac` (SHA-1/256/512, hex or base64) / `token` (header or query) / `none` verification on the raw body; deduplication by provider event ID (from a header or a JSON path); body size limit (1 MiB default, up to 10 MiB per source); 100 requests / 10 s per source |
-| **Delivery** | At-least-once delivery; [Standard Webhooks](https://www.standardwebhooks.com/) signing toward your backend; per-destination timeout, retry budget, backoff, concurrency, and rate limit |
-| **Retry & DLQ** | Retries on 408/429/5xx, network errors, and timeouts (honoring `Retry-After`); other 3xx/4xx responses fail immediately; events that exhaust their retries become dead-lettered |
-| **Recovery** | A cron reconciler re-enqueues stuck, lost, or never-enqueued deliveries; pausing an endpoint holds its deliveries and resuming it releases them |
-| **Dashboard** | Overview stats and trends, projects and endpoints, event search, delivery timelines, a failures / dead-letter view, single and bulk replay, alerts, archives, audit log, users, and settings |
-| **Security** | Cloudflare Access login, Admin / Operator / Viewer roles, audit log for every change, encrypted secrets, SSRF protection, HTTPS-only destinations, credential headers stripped |
-| **Operations** | Alerts (consecutive failures, new dead letters, stuck deliveries, D1 storage, stuck archive, stale backup) to Discord, Slack, or Telegram; daily archival of old data to R2 with configurable retention; daily D1 backup to R2 with restore scripts; `/healthz` with a job heartbeat |
+| [Ingress](docs/sources.md) | Source authentication, provider event deduplication, and admission controls |
+| [Delivery](docs/delivery.md) | Signed, at-least-once delivery with configurable retries and recovery |
+| [Dashboard](docs/dashboard.md) | Overview, event investigation, and operator recovery |
+| [Security](docs/users.md) | Built-in login, API tokens, role-based permissions, and audit history |
+| [Operations](docs/operations.md) | Monitoring, alerts, archival, and backup/restore |
 
 ## How it works
 
@@ -44,7 +39,7 @@ Provider ──POST /in/:sourceId──▶ Ingress ──▶ D1 ledger (+ R2 for
                                                      ▼                  4xx  ✖ failed
                                              D1 attempt log ──▶ dead letter after retry budget
 
-Dashboard ──(Cloudflare Access)──▶ Admin API ──▶ D1 / R2
+Dashboard ──(login session or API token)──▶ Admin API ──▶ D1 / R2
 Cron ──▶ reconcile · alerts (1 min) · stats rollup (5 min) · archive (03:00 UTC) · D1 backup (20:00 UTC)
 ```
 
@@ -54,7 +49,7 @@ D1 is the source of truth. The queue is only a transport, so the reconciler can 
 
 - **Runtime:** Cloudflare Workers, [Hono](https://hono.dev/), TypeScript
 - **Storage:** Cloudflare D1 (ledger, via Drizzle ORM), R2 (large payloads, archives, and backups), Queues (delivery), Durable Objects (per-destination limiter), Workflows (archive and backup)
-- **Auth:** Cloudflare Access + server-side RBAC
+- **Auth:** Built-in username/password login (server-side sessions in D1) + API tokens + RBAC
 - **Dashboard:** React, Vite, Tailwind CSS, TanStack Router / Query
 - **Tooling:** pnpm workspaces, Wrangler, Vitest with `@cloudflare/vitest-plugin`, Playwright, Biome
 
@@ -66,7 +61,7 @@ Two paths: run everything locally in a few minutes (no Cloudflare account needed
 
 - Node.js 24 (see [`.nvmrc`](.nvmrc)) and [pnpm](https://pnpm.io/) (`corepack enable` picks the pinned version)
 - `git`, `openssl`, `curl`, and `jq` for the examples below
-- For a Cloudflare deployment: a Cloudflare account on **Workers Paid** (Queues, Durable Objects, and Workflows; 14-day queue retention) and a **Zero Trust** organization for Access
+- For a Cloudflare deployment: a Cloudflare account on **Workers Paid** (Queues, Durable Objects, and Workflows; 14-day queue retention)
 
 Wrangler is a dev dependency, so `pnpm exec wrangler` needs no global install.
 
@@ -78,12 +73,13 @@ cd hookflare
 pnpm install
 cp apps/gateway/.dev.vars.example apps/gateway/.dev.vars
 # Set SECRETS_KEY to the output of: openssl rand -base64 32
-# Set ACCESS_DEV_EMAIL and BOOTSTRAP_ADMIN_EMAILS to the same email
+# (the Turnstile test keys already have usable defaults.)
+pnpm build              # builds the dashboard (without it, / shows a "Dashboard not built" placeholder)
 pnpm db:migrate:local   # applies migrations to local D1
 pnpm dev                # gateway on http://localhost:8787 (admin API + built dashboard)
 ```
 
-`ACCESS_DEV_EMAIL` skips the Access JWT check only for requests to `localhost`/`127.0.0.1`, and that email must also be in `BOOTSTRAP_ADMIN_EMAILS` to get the admin role. Local D1, R2, Queues, Durable Objects, and Workflows are all simulated by `wrangler dev`.
+Open http://localhost:8787, create the first admin on the onboarding page (setup needs no token and closes after the first admin is created), then create the first project when the dashboard asks for it. Local D1, R2, Queues, Durable Objects, and Workflows are all simulated by `wrangler dev`.
 
 For dashboard development with hot reload, also run `pnpm dev:dashboard` and open http://localhost:5173 (Vite proxies `/api` to the Worker).
 
@@ -96,7 +92,7 @@ pnpm test && pnpm typecheck && pnpm lint
 
 ### Option B: deploy to Cloudflare
 
-Each deployment is one isolated environment (production and staging are separate Workers with their own resources). The steps below are for production with [`apps/gateway/wrangler.jsonc`](apps/gateway/wrangler.jsonc); for staging use [`wrangler.staging.jsonc`](apps/gateway/wrangler.staging.jsonc), the `-staging` resource names, and `pnpm deploy:staging`. The full procedure, including the sink Worker and service token used by smoke tests, is in [`docs/runbook/setup.md`](docs/runbook/setup.md).
+Each deployment is one isolated environment (production and staging are separate Workers with their own resources). The steps below are for production with [`apps/gateway/wrangler.jsonc`](apps/gateway/wrangler.jsonc); for staging use [`wrangler.staging.jsonc`](apps/gateway/wrangler.staging.jsonc), the `-staging` resource names, and `pnpm deploy:staging`. The full procedure, including the sink Worker and the API token used by smoke tests, is in [`docs/runbook.md#setup`](docs/runbook.md#setup).
 
 **1. Log in and create resources**
 
@@ -109,7 +105,7 @@ pnpm exec wrangler r2 bucket create hookflare-payloads
 pnpm exec wrangler r2 bucket create hookflare-backups
 ```
 
-Put the `database_id` printed by `d1 create` into `apps/gateway/wrangler.jsonc` → `d1_databases[0].database_id` (the committed value is the maintainers' production database). The ingress rate limiter, cron triggers, the `DestinationLimiter` Durable Object, and the `hookflare-archive`/`hookflare-backup` Workflows are declared in the config and created by the deploy.
+Put the `database_id` printed by `d1 create` into `apps/gateway/wrangler.jsonc` → `d1_databases[0].database_id` (the committed value is the maintainers' production database). The ingress and login rate limiters, cron triggers, the `DestinationLimiter` Durable Object, and the `hookflare-archive`/`hookflare-backup` Workflows are declared in the config and created by the deploy.
 
 **2. Set the encryption key**
 
@@ -120,51 +116,67 @@ pnpm exec wrangler secret put SECRETS_KEY --config apps/gateway/wrangler.jsonc
 
 `SECRETS_KEY` encrypts source secrets, signing secrets, and alert channel configs. A backup cannot replace it: without it a restored database is unreadable.
 
-**3. Protect the dashboard with Cloudflare Access**
+**3. (Optional) Turnstile**
 
-In Zero Trust, create a self-hosted Access application on the Worker's hostname that covers `/` and `/api/admin/*`, with **bypass** policies for `/in/*` and `/healthz` (webhook providers and uptime monitors must reach them without logging in). Then set in `apps/gateway/wrangler.jsonc` → `vars`:
+Create a Turnstile widget for the Worker's hostname — either in the Cloudflare dashboard (Turnstile → Add widget), or via the Cloudflare API MCP server:
 
-| Var | Value |
-|---|---|
-| `ACCESS_TEAM_DOMAIN` | `https://<team>.cloudflareaccess.com` |
-| `ACCESS_AUD` | the application's AUD tag |
-| `BOOTSTRAP_ADMIN_EMAILS` | comma-separated emails that become admins on first login |
-| `PUBLIC_BASE_URL` | optional; the ingress origin (e.g. `https://hooks.example.com`) when it differs from the admin hostname |
+```js
+// MCP execute: POST /accounts/{id}/challenges/widgets
+// { name: "hookflare", domains: ["<your-worker-hostname>"], mode: "managed" }
+```
 
-The admin API fails closed (`500`) until both Access values are set.
+Then set the site key as a var in `apps/gateway/wrangler.jsonc` → `vars` (`TURNSTILE_SITE_KEY`) and the secret key as a secret:
+
+```bash
+pnpm exec wrangler secret put TURNSTILE_SECRET_KEY --config apps/gateway/wrangler.jsonc
+```
+
+Turnstile protects the login and onboarding forms. Both values must be set, or neither: with neither set the pages show a "Turnstile is off" notice (and `/healthz` reports it); with only one set, login and setup fail closed. If the ingress hostname differs from the admin hostname, also set `PUBLIC_BASE_URL` in `apps/gateway/wrangler.jsonc` → `vars` (e.g. `https://hooks.example.com`) so `ingress_url` in admin responses points at it.
 
 **4. Deploy**
 
 ```bash
-pnpm run deploy -- --skip-smoke   # first deploy: no sink or service token yet
-curl https://<your-worker-domain>/healthz   # {"status":"ok","version":"<worker version id>"}
+pnpm run deploy -- --skip-smoke   # no sink or API token yet
+curl https://<your-worker-domain>/healthz   # {"status":"ok",...,"version":"<worker version id>",...}
 ```
 
-`pnpm run deploy` runs [`scripts/deploy.mjs`](scripts/deploy.mjs): it records a restore point (D1 Time Travel bookmark and the live Worker version), builds the dashboard, applies remote D1 migrations, deploys the Worker, smoke-tests, and prints the exact rollback commands. Later deploys should run the smoke test; see [`docs/runbook/deploy.md`](docs/runbook/deploy.md). (`pnpm deploy` is a built-in pnpm command, so always use `pnpm run deploy`.)
+`pnpm run deploy` runs [`scripts/deploy.mjs`](scripts/deploy.mjs): it builds the dashboard, records a restore point (D1 Time Travel bookmark and the live Worker version), applies remote D1 migrations, deploys the Worker, smoke-tests, and prints the exact rollback commands. Later deploys should run the smoke test; see [`docs/runbook.md#deploy-and-smoke`](docs/runbook.md#deploy-and-smoke). (`pnpm deploy` is a built-in pnpm command, so always use `pnpm run deploy`.)
 
-Open `https://<your-worker-domain>/`, log in through Access with a bootstrap admin email, and continue in the dashboard: create a project, a destination, and a source, then add alert channels and review Settings › Storage (retention and backups).
+On the very first deploy the Worker does not exist yet: the script records `previousVersion: "none"`, and the printed rollback list has no Worker rollback, only the D1 restore.
+
+**5. Create the first admin immediately**
+
+Open `https://<your-worker-domain>/` and create the first admin on the onboarding page right away, before the URL is shared: setup is first-come, needs no token, and closes once a password-bearing account exists. Then continue in the dashboard: create a project, a destination, and a source, add alert channels, and review Settings › Storage (retention and backups).
+
+**6. (Optional) Smoke test**
+
+Deploy the sink (`pnpm --filter sink run deploy`), create an admin API token in Settings › Users, then run `HOOKFLARE_URL=https://<your-worker-domain> HOOKFLARE_API_TOKEN=<token> SINK_URL=https://<sink-domain> pnpm run smoke`. See [`docs/runbook.md#setup`](docs/runbook.md#setup).
 
 ### Receive your first webhook
 
-This uses the local instance from option A. On a deployed Worker, replace the host and call the admin API with [`cloudflared access curl`](https://developers.cloudflare.com/cloudflare-one/applications/non-http/cloudflared-authentication/) or an Access service token.
+This uses the local instance from option A, after you have created the first admin and the first project in the dashboard. Admin API calls authenticate with an API token: in Settings › Users, choose **API tokens** on your account, create one, and copy the `hf_…` value (shown only once). On a deployed Worker, replace the host.
+
+The dashboard login is protected by Turnstile (the local `.dev.vars` uses Cloudflare's test keys), so a `curl` login without a Turnstile token gets `403 turnstile_failed`; use the API token instead.
 
 ```bash
+export HOOKFLARE_API_TOKEN='hf_...'
 API=http://localhost:8787/api/admin/v1
-PROJECT=$(curl -s -X POST $API/projects -H 'content-type: application/json' \
-  -d '{"name":"Shop","slug":"shop"}' | jq -r .id)
-curl -s -X POST $API/destinations -H 'content-type: application/json' \
-  -d "{\"project_id\":\"$PROJECT\",\"name\":\"Backend\",\"url\":\"https://backend.example.com/hooks\"}"
-# → save signing_secret: it is shown only once
-DEST=<destination id from the response>
-curl -s -X POST $API/sources -H 'content-type: application/json' \
-  -d "{\"project_id\":\"$PROJECT\",\"destination_id\":\"$DEST\",\"name\":\"Provider\",\"auth_type\":\"hmac\",\"auth_config\":{\"header\":\"x-signature\",\"algorithm\":\"sha256\",\"encoding\":\"hex\"}}"
-# → save secret and ingress_url: the secret is shown only once
-SOURCE_SECRET=<secret from the response>
-INGRESS_URL=<ingress_url from the response>
+AUTH="authorization: Bearer $HOOKFLARE_API_TOKEN"
+PROJECT=$(curl -fsS "$API/projects" -H "$AUTH" | jq -er '.data[0].id')
+DEST=$(curl -fsS "$API/destinations" -H "$AUTH" \
+  --json "{\"project_id\":\"$PROJECT\",\"name\":\"Backend\",\"url\":\"https://backend.example.com/hooks\"}")
+# → save .signing_secret: it is shown only once
+DEST_ID=$(printf %s "$DEST" | jq -er .id)
+SOURCE=$(curl -fsS "$API/sources" -H "$AUTH" \
+  --json "{\"project_id\":\"$PROJECT\",\"destination_id\":\"$DEST_ID\",\"name\":\"Provider\",\"auth_type\":\"hmac\",\"auth_config\":{\"header\":\"x-signature\",\"algorithm\":\"sha256\",\"encoding\":\"hex\"}}")
+# → .secret is shown only once
+SOURCE_SECRET=$(printf %s "$SOURCE" | jq -er .secret)
+INGRESS_URL=$(printf %s "$SOURCE" | jq -er .ingress_url)
 BODY='{"id":"evt_1","type":"order.paid"}'
-SIG=$(printf %s "$BODY" | openssl dgst -sha256 -hmac "$SOURCE_SECRET" | awk '{print $2}')
-curl -i -X POST "$INGRESS_URL" -H 'content-type: application/json' -H "x-signature: $SIG" -d "$BODY"
-# → 202 {"event_id":"evt_..."}; then GET $API/events/<event_id> shows the delivery and its attempt
+SIG=$(printf %s "$BODY" | openssl dgst -sha256 -hmac "$SOURCE_SECRET" | awk '{print $NF}')
+curl -i "$INGRESS_URL" -H "x-signature: $SIG" --json "$BODY"
+# → 202 {"event_id":"evt_..."}; then this shows the delivery and its attempts:
+# curl -fsS "$API/events/<event_id>" -H "$AUTH" | jq .deliveries
 ```
 
 Destination URLs must be public HTTPS (the SSRF guard rejects private addresses), so point the destination at a real endpoint or a request bin. Verify the signature in your backend with any [Standard Webhooks library](https://github.com/standard-webhooks/standard-webhooks#reference-implementations). Source changes made with `PATCH` can take up to 30 seconds to reach ingress.
@@ -181,27 +193,83 @@ gateway for Cloudflare Workers, and verify it runs locally.
    openssl, curl, jq. Report anything missing instead of installing system
    packages without asking me.
 2. Clone the repo (latest release: `git checkout 1.0.0`) and run `pnpm install`
-   at the repository root.
+   and `pnpm build` at the repository root.
 3. Copy `apps/gateway/.dev.vars.example` to `apps/gateway/.dev.vars`. Set
-   SECRETS_KEY to a fresh `openssl rand -base64 32`, and set ACCESS_DEV_EMAIL and
-   BOOTSTRAP_ADMIN_EMAILS to the same email (ask me which one). Never commit
+   SECRETS_KEY to a fresh `openssl rand -base64 32` (the
+   Turnstile test keys already have usable defaults). Never commit
    `.dev.vars` or print the key back to me.
 4. Run `pnpm db:migrate:local`, then start `pnpm dev` in the background and
    wait until `curl http://localhost:8787/healthz` returns "status":"ok".
-5. Follow the README section "Receive your first webhook" against
-   http://localhost:8787 and confirm ingress returns 202 with an event_id.
+5. Ask me to open http://localhost:8787/setup, create the first admin and
+   the first project, and create an API token in Settings > Users (export it
+   myself as HOOKFLARE_API_TOKEN). Then follow the README section "Receive
+   your first webhook" against http://localhost:8787 and confirm ingress
+   returns 202 with an event_id.
 6. Run `pnpm test`, `pnpm typecheck`, and `pnpm lint`; report any failure with
    its output instead of changing code to make it pass.
 7. Stop. Do NOT run `wrangler login`, create Cloudflare resources, set secrets,
-   or deploy unless I explicitly ask. If I do, follow README "Option B" and
-   `docs/runbook/setup.md` step by step, show me each command that changes my
-   Cloudflare account before running it, and use `pnpm run deploy`
-   (never `pnpm deploy`). If the Cloudflare API MCP server is connected, use it
-   for account operations (README "Cloudflare operations with the Cloudflare
-   MCP server") and wrangler only for local dev and `pnpm run deploy`.
+   or deploy unless I explicitly ask. If I do, use the README prompt "Deploy
+   to your Cloudflare account with an AI coding agent".
 
 Finish with a short summary: what was installed, the local URLs, and what is
 left for a Cloudflare deployment.
+```
+
+### Deploy to your Cloudflare account with an AI coding agent
+
+Once the local install works, paste this prompt into the same agent to deploy your own production instance. It changes your Cloudflare account, so the agent shows every account-changing step before running it, and you type the secrets yourself.
+
+```text
+Deploy Hookflare from this checkout to MY Cloudflare account as a production
+instance. Follow README "Option B: deploy to Cloudflare" and
+docs/runbook.md#setup. Rules for the whole task:
+- Show me each command or API call that creates, changes, or deletes anything
+  in my Cloudflare account, and wait for my OK before running it.
+- Never read, print, log, or commit secret values (SECRETS_KEY,
+  TURNSTILE_SECRET_KEY, API tokens). When a secret must be set, give me the
+  exact command to run myself with the `!` prefix.
+- Use `pnpm run deploy`, never `pnpm deploy`. Do not run SQL against the
+  remote D1 database.
+
+1. Preflight: confirm `pnpm test` passes on the checked-out release. Find my
+   account: use the Cloudflare API MCP server if it is connected (pass the
+   account ID explicitly), otherwise `pnpm exec wrangler whoami` (if it is not
+   logged in, ask me to run `! pnpm exec wrangler login`). If several accounts
+   are listed, ask me which one. Confirm the account is on Workers Paid and
+   has a workers.dev subdomain (or ask me for a custom domain).
+2. Check for name clashes first: D1 database `hookflare`, queues
+   `hookflare-deliveries` and `hookflare-deliveries-dlq`, R2 buckets
+   `hookflare-payloads` and `hookflare-backups`, Worker `hookflare`. If any
+   exist, stop and ask me whether to reuse them or pick new names (new names
+   must then be updated in apps/gateway/wrangler.jsonc).
+3. Create the missing resources. Put the new D1 `database_id` into
+   apps/gateway/wrangler.jsonc -> d1_databases[0].database_id: the committed
+   ID belongs to the maintainers, so the deploy must never use it.
+4. SECRETS_KEY: tell me to run
+   `! openssl rand -base64 32` and save the value in my password manager, then
+   `! pnpm exec wrangler secret put SECRETS_KEY --config apps/gateway/wrangler.jsonc`
+   and paste it. Remind me that a backup cannot replace this key.
+5. Turnstile (ask me whether I want it): create a managed widget for the
+   Worker hostname, put the site key in vars.TURNSTILE_SITE_KEY, and have me
+   set TURNSTILE_SECRET_KEY with `! pnpm exec wrangler secret put ...`. Both
+   or neither. If ingress will use a different hostname, set
+   vars.PUBLIC_BASE_URL.
+6. Deploy with `pnpm run deploy -- --skip-smoke`. If any step fails, stop
+   and show me the output with its rollback lines; do not work around the
+   script. Then confirm `curl https://<worker-host>/healthz` returns
+   "status":"ok".
+7. Immediately tell me to open https://<worker-host>/setup and create the
+   first admin myself, before sharing the URL (setup is first-come). Do not
+   create the admin for me.
+8. Optional, ask first: deploy the sink (`pnpm --filter sink run deploy`),
+   have me create an admin API token in Settings > Users, and run
+   `pnpm run smoke` with HOOKFLARE_URL, HOOKFLARE_API_TOKEN, and SINK_URL that
+   I export myself.
+
+Finish with: the account and resource names/IDs used, the Worker URL, the
+health check result, the wrangler.jsonc changes to commit to my fork (never
+.dev.vars or secrets), the rollback commands printed by the deploy, and what
+is left (first admin, alert channels, Settings > Storage).
 ```
 
 ### Cloudflare operations with the Cloudflare MCP server
@@ -219,70 +287,35 @@ The first call opens an OAuth page where you choose the account and permissions.
 | Create D1 databases, queues, and R2 buckets; list Workers, deployments, and versions | MCP `execute` |
 | Inspect a live D1 database (`POST /accounts/{id}/d1/database/{db}/query`) | MCP `execute` |
 | Workers Builds triggers: build/deploy command, branch, path filters (`/accounts/{id}/builds/triggers`) | MCP `execute` |
-| Cloudflare product questions (Access, Queues limits, Workflows) | MCP `docs` |
+| Cloudflare product questions (Turnstile, Queues limits, Workflows) | MCP `docs` |
 | Local dev, local D1 migrations, `wrangler types` | `pnpm` scripts (wrangler) |
-| Deploys, remote migrations, rollback | `pnpm run deploy` and [`docs/runbook/`](docs/runbook/), never hand-made API calls, so the restore point and smoke result are recorded |
+| Deploys, remote migrations, rollback | `pnpm run deploy` and [`docs/runbook.md`](docs/runbook.md), never hand-made API calls, so the restore point and smoke result are recorded |
 
 Pass the account ID explicitly when the OAuth grant covers several accounts. A write through `execute` changes the live account immediately: review every call that creates, updates, or deletes something (above all SQL against a production D1) before approving it.
 
-The Git-connected Workers Builds trigger runs `pnpm install --frozen-lockfile` as the build command and `pnpm run deploy -- --skip-smoke` as the deploy command, because Workers Builds has no sink or Access service token. Run `pnpm run smoke` afterwards from a machine that has the smoke env.
+The Git-connected Workers Builds trigger runs `pnpm install --frozen-lockfile` as the build command and `pnpm run deploy -- --skip-smoke` as the deploy command, because Workers Builds has no sink or API token. Run `pnpm run smoke` afterwards from a machine that has the smoke env (`HOOKFLARE_API_TOKEN` from an admin API token).
 
 ## Dashboard
 
-Pages: Overview, Projects, Endpoints (sources and destinations), Events, Failures, Alerts, Archives, Audit log, and Settings (retry defaults, storage and backups, users). What a user can do depends on their role: **viewer** reads events and deliveries, **operator** also sees payloads, replays, and pauses/resumes destinations, **admin** also changes configuration (projects, endpoints, alert channels), manages users and settings, and reads the audit log.
+Pages: Overview, Projects, Endpoints (sources and destinations), Events, Failures, Alerts, Archives, Audit log, and Settings (retry defaults, storage and backups, alert channels and rules, users). What a user can do depends on their role: **viewer** reads events and deliveries, **operator** also sees payloads, replays, and pauses/resumes destinations, **admin** also changes configuration (projects, endpoints, alert channels), manages users and settings, and reads the audit log.
 
-For local development, run `pnpm dev` with `ACCESS_DEV_EMAIL` set in `apps/gateway/.dev.vars`, plus `pnpm dev:dashboard` (Vite on port 5173, proxying `/api` to the Worker).
+For local development, run `pnpm dev` (create the first admin via the onboarding page — no token needed), plus `pnpm dev:dashboard` (Vite on port 5173, proxying `/api` to the Worker).
 
-Production serves the dashboard from the same Worker behind Cloudflare Access. The Access application must cover `/` and `/api/admin/*`, and must not cover `/in/*`.
+Production serves the dashboard from the same Worker. The first visit shows the onboarding page (`/setup`); afterwards login is username/password at `/login`, and automation uses API tokens (Settings › Users). `/in/*` and `/healthz` stay public.
 
-## Delivery contract for your backend
+## Integration
 
-Each request Hookflare sends to your backend includes:
-
-| Header | Purpose |
-|---|---|
-| `webhook-id`, `webhook-timestamp`, `webhook-signature` | Standard Webhooks signature, used to verify the request came from Hookflare |
-| `X-Webhook-Event-ID` | Stable event ID; **use it as your idempotency key** |
-| `X-Webhook-Delivery-ID` | ID of this delivery (a replay gets a new one) |
-| `X-Webhook-Attempt` | Attempt number, starting at 1 |
-
-Return any `2xx` to acknowledge. Return `429` (optionally with `Retry-After`) or `5xx` to ask for a retry. Any other `4xx` or `3xx` marks the delivery as failed without retrying. Redirects are never followed.
-
-Retries on `408`/`429`/`5xx`, timeouts, and network errors use exponential backoff (30 s → 6 h by default, ±20% jitter, `Retry-After` honored on `429`), up to 20 attempts (~62 h window) by default. Per-destination `max_attempts`, `backoff_base_s`, and `backoff_max_s` override the defaults. Every retry carries the same `webhook-id`: deduplicate on it, because delivery is at-least-once. `3xx` and other `4xx` responses are final and never retried.
-
-Pausing a destination (`POST /api/admin/v1/destinations/:id/pause`) holds its deliveries with status `paused` without consuming attempts; resuming it (`POST /api/admin/v1/destinations/:id/resume`) releases them for delivery.
-
-## Roadmap
-
-| Milestone | Scope | Status |
-|---|---|---|
-| **M0: Foundation** | Monorepo, Wrangler config, migrations, CI | Done |
-| **M1: Core pipeline** | Ingress, D1 ledger, queue, single-shot delivery, signing, SSRF guard | Done |
-| **M2: Reliability** | Retries, dead letter, idempotency, R2 payloads, reconciler, pause/resume | Done |
-| **M3: Admin API & security** | Access + RBAC, audit log, replay, test delivery, secret rotation | Done |
-| **M4: Dashboard** | All dashboard pages, stats rollups | Done |
-| **M5: Operations** | Alerting, R2 archival, per-destination concurrency and rate limits | Done |
-| **M6: Production readiness** | Staging, deploy & rollback, benchmarks, backup/restore, runbook, uptime monitoring | Code done (1.0.0); live staging drills pending |
-
-Full details: [`docs/superpowers/specs/2026-10-14-hookflare-roadmap.md`](docs/superpowers/specs/2026-10-14-hookflare-roadmap.md). The original system spec is in [`DESIGN.md`](DESIGN.md).
-
-### Out of scope
-
-Hookflare is deliberately **not** an integration platform. The following are out of scope: payload transformations, multi-destination fan-out, workflow editors, SaaS billing, and real-time WebSocket dashboards.
+See the [wire contract](docs/contract.md) for signing, response codes, and
+deduplication across retries or replay, and [delivery](docs/delivery.md) for
+the retry policy and delivery states.
 
 ## Contributing
 
-1.0.0 is the first release, and feedback on the [roadmap](docs/superpowers/specs/2026-10-14-hookflare-roadmap.md) is very welcome. Please open an issue to discuss a change before you send a pull request.
+Feedback on the [roadmap](docs/roadmap.md) is welcome. Please open an issue to discuss a change before you send a pull request.
 
 ## Releases
 
-Releases follow [SemVer](https://semver.org/) and are tagged `X.Y.Z` (no `v` prefix) on `main`. Release notes live in [`CHANGELOG.md`](CHANGELOG.md).
-
-| Version | Date | Highlights |
-|---|---|---|
-| [1.0.0](CHANGELOG.md#100---2026-10-17) | 2026-10-17 | First release: milestones M0–M6 |
-
-To run a specific release, check out its tag before installing: `git checkout 1.0.0`.
+See [`CHANGELOG.md`](CHANGELOG.md) for released versions. To run a specific release, check out its tag before installing. The docs in that checkout describe that release.
 
 ## License
 

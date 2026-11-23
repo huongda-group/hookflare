@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { AuditPage, auditSearch } from "@/pages/AuditPage";
 
 export const Route = createFileRoute("/audit")({
+	staticData: { pageTitle: "Audit" },
 	validateSearch: auditSearch,
 	component: function AuditRoute() {
 		const search = Route.useSearch();

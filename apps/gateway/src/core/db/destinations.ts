@@ -28,7 +28,6 @@ export async function listDestinations(
 		.all();
 }
 
-/** Unexecuted conditional status change; returns no row when not in `from`. */
 export function transitionDestinationStmt(
 	db: Db,
 	id: string,
@@ -43,7 +42,6 @@ export function transitionDestinationStmt(
 		.returning();
 }
 
-/** Conditional status change; undefined when the row is not in `from`. */
 export async function transitionDestination(
 	db: Db,
 	id: string,

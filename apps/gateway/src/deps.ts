@@ -9,28 +9,16 @@ import type { AppEnv } from "./env";
 export type DeliveryMessage = { deliveryId: string };
 export type Db = DrizzleD1Database<typeof schema>;
 
-/**
- * Everything a handler needs from the outside world. Handlers never touch
- * env.DB / env.QUEUE / global fetch, so tests can stub network, DNS, and time
- * (tests wrap db/queue/payloads for fault injection).
- */
 export type Deps = {
 	db: Db;
 	queue: Queue<DeliveryMessage>;
-	/** R2 bucket for bodies > 64 KiB. */
 	payloads: R2Bucket;
-	/** Outbound calls to backends. */
 	fetch: typeof fetch;
 	resolveDns: ResolveDns;
-	/** Epoch ms. */
 	now: () => number;
-	/** M5a: the destination's DestinationLimiter (spec §5.3). */
 	limiter: (destinationId: string) => LimiterStub;
-	/** M5c: the archive Workflow binding (spec §7.4). */
 	archive: Workflow<ArchiveParams>;
-	/** M6: R2 bucket holding full-DB backup parts. */
 	backups: R2Bucket;
-	/** M6: the backup Workflow binding. */
 	backup: Workflow<BackupParams>;
 	env: AppEnv;
 };

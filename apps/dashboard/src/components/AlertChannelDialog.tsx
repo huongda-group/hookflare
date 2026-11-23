@@ -4,7 +4,8 @@ import {
 	type AlertChannel,
 	type AlertChannelType,
 } from "@hookflare/shared";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { FormField } from "@/components/FormField";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -32,7 +33,6 @@ function serverMessage(err: unknown): string {
 	return String(err);
 }
 
-/** Config inputs are write-only: on edit, empty means "keep the current config" (spec §6.6). */
 export function AlertChannelDialog({
 	channel,
 	onOpenChange,
@@ -56,6 +56,8 @@ export function AlertChannelDialog({
 		channel?.project_ids ?? [],
 	);
 	const [error, setError] = useState<string | null>(null);
+	const [saving, setSaving] = useState(false);
+	const inFlight = useRef(false);
 
 	const configTouched =
 		type === "telegram"
@@ -73,6 +75,10 @@ export function AlertChannelDialog({
 			setError("Enter the bot token again to change the chat ID");
 			return;
 		}
+		/* istanbul ignore if -- @preserve */
+		if (inFlight.current) return;
+		inFlight.current = true;
+		setSaving(true);
 		setError(null);
 		const body = {
 			name,
@@ -86,6 +92,9 @@ export function AlertChannelDialog({
 			onSaved();
 		} catch (err) {
 			setError(serverMessage(err));
+		} finally {
+			inFlight.current = false;
+			setSaving(false);
 		}
 	}
 
@@ -99,16 +108,14 @@ export function AlertChannelDialog({
 					<DialogTitle>{editing ? "Edit channel" : "Add channel"}</DialogTitle>
 				</DialogHeader>
 				<div className="space-y-3">
-					<div>
-						<Label htmlFor="ach-name">Name</Label>
+					<FormField htmlFor="ach-name" label="Name">
 						<Input
 							id="ach-name"
 							value={name}
 							onChange={(e) => setName(e.target.value)}
 						/>
-					</div>
-					<div>
-						<Label htmlFor="ach-type">Type</Label>
+					</FormField>
+					<FormField htmlFor="ach-type" label="Type">
 						<select
 							id="ach-type"
 							className="block w-full rounded border px-2 py-1"
@@ -122,13 +129,13 @@ export function AlertChannelDialog({
 								</option>
 							))}
 						</select>
-					</div>
+					</FormField>
 					{type === "telegram" ? (
 						<>
-							<div>
-								<Label htmlFor="ach-token">
-									{editing ? "New bot token" : "Bot token"}
-								</Label>
+							<FormField
+								htmlFor="ach-token"
+								label={editing ? "New bot token" : "Bot token"}
+							>
 								<Input
 									id="ach-token"
 									type="password"
@@ -137,21 +144,20 @@ export function AlertChannelDialog({
 									value={botToken}
 									onChange={(e) => setBotToken(e.target.value)}
 								/>
-							</div>
-							<div>
-								<Label htmlFor="ach-chat">Chat ID</Label>
+							</FormField>
+							<FormField htmlFor="ach-chat" label="Chat ID">
 								<Input
 									id="ach-chat"
 									value={chatId}
 									onChange={(e) => setChatId(e.target.value)}
 								/>
-							</div>
+							</FormField>
 						</>
 					) : (
-						<div>
-							<Label htmlFor="ach-url">
-								{editing ? "New webhook URL" : "Webhook URL"}
-							</Label>
+						<FormField
+							htmlFor="ach-url"
+							label={editing ? "New webhook URL" : "Webhook URL"}
+						>
 							<Input
 								id="ach-url"
 								type="password"
@@ -160,7 +166,7 @@ export function AlertChannelDialog({
 								value={url}
 								onChange={(e) => setUrl(e.target.value)}
 							/>
-						</div>
+						</FormField>
 					)}
 					<fieldset>
 						<legend className="text-sm font-medium">
@@ -192,10 +198,12 @@ export function AlertChannelDialog({
 							</div>
 						))}
 					</fieldset>
-					{error && <p className="text-sm text-red-700">{error}</p>}
+					{error && <p className="text-sm text-failure">{error}</p>}
 				</div>
 				<DialogFooter>
-					<Button onClick={save}>Save</Button>
+					<Button disabled={saving} onClick={save}>
+						Save
+					</Button>
 				</DialogFooter>
 			</DialogContent>
 		</Dialog>

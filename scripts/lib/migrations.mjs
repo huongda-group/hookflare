@@ -1,14 +1,3 @@
-/**
- * Migration safety checks: detect destructive SQL in new Drizzle migrations
- * unless the migration is listed in the contract file.
- */
-
-/**
- * Strip `--` comments from SQL, tracking string literals so `--` inside
- * quotes is preserved.
- * @param {string} sql
- * @returns {string}
- */
 function stripLineComments(sql) {
 	let out = "";
 	let quote = null;
@@ -41,17 +30,8 @@ function stripLineComments(sql) {
 	return out;
 }
 
-/**
- * Find the destructive operations in a migration's SQL. Returns reasons from
- * `"DROP TABLE"`, `"DROP COLUMN"`, `"RENAME"`, and
- * `"ADD COLUMN NOT NULL without DEFAULT"`. Matching is case-insensitive and
- * `--` comment lines are ignored.
- * @param {string} sql
- * @returns {string[]}
- */
 export function findDestructive(sql) {
 	const clean = stripLineComments(sql);
-	/** @type {string[]} */
 	const reasons = [];
 	if (/\bDROP\s+TABLE\b/i.test(clean)) {
 		reasons.push("DROP TABLE");
@@ -77,22 +57,11 @@ export function findDestructive(sql) {
 	return reasons;
 }
 
-/**
- * Basename of a migration path.
- * @param {string} file
- * @returns {string}
- */
 function migrationName(file) {
 	const slash = file.lastIndexOf("/");
 	return slash === -1 ? file : file.slice(slash + 1);
 }
 
-/**
- * Return the `.sql` names in head that are not in base.
- * @param {string[]} baseFiles
- * @param {string[]} headFiles
- * @returns {string[]}
- */
 export function newMigrations(baseFiles, headFiles) {
 	const base = new Set(
 		baseFiles
@@ -104,21 +73,8 @@ export function newMigrations(baseFiles, headFiles) {
 	);
 }
 
-/**
- * Migrations on the base ref that the head changed: a modified or removed
- * migration rewrites history that D1 has already applied (and records by
- * name only), so it never takes effect remotely. Line endings are
- * normalized before comparing. A removed file listed in `squashed` (folded
- * into a baseline by a deliberate squash) is not reported.
- * @param {Record<string, string>} base `.sql` name → content at the base ref.
- * @param {Record<string, string>} head `.sql` name → content in the tree.
- * @param {string[]} [squashed] `.sql` names the squash removed.
- * @returns {{ file: string, change: "modified" | "removed" }[]}
- */
 export function changedMigrations(base, head, squashed = []) {
-	/** @param {string} sql */
 	const normalize = (sql) => sql.replace(/\r\n/g, "\n");
-	/** @type {{ file: string, change: "modified" | "removed" }[]} */
 	const changed = [];
 	for (const [file, sql] of Object.entries(base)) {
 		if (!(file in head)) {
@@ -133,17 +89,10 @@ export function changedMigrations(base, head, squashed = []) {
 	return changed;
 }
 
-/**
- * Problems in a parsed `contract.json`: it must be an array of
- * `{ file, release, reason }` objects with non-empty strings.
- * @param {unknown} contract
- * @returns {string[]}
- */
 export function contractProblems(contract) {
 	if (!Array.isArray(contract)) {
 		return ["contract.json must be an array"];
 	}
-	/** @type {string[]} */
 	const problems = [];
 	contract.forEach((entry, index) => {
 		if (typeof entry !== "object" || entry === null) {
@@ -152,7 +101,7 @@ export function contractProblems(contract) {
 			);
 			return;
 		}
-		const fields = /** @type {Record<string, unknown>} */ (entry);
+		const fields = entry;
 		const label =
 			typeof fields.file === "string"
 				? `contract.json[${index}] (${fields.file})`
@@ -167,25 +116,8 @@ export function contractProblems(contract) {
 	return problems;
 }
 
-/**
- * A contract entry that excuses a destructive migration.
- * @typedef {{ file: string, release: string, reason: string }} ContractEntry
- */
-
-/**
- * A migration file under review.
- * @typedef {{ name: string, sql: string }} MigrationFile
- */
-
-/**
- * Check migration files against the contract. Destructive files listed in
- * the contract pass; destructive files missing from it are problems.
- * @param {{ files: MigrationFile[], contract: ContractEntry[] }} input
- * @returns {{ ok: boolean, problems: { file: string, reasons: string[] }[] }}
- */
 export function checkMigrations({ files, contract }) {
 	const excused = new Set(contract.map((entry) => migrationName(entry.file)));
-	/** @type {{ file: string, reasons: string[] }[]} */
 	const problems = [];
 	for (const file of files) {
 		const reasons = findDestructive(file.sql);

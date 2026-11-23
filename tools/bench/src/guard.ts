@@ -1,15 +1,3 @@
-/**
- * Production guard for every bench tool that touches a deployment. The
- * bench only ever targets staging: the seeder refuses a wrangler config that
- * names the production Worker or D1 database, and the runners refuse a URL
- * whose host belongs to production. There is deliberately no override flag.
- *
- * Production is read from `apps/gateway/wrangler.jsonc` (Worker name, D1
- * database names and IDs, `PUBLIC_BASE_URL`, `routes`), plus the
- * `<name>.<account>.workers.dev` host. `HOOKFLARE_PRODUCTION_URL` (comma
- * separated) can only add more hosts to refuse, never remove one.
- */
-
 import { readFileSync } from "node:fs";
 import { parseJsonc } from "../../../scripts/lib/jsonc.mjs";
 
@@ -17,7 +5,6 @@ export type ProductionTarget = {
 	workerName: string;
 	databaseNames: string[];
 	databaseIds: string[];
-	/** Lowercase hosts that serve production (custom domains, routes). */
 	hosts: string[];
 };
 
@@ -55,7 +42,6 @@ function readWrangler(text: string): WranglerConfig {
 	return { name: raw.name, databaseNames, databaseIds, raw };
 }
 
-/** Host of a URL or a route pattern such as `api.example.com/*`. */
 function hostOf(value: string): string | null {
 	const trimmed = value.trim();
 	if (trimmed === "") return null;
@@ -69,10 +55,6 @@ function hostOf(value: string): string | null {
 	}
 }
 
-/**
- * Production identity from the production wrangler config text plus the
- * optional comma-separated `HOOKFLARE_PRODUCTION_URL` value.
- */
 export function productionTarget(
 	configText: string,
 	extraUrls = "",
@@ -100,7 +82,6 @@ export function productionTarget(
 	};
 }
 
-/** Reads `apps/gateway/wrangler.jsonc` relative to this file. */
 export function loadProductionTarget(
 	env: Record<string, string | undefined> = process.env,
 ): ProductionTarget {
@@ -111,7 +92,6 @@ export function loadProductionTarget(
 	return productionTarget(text, env.HOOKFLARE_PRODUCTION_URL ?? "");
 }
 
-/** Throws when a wrangler config targets the production Worker or D1. */
 export function assertNotProductionConfig(
 	configText: string,
 	prod: ProductionTarget,
@@ -138,7 +118,6 @@ export function assertNotProductionConfig(
 	}
 }
 
-/** Throws when `url` is served by production (or does not parse). */
 export function assertNotProductionUrl(
 	url: string,
 	prod: ProductionTarget,

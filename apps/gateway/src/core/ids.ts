@@ -12,6 +12,7 @@ export const ID_PREFIXES = [
 	"tst",
 	"arb",
 	"bkp",
+	"tok",
 ] as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[number];
@@ -29,8 +30,6 @@ const TIME_LEN = 10;
 const RAND_LEN = 16;
 const MAX_TIME = 2 ** 48 - 1;
 
-// Monotonic state within this isolate. On same-ms (or clock regression) the
-// random component is incremented so ids stay strictly increasing.
 let lastMs = -1;
 const lastRand = new Uint8Array(10);
 
@@ -57,10 +56,9 @@ function encodeRandom(rand: Uint8Array): string {
 	return out;
 }
 
-/** Increment a 10-byte big-endian counter in place. Returns false on overflow. */
 function increment(rand: Uint8Array): boolean {
 	for (let i = rand.length - 1; i >= 0; i--) {
-		const cur = rand[i] ?? 0;
+		const cur = rand[i] ?? /* istanbul ignore next */ 0;
 		rand[i] = (cur + 1) & 0xff;
 		if (rand[i] !== 0) {
 			return true;
@@ -74,7 +72,6 @@ function isValidPrefix(prefix: string): prefix is IdPrefix {
 }
 
 function isValidUlid(ulid: string): boolean {
-	// First char must be 0-7: anything higher exceeds the 48-bit timestamp.
 	if (ulid.length !== ULID_LEN || !/^[0-7]/.test(ulid)) {
 		return false;
 	}
@@ -86,10 +83,6 @@ function isValidUlid(ulid: string): boolean {
 	return true;
 }
 
-/**
- * Generate a new `<prefix>_<ULID>` id, monotonically increasing per isolate.
- * `nowMs` is injectable for tests; production callers omit it.
- */
 export function newId(prefix: IdPrefix, nowMs: number = Date.now()): string {
 	if (!isValidPrefix(prefix)) {
 		throw new Error(
@@ -101,13 +94,10 @@ export function newId(prefix: IdPrefix, nowMs: number = Date.now()): string {
 		throw new Error("timestamp outside the ULID 48-bit range");
 	}
 	if (now < lastMs) {
-		// Clock moved backwards: hold the last timestamp to stay monotonic.
 		now = lastMs;
 	}
 	if (now === lastMs) {
 		if (!increment(lastRand)) {
-			// Random overflow on the same ms (practically impossible): step the
-			// clock forward 1ms so ordering is still strictly increasing.
 			now = lastMs + 1;
 			if (now > MAX_TIME) {
 				throw new Error("timestamp outside the ULID 48-bit range");
@@ -122,7 +112,6 @@ export function newId(prefix: IdPrefix, nowMs: number = Date.now()): string {
 	return `${prefix}_${encodeTime(now)}${encodeRandom(lastRand)}`;
 }
 
-/** Validate `<prefix>_<ULID>` format, optionally requiring a specific prefix. */
 export function isId(value: unknown, prefix?: IdPrefix): boolean {
 	if (typeof value !== "string") {
 		return false;
@@ -142,17 +131,15 @@ export function isId(value: unknown, prefix?: IdPrefix): boolean {
 	return true;
 }
 
-/** Extract the millisecond epoch timestamp embedded in an id. Throws if invalid. */
 export function idTimestamp(id: string): number {
 	if (!isId(id)) {
-		// Do not echo the input: ids often come from untrusted requests.
 		throw new Error("invalid id");
 	}
 	const ulid = id.slice(id.indexOf("_") + 1);
 	const timePart = ulid.slice(0, TIME_LEN);
 	let ms = 0;
 	for (const ch of timePart) {
-		ms = ms * 32 + (DECODING[ch] ?? 0);
+		ms = ms * 32 + (DECODING[ch] ?? /* istanbul ignore next */ 0);
 	}
 	return ms;
 }

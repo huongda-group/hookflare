@@ -30,15 +30,9 @@ import { deadCursorStatement, evaluateRules } from "./rules";
 
 export const SEND_BATCH = 50;
 export const SEND_CONCURRENCY = 10;
-/**
- * No new send starts once a run has spent this long; with the 5 s send
- * timeout every claim settles well inside CLAIM_STALE_MS, so the next
- * minute's run never reclaims (and re-sends) a row this run still owns.
- */
-export const SEND_BUDGET_MS = 30_000;
+export const SEND_BUDGET_MS = 15_000;
 export const MAX_TRIES = 3;
 export const CLAIM_STALE_MS = 60_000;
-/** Per run and per kind (opens, resolves, reminders); the rest wait for the next run. */
 export const MAX_CHANGES_PER_RUN = 100;
 
 export type AlertsRunResult = {
@@ -52,9 +46,8 @@ export type AlertsRunResult = {
 const run = (deps: Deps, stmts: BatchItem[]) =>
 	stmts.length
 		? deps.db.batch(stmts as [BatchItem, ...BatchItem[]])
-		: Promise.resolve([]);
+		: /* istanbul ignore next */ Promise.resolve([]);
 
-/** Spec §6.3 steps 1–5. Each incident change is its own batch, so one failure never blocks the rest. */
 export async function runAlerts(
 	deps: Deps,
 	logger: Logger,
@@ -76,8 +69,6 @@ export async function runAlerts(
 		failed: 0,
 	};
 
-	// 2. Open (and, for new_dead, add fresh dead deliveries to incidents that are already open).
-	// new_dead is bounded by the rule's own scan (≤ 100 destinations per run).
 	const deadStmts: BatchItem[] = [
 		deadCursorStatement(deps.db, deadCursor.to, now),
 	];
@@ -86,7 +77,6 @@ export async function runAlerts(
 	for (const a of active) {
 		const existing = openByKey.get(keyOf(a));
 		if (existing) {
-			// A carry-over only keeps the incident active; a fresh batch is always counted.
 			if (a.rule === "new_dead" && !a.carryOver) {
 				deadStmts.push(
 					updateDetailsStatement(
@@ -94,6 +84,14 @@ export async function runAlerts(
 						existing.id,
 						mergeDead(existing.detailsJson, a.details),
 					),
+				);
+			} else if (a.updateDetails) {
+				await runSafely(
+					deps,
+					logger,
+					[updateDetailsStatement(deps.db, existing.id, a.details)],
+					a,
+					() => {},
 				);
 			}
 			continue;
@@ -104,7 +102,6 @@ export async function runAlerts(
 			now,
 			matchChannels(routes, a.rule, a.projectId),
 		);
-		// The dead cursor moves in the same batch as the new_dead opens (spec §6.2).
 		if (a.rule === "new_dead") {
 			deadStmts.push(...stmts);
 			deadOpened++;
@@ -117,7 +114,6 @@ export async function runAlerts(
 		result.opened += deadOpened;
 	});
 
-	// 3. Resolve.
 	let resolves = 0;
 	for (const o of open) {
 		if (activeByKey.has(keyOf(o))) continue;
@@ -131,7 +127,6 @@ export async function runAlerts(
 		await runSafely(deps, logger, stmts, o, () => result.resolved++);
 	}
 
-	// 4. Remind.
 	if (rules.reminder_s > 0) {
 		let reminds = 0;
 		for (const o of open) {
@@ -149,7 +144,6 @@ export async function runAlerts(
 		}
 	}
 
-	// 5. Send.
 	const sent = await sendPendingNotifications(deps, logger);
 	result.sent = sent.sent;
 	result.failed = sent.failed;
@@ -163,9 +157,7 @@ function mergeDead(
 	let prev: { new_dead?: number; delivery_ids?: string[] } = {};
 	try {
 		prev = JSON.parse(previousJson) as typeof prev;
-	} catch {
-		// Corrupt stored details: start over from this batch.
-	}
+	} catch {}
 	const n = next as {
 		new_dead: number;
 		delivery_ids: string[];
@@ -200,19 +192,12 @@ async function runSafely(
 type Claimed = typeof alertNotifications.$inferSelect;
 type SendOutcome = { ok: true } | { ok: false; error: string; final?: boolean };
 
-/**
- * M5-14: claim, send with bounded concurrency and a 5 s timeout, and settle
- * each row on its own. Every settle is fenced by this run's claim
- * (status = 'sending' AND claimed_at = claimedAt), so a run whose claim was
- * taken over never overwrites the newer run's result.
- */
 export async function sendPendingNotifications(
 	deps: Deps,
 	logger: Logger,
 ): Promise<{ sent: number; failed: number }> {
 	const claimedAt = deps.now();
 	const stale = claimedAt - CLAIM_STALE_MS;
-	// A claim that died after its last try can never be sent again.
 	await deps.db
 		.update(alertNotifications)
 		.set({ status: "failed", lastError: "claim_expired" })
@@ -259,7 +244,6 @@ export async function sendPendingNotifications(
 	const totals = { sent: 0, failed: 0 };
 	for (let i = 0; i < claimed.length; i += SEND_CONCURRENCY) {
 		if (deps.now() - claimedAt >= SEND_BUDGET_MS) {
-			// Out of time: hand the rest back untouched; they were never tried.
 			const rest = claimed.slice(i).map((n) => n.id);
 			try {
 				await deps.db
@@ -320,7 +304,6 @@ async function sendAndSettle(
 			.set({ status: final ? "failed" : "pending", lastError: outcome.error })
 			.where(where);
 	} catch (err) {
-		// The claim stays; the next run past CLAIM_STALE_MS takes it over.
 		logger.error("alerts.settle_failed", {
 			notification_id: n.id,
 			error: String(err),

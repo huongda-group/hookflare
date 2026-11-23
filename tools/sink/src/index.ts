@@ -9,7 +9,6 @@ export type Stats = {
 	by_status: Record<string, number>;
 	first_at: number;
 	last_at: number;
-	/** Distinct webhook IDs, sorted; only with `?ids=1`. */
 	ids?: string[];
 };
 
@@ -20,12 +19,10 @@ const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 let sleep: (ms: number) => Promise<void> = (ms) =>
 	new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-/** Test seam: stub the `delay_ms` wait so tests do not sleep for real. */
 function setSleep(fn: (ms: number) => Promise<void>): void {
 	sleep = fn;
 }
 
-/** FNV-1a 32-bit of the ID, modulo the shard count. */
 function shardFor(webhookId: string): number {
 	let h = 0x811c9dc5;
 	for (let i = 0; i < webhookId.length; i++) {
@@ -67,7 +64,6 @@ async function handleHook(
 	const url = new URL(request.url);
 	const rawStatus = url.searchParams.get("status");
 	const status = rawStatus === null ? 200 : Number(rawStatus);
-	// `new Response` throws outside 200-599, so reject before recording a hit.
 	if (!Number.isInteger(status) || status < 200 || status > 599) {
 		return Response.json({ error: "invalid_status" }, { status: 400 });
 	}
@@ -81,16 +77,10 @@ async function handleHook(
 	if (delayMs > 0) {
 		await sleep(delayMs);
 	}
-	// Null-body statuses must not carry a body.
 	const body = NULL_BODY_STATUSES.has(chosen) ? null : "ok";
 	return new Response(body, { status: chosen });
 }
 
-/**
- * Merged run stats. `?ids=1` adds the distinct webhook IDs (capped per
- * shard), which the smoke test uses to check exactly which deliveries
- * arrived; load runs leave it off.
- */
 async function handleStats(
 	env: SinkEnv,
 	run: string,
@@ -148,7 +138,6 @@ export default {
 	async fetch(request: Request, env: SinkEnv): Promise<Response> {
 		const url = new URL(request.url);
 		const parts = url.pathname.split("/");
-		// ["", "r", run, action?]
 		if (parts.length < 3 || parts[1] !== "r" || !parts[2]) {
 			return notFound();
 		}

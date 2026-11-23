@@ -4,11 +4,13 @@ import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-// Spec M4-2: `vite dev` proxies the API to `wrangler dev` (ACCESS_DEV_EMAIL).
 export default defineConfig({
-	// The router plugin must run before the React plugin.
 	plugins: [
-		tanstackRouter({ target: "react", autoCodeSplitting: true }),
+		tanstackRouter({
+			target: "react",
+			autoCodeSplitting: true,
+			codeSplittingOptions: { addHmr: !process.env.VITEST },
+		}),
 		react(),
 		tailwindcss(),
 	],

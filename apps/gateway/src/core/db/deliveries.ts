@@ -42,7 +42,6 @@ export type DeliveryContext = {
 
 const CLAIMABLE = ["pending", "queued", "retrying"] as const;
 
-/** Spec §7: a delivery a consumer may take, including one whose lease expired. */
 export function claimable(now: number) {
 	return or(
 		inArray(deliveries.status, CLAIMABLE),
@@ -75,7 +74,6 @@ export async function loadDeliveryContext(
 	return row ?? null;
 }
 
-/** Ends a delivery that never reached the backend. Never overwrites a handled delivery. */
 export async function finishWithoutAttempt(
 	deps: Deps,
 	deliveryId: string,
@@ -94,7 +92,6 @@ export async function finishWithoutAttempt(
 		.where(and(eq(deliveries.id, deliveryId), claimable(now)));
 }
 
-/** Parks a delivery of a paused destination until Resume (spec §7 step 3). */
 export async function holdDelivery(
 	deps: Deps,
 	deliveryId: string,
@@ -105,28 +102,30 @@ export async function holdDelivery(
 		.where(and(eq(deliveries.id, deliveryId), claimable(deps.now())));
 }
 
-/**
- * Takes the lease until `leaseUntil` (also the fencing token, spec §7.2).
- * Returns attempt_count at lease time, or null when another worker holds it.
- */
 export async function acquireLease(
 	deps: Deps,
 	deliveryId: string,
 	leaseUntil: number,
 ): Promise<number | null> {
+	const now = deps.now();
 	const [row] = await deps.db
 		.update(deliveries)
 		.set({ status: "in_flight", leaseUntil, nextAttemptAt: null })
-		.where(and(eq(deliveries.id, deliveryId), claimable(deps.now())))
+		.where(
+			and(
+				eq(deliveries.id, deliveryId),
+				claimable(now),
+				or(
+					ne(deliveries.status, "retrying"),
+					isNull(deliveries.nextAttemptAt),
+					lte(deliveries.nextAttemptAt, now),
+				),
+			),
+		)
 		.returning({ attemptCount: deliveries.attemptCount });
 	return row?.attemptCount ?? null;
 }
 
-/**
- * Records one attempt, fenced by the lease. Both statements check the same
- * lease in one transaction (the attempt insert runs first so its guard sees
- * the lease before the update clears it). false = lease lost, nothing written.
- */
 export async function recordLeasedAttempt(
 	deps: Deps,
 	deliveryId: string,
@@ -149,7 +148,6 @@ export async function recordLeasedAttempt(
 				${outcome.errorKind}, ${outcome.error}, ${a.snippet}
 			WHERE EXISTS (SELECT 1 FROM deliveries WHERE id = ${deliveryId}
 				AND status = 'in_flight' AND lease_until = ${a.leaseUntil})`),
-		// M5-12: same fence as the other two statements; a stale worker changes nothing.
 		deps.db
 			.update(destinations)
 			.set({
@@ -187,10 +185,6 @@ export async function recordLeasedAttempt(
 	);
 }
 
-/**
- * Spec §8.2: only claimable deliveries become dead; a live lease is left to its worker,
- * and a retry whose backoff is not yet due is left to its delayed message.
- */
 export async function markDeadFromDlq(
 	deps: Deps,
 	deliveryId: string,
@@ -219,7 +213,6 @@ export async function markDeadFromDlq(
 	return result.meta.changes === 1;
 }
 
-/** Moves up to `limit` paused deliveries back to pending (oldest first). */
 export async function releasePausedDeliveries(
 	deps: Deps,
 	destinationId: string,
@@ -244,7 +237,6 @@ export async function releasePausedDeliveries(
 	return rows.map((r) => r.id);
 }
 
-/** ids must fit one D1 query (≤ ENQUEUE_CHUNK). */
 export async function markQueuedMany(deps: Deps, ids: string[]): Promise<void> {
 	await deps.db
 		.update(deliveries)
@@ -260,18 +252,15 @@ export type FailureFilter = {
 	destinationId?: string;
 	from?: number;
 	to?: number;
-	/** Hide failures that already have a newer replay for the same event and destination. */
 	unresolved: boolean;
 	after?: { at: number; id: string };
 	limit: number;
 };
 
-/** Spec §8.4. Ordered by (completed_at, id) desc; returns limit + 1 rows. */
 export async function listFailures(db: Db, f: FailureFilter) {
 	const newer = alias(deliveries, "newer");
 	const where: (SQL | undefined)[] = [
 		inArray(deliveries.status, f.statuses?.length ? f.statuses : [...FAILED]),
-		// The cursor keys on completed_at; failed rows always set it.
 		isNotNull(deliveries.completedAt),
 		f.projectId ? eq(deliveries.projectId, f.projectId) : undefined,
 		f.destinationId ? eq(deliveries.destinationId, f.destinationId) : undefined,
@@ -317,7 +306,6 @@ export async function listFailures(db: Db, f: FailureFilter) {
 		.all();
 }
 
-/** Newest replay per (event, destination), keyed "<eventId>|<destinationId>". */
 export async function latestReplays(
 	db: Db,
 	pairs: { eventId: string; destinationId: string }[],
@@ -366,9 +354,8 @@ export async function getInitialDelivery(
 		.get();
 }
 
-const TERMINAL: DeliveryStatus[] = ["delivered", "failed_final", "dead"];
+export const TERMINAL: DeliveryStatus[] = ["delivered", "failed_final", "dead"];
 
-/** "<eventId>|<destinationId>" of replays still in the pipeline (spec §9.2). */
 export async function activeReplays(
 	db: Db,
 	eventIds: string[],

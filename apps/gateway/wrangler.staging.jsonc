@@ -18,13 +18,10 @@
 	"vars": {
 		// debug | info | warn | error
 		"LOG_LEVEL": "info",
-		// The staging Access application for /api/admin/v1 (not secrets). Set
-		// per deployment; the admin API fails closed (500) while they are empty.
-		"ACCESS_TEAM_DOMAIN": "",
-		// set at setup
-		"ACCESS_AUD": "",
-		// Comma-separated emails allowed to use the admin API until RBAC (M3).
-		"BOOTSTRAP_ADMIN_EMAILS": "",
+		// The staging Turnstile site key for the login and setup forms (public,
+		// not a secret). Set at setup together with TURNSTILE_SECRET_KEY; both
+		// must be set or neither, and empty disables Turnstile (spec §6.5.1).
+		"TURNSTILE_SITE_KEY": "",
 		// Origin used for ingress_url in admin responses, e.g. https://hooks.example.com.
 		// Empty means the origin of the admin request.
 		"PUBLIC_BASE_URL": ""
@@ -64,6 +61,14 @@
 			// rate-limit counters.
 			"namespace_id": "2001",
 			"simple": { "limit": 100, "period": 10 }
+		},
+		{
+			"name": "LOGIN_LIMITER",
+			// Per-IP login/setup attempts (spec §6.5): 10 per minute. Distinct
+			// from production's 1002 so the two Workers never share counters;
+			// no resource needs to be created.
+			"namespace_id": "2002",
+			"simple": { "limit": 10, "period": 60 }
 		}
 	],
 	"version_metadata": {
@@ -75,7 +80,7 @@
 			"database_name": "hookflare-staging",
 			// Staging D1 database. The all-zero ID is a placeholder on purpose:
 			// the real ID comes from `wrangler d1 create hookflare-staging` in
-			// the live staging setup step (docs/runbook/setup.md), which
+			// the live staging setup step (docs/runbook.md#setup), which
 			// replaces it. Do not deploy with the placeholder. Local dev and tests
 			// use local D1 and never contact it.
 			"database_id": "00000000-0000-0000-0000-000000000000"

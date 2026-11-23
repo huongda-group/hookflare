@@ -3,7 +3,7 @@ import type { Db } from "../../deps";
 import { type AuditLogRow, auditLogs } from "./schema";
 
 export type AuditFilter = {
-	actorEmail?: string;
+	actor?: string;
 	resourceType?: string;
 	resourceId?: string;
 	action?: string;
@@ -19,7 +19,7 @@ export async function searchAuditLogs(
 ): Promise<AuditLogRow[]> {
 	const a = auditLogs;
 	const where: (SQL | undefined)[] = [
-		f.actorEmail ? eq(a.actorEmail, f.actorEmail) : undefined,
+		f.actor ? eq(a.actor, f.actor) : undefined,
 		f.resourceType ? eq(a.resourceType, f.resourceType) : undefined,
 		f.resourceId ? eq(a.resourceId, f.resourceId) : undefined,
 		f.action ? eq(a.action, f.action) : undefined,

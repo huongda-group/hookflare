@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { ProjectSelect } from "@/components/ProjectSelect";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useActiveProject } from "@/lib/project-selection";
 import { DestinationsTab } from "./endpoints/DestinationsTab";
 import { SourcesTab } from "./endpoints/SourcesTab";
 
@@ -20,16 +20,11 @@ export function EndpointsPage({
 	search: EndpointsSearch;
 	setSearch: (s: Partial<EndpointsSearch>) => void;
 }) {
+	const { projectId } = useActiveProject();
+	if (!projectId) return null;
 	return (
 		<div className="space-y-4">
-			<div className="flex items-center justify-between">
-				<h1 className="text-xl font-semibold">Endpoints</h1>
-				<ProjectSelect
-					value={search.project_id}
-					onChange={(project_id) => setSearch({ project_id })}
-					label="Filter by project"
-				/>
-			</div>
+			<h1 className="text-xl font-semibold">Endpoints</h1>
 			<Tabs
 				value={search.tab}
 				onValueChange={(tab) =>
@@ -41,10 +36,10 @@ export function EndpointsPage({
 					<TabsTrigger value="destinations">Destinations</TabsTrigger>
 				</TabsList>
 				<TabsContent value="sources">
-					<SourcesTab projectId={search.project_id} />
+					<SourcesTab projectId={projectId} />
 				</TabsContent>
 				<TabsContent value="destinations">
-					<DestinationsTab projectId={search.project_id} />
+					<DestinationsTab projectId={projectId} />
 				</TabsContent>
 			</Tabs>
 		</div>

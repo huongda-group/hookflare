@@ -7,7 +7,6 @@ export type Policy = {
 	backoffMaxS: number;
 };
 
-/** Fallback retry defaults when Settings has no row (spec M4-8). */
 export const DEFAULT_POLICY: Policy = {
 	timeoutMs: 10_000,
 	maxAttempts: 20,
@@ -15,7 +14,6 @@ export const DEFAULT_POLICY: Policy = {
 	backoffMaxS: 21_600,
 };
 
-/** Cloudflare Queues accept delaySeconds up to 12 h (spec M2-5). */
 export const MAX_DELAY_S = 43_200;
 
 export type PolicyFields = Pick<
@@ -23,11 +21,6 @@ export type PolicyFields = Pick<
 	"timeoutMs" | "maxAttempts" | "backoffBaseS" | "backoffMaxS"
 >;
 
-/**
- * A destination field always wins over the defaults. backoff_max_s is raised
- * to backoff_base_s: changing the defaults must never leave a destination with
- * max < base (both are ≤ MAX_DELAY_S, so the result stays valid).
- */
 export function resolvePolicy(d: PolicyFields, defaults: Policy): Policy {
 	const backoffBaseS = d.backoffBaseS ?? defaults.backoffBaseS;
 	return {

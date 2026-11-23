@@ -1,17 +1,4 @@
 #!/usr/bin/env node
-/**
- * Restore an R2 backup into a new D1 database (path B). Refuses the
- * production database always and the staging database unless
- * `--allow-known-db`; refuses a target whose d1_migrations differ from
- * the manifest or that already has rows. Downloads and sha256-checks the
- * parts, streams them into SQL files in `tableOrder` (orphaned rows go to
- * `orphans.json`, key and FK values only), then applies each file with
- * `wrangler d1 execute --remote`, recording progress in
- * `.restore/<id>/applied.json` so a re-run resumes where it stopped.
- *
- * `--prepare-migrations` only copies the manifest's migrations into
- * `.restore/<id>/migrations/` for `wrangler d1 migrations apply`.
- */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -28,13 +15,6 @@ const USAGE = [
 	"       restore-backup.mjs --prefix <p> --prepare-migrations [--bucket hookflare-backups]",
 ].join("\n");
 
-/**
- * Value of a `--flag value` argv option.
- * @param {string[]} argv
- * @param {string} flag
- * @param {string} fallback
- * @returns {string}
- */
 function option(argv, flag, fallback) {
 	const index = argv.indexOf(flag);
 	return index !== -1 && index + 1 < argv.length ? argv[index + 1] : fallback;
@@ -52,12 +32,6 @@ if (!prefix || (!config && !prepare) || (fromArg && !/^\d+$/.test(fromArg))) {
 }
 const wrangler = wranglerBin();
 
-/**
- * Download one R2 object to a local file.
- * @param {string} key
- * @param {string} dest
- * @returns {Promise<void>}
- */
 async function r2Get(key, dest) {
 	mkdirSync(dirname(dest), { recursive: true });
 	execFileSync(
@@ -67,11 +41,6 @@ async function r2Get(key, dest) {
 	);
 }
 
-/**
- * Run one read query on the target database.
- * @param {string} sql
- * @returns {Promise<Record<string, unknown>[]>}
- */
 async function query(sql) {
 	const out = execFileSync(
 		wrangler,
@@ -93,11 +62,6 @@ async function query(sql) {
 	return first.results ?? [];
 }
 
-/**
- * Apply one SQL file to the target database.
- * @param {string} file
- * @returns {Promise<void>}
- */
 async function execute(file) {
 	execFileSync(
 		wrangler,

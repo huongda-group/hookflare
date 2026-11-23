@@ -8,6 +8,10 @@ import {
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { Controller, useForm } from "react-hook-form";
+import { DirtyFormGuard } from "@/components/DirtyFormGuard";
+import { FormField } from "@/components/FormField";
+import { FormSection } from "@/components/FormSection";
+import { ResourcePicker } from "@/components/ResourcePicker";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -17,7 +21,6 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
 	Select,
 	SelectContent,
@@ -25,11 +28,9 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import { api } from "@/lib/api";
+import { api, projectScopedPath } from "@/lib/api";
 import { applyServerIssues, nullableNumber, optionalNumber } from "@/lib/forms";
-import { useDestinationsList } from "@/lib/queries/endpoints";
-import { qk } from "@/lib/queries/keys";
-import { useProjectsList } from "@/lib/queries/projects";
+import { invalidateEndpointViews } from "@/lib/queries/invalidate-endpoint-views";
 import { FieldError } from "./ProjectFormDialog";
 
 const AUTH_LABEL: Record<(typeof AUTH_TYPES)[number], string> = {
@@ -84,26 +85,43 @@ function SimpleSelect({
 	);
 }
 
-/**
- * Create: the whole discriminated body is validated by createSourceRequest.
- * Edit: auth_type is fixed (M3 stores it per source), and the server checks
- * auth_config against it, so the form shows the fields for the stored type.
- * auth_type stays out of the edit values: the strict patch schema rejects it.
- */
 export function SourceFormDialog({
 	open,
 	onOpenChange,
+	projectId,
 	source,
 	onCreated,
 }: {
 	open: boolean;
 	onOpenChange: (o: boolean) => void;
+	projectId: string;
 	source?: Source;
+	onCreated?: (secret: string | null) => void;
+}) {
+	if (!open) return null;
+	return (
+		<SourceForm
+			projectId={projectId}
+			source={source}
+			onDone={() => onOpenChange(false)}
+			onCreated={onCreated}
+		/>
+	);
+}
+
+function SourceForm({
+	projectId,
+	source,
+	onDone,
+	onCreated,
+}: {
+	projectId: string;
+	source?: Source;
+	onDone: () => void;
 	onCreated?: (secret: string | null) => void;
 }) {
 	const qc = useQueryClient();
 	const editing = source !== undefined;
-	const projects = useProjectsList();
 	const form = useForm<Values>({
 		resolver: zodResolver(
 			(editing ? patchSourceRequest : createSourceRequest) as never,
@@ -117,20 +135,20 @@ export function SourceFormDialog({
 					event_id_selector: source.event_id_selector,
 					max_body_bytes: source.max_body_bytes,
 				}
-			: { name: "", auth_type: "none", auth_config: {}, event_id_from: "none" },
+			: {
+					project_id: projectId,
+					name: "",
+					auth_type: "none",
+					auth_config: {},
+					event_id_from: "none",
+				},
 	});
 	const watchedAuthType = form.watch("auth_type");
 	const authType = editing ? source.auth_type : watchedAuthType;
 	const eventFrom = form.watch("event_id_from");
-	const projectId = editing ? source.project_id : form.watch("project_id");
-	const destinations = useDestinationsList(projectId);
 
 	const setAuthType = (t: Values["auth_type"]) => {
 		form.setValue("auth_type", t);
-		// Hidden fields keep their values (shouldUnregister is off), and the strict
-		// create schema rejects a `secret` key (even an undefined one) for
-		// auth_type "none" with an error no visible field shows. Remove the key,
-		// and every auth-specific error, on each switch.
 		form.unregister("secret");
 		form.clearErrors(["secret", "auth_config"]);
 		form.setValue(
@@ -151,14 +169,19 @@ export function SourceFormDialog({
 		try {
 			if (editing) {
 				const { secret: _s, project_id: _p, ...patch } = body;
-				await api.patch(`/sources/${source.id}`, patch);
+				await api.patch(
+					projectScopedPath(`/sources/${source.id}`, projectId),
+					patch,
+				);
 			} else {
-				const res = await api.post<{ secret?: string }>("/sources", body);
+				const res = await api.post<{ secret?: string }>(
+					projectScopedPath("/sources", projectId),
+					body,
+				);
 				onCreated?.(res.secret ?? null);
 			}
-			await qc.invalidateQueries({ queryKey: qk.sources.all });
-			form.reset();
-			onOpenChange(false);
+			await invalidateEndpointViews(qc, "source", projectId);
+			onDone();
 		} catch (err) {
 			applyServerIssues(form, err);
 		}
@@ -168,237 +191,239 @@ export function SourceFormDialog({
 		{ message?: string } | undefined
 	> & { auth_config?: Record<string, { message?: string }> };
 	return (
-		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="max-w-xl">
-				<DialogHeader>
-					<DialogTitle>{editing ? "Edit source" : "New source"}</DialogTitle>
-				</DialogHeader>
-				<form onSubmit={submit} className="space-y-3">
-					{!editing && (
-						<div>
-							<Label htmlFor="src-project">Project</Label>
-							<Controller
-								control={form.control}
-								name="project_id"
-								render={({ field }) => (
-									<SimpleSelect
-										id="src-project"
-										label="Project"
-										value={field.value}
-										onChange={(v) => {
-											field.onChange(v);
-											form.setValue("destination_id", undefined);
-										}}
-										options={(projects.data?.data ?? []).map((p) => [
-											p.id,
-											p.name,
-										])}
+		<DirtyFormGuard dirty={form.formState.isDirty}>
+			{(requestClose) => (
+				<Dialog open onOpenChange={(o) => !o && requestClose(onDone)}>
+					<DialogContent className="max-w-xl">
+						<DialogHeader>
+							<DialogTitle>
+								{editing ? "Edit source" : "New source"}
+							</DialogTitle>
+						</DialogHeader>
+						<form onSubmit={submit} className="space-y-3">
+							<FormSection
+								title="Target"
+								description="Changes take up to 30 seconds to reach ingress."
+							>
+								<FormField htmlFor="src-destination" label="Destination">
+									<Controller
+										control={form.control}
+										name="destination_id"
+										render={({ field }) => (
+											<ResourcePicker
+												id="src-destination"
+												kind="destination"
+												projectId={projectId}
+												label="Destination"
+												value={field.value}
+												onChange={field.onChange}
+											/>
+										)}
 									/>
+									<FieldError message={e.destination_id?.message} />
+								</FormField>
+								<FormField htmlFor="src-name" label="Name">
+									<Input id="src-name" {...form.register("name")} />
+									<FieldError message={e.name?.message} />
+								</FormField>
+							</FormSection>
+							<FormSection title="Authentication">
+								{!editing && (
+									<FormField htmlFor="src-auth" label="Auth type">
+										<SimpleSelect
+											id="src-auth"
+											label="Auth type"
+											value={authType}
+											onChange={(v) => setAuthType(v as Values["auth_type"])}
+											options={AUTH_TYPES.map((t) => [t, AUTH_LABEL[t]])}
+										/>
+									</FormField>
 								)}
-							/>
-							<FieldError message={e.project_id?.message} />
-						</div>
-					)}
-					<div>
-						<Label htmlFor="src-destination">Destination</Label>
-						<Controller
-							control={form.control}
-							name="destination_id"
-							render={({ field }) => (
-								<SimpleSelect
-									id="src-destination"
-									label="Destination"
-									value={field.value}
-									onChange={field.onChange}
-									options={(destinations.data?.data ?? []).map((d) => [
-										d.id,
-										d.name,
-									])}
-								/>
-							)}
-						/>
-						<FieldError message={e.destination_id?.message} />
-					</div>
-					<div>
-						<Label htmlFor="src-name">Name</Label>
-						<Input id="src-name" {...form.register("name")} />
-						<FieldError message={e.name?.message} />
-					</div>
-					{!editing && (
-						<div>
-							<Label htmlFor="src-auth">Auth type</Label>
-							<SimpleSelect
-								id="src-auth"
-								label="Auth type"
-								value={authType}
-								onChange={(v) => setAuthType(v as Values["auth_type"])}
-								options={AUTH_TYPES.map((t) => [t, AUTH_LABEL[t]])}
-							/>
-						</div>
-					)}
-					{authType === "hmac" && (
-						<div className="grid grid-cols-2 gap-3">
-							<div>
-								<Label htmlFor="src-hmac-header">Signature header</Label>
-								<Input
-									id="src-hmac-header"
-									{...form.register("auth_config.header")}
-								/>
-								<FieldError message={e.auth_config?.header?.message} />
-							</div>
-							<div>
-								<Label htmlFor="src-hmac-prefix">Prefix (optional)</Label>
-								<Input
-									id="src-hmac-prefix"
-									placeholder="sha256="
-									{...form.register("auth_config.prefix", {
-										setValueAs: (v) => (v === "" ? undefined : v),
-									})}
-								/>
-							</div>
-							<div>
-								<Label htmlFor="src-hmac-alg">Algorithm</Label>
-								<Controller
-									control={form.control}
-									name="auth_config.algorithm"
-									render={({ field }) => (
-										<SimpleSelect
-											id="src-hmac-alg"
-											label="Algorithm"
-											value={field.value as string}
-											onChange={field.onChange}
-											options={[
-												["sha256", "SHA-256"],
-												["sha512", "SHA-512"],
-												["sha1", "SHA-1"],
-											]}
+								{authType === "hmac" && (
+									<div className="grid grid-cols-2 gap-3">
+										<FormField
+											htmlFor="src-hmac-header"
+											label="Signature header"
+										>
+											<Input
+												id="src-hmac-header"
+												{...form.register("auth_config.header")}
+											/>
+											<FieldError message={e.auth_config?.header?.message} />
+										</FormField>
+										<FormField
+											htmlFor="src-hmac-prefix"
+											label="Prefix (optional)"
+										>
+											<Input
+												id="src-hmac-prefix"
+												placeholder="sha256="
+												{...form.register("auth_config.prefix", {
+													setValueAs: (v) => (v === "" ? undefined : v),
+												})}
+											/>
+										</FormField>
+										<FormField htmlFor="src-hmac-alg" label="Algorithm">
+											<Controller
+												control={form.control}
+												name="auth_config.algorithm"
+												render={({ field }) => (
+													<SimpleSelect
+														id="src-hmac-alg"
+														label="Algorithm"
+														value={field.value as string}
+														onChange={field.onChange}
+														options={[
+															["sha256", "SHA-256"],
+															["sha512", "SHA-512"],
+															["sha1", "SHA-1"],
+														]}
+													/>
+												)}
+											/>
+										</FormField>
+										<FormField htmlFor="src-hmac-enc" label="Encoding">
+											<Controller
+												control={form.control}
+												name="auth_config.encoding"
+												render={({ field }) => (
+													<SimpleSelect
+														id="src-hmac-enc"
+														label="Encoding"
+														value={field.value as string}
+														onChange={field.onChange}
+														options={[
+															["hex", "hex"],
+															["base64", "base64"],
+														]}
+													/>
+												)}
+											/>
+										</FormField>
+									</div>
+								)}
+								{authType === "token" && (
+									<div className="grid grid-cols-2 gap-3">
+										<FormField htmlFor="src-token-in" label="Token in">
+											<Controller
+												control={form.control}
+												name="auth_config.in"
+												render={({ field }) => (
+													<SimpleSelect
+														id="src-token-in"
+														label="Token in"
+														value={field.value as string}
+														onChange={field.onChange}
+														options={[
+															["header", "Header"],
+															["query", "Query parameter"],
+														]}
+													/>
+												)}
+											/>
+										</FormField>
+										<FormField htmlFor="src-token-name" label="Name">
+											<Input
+												id="src-token-name"
+												{...form.register("auth_config.name")}
+											/>
+											<FieldError message={e.auth_config?.name?.message} />
+										</FormField>
+									</div>
+								)}
+								{!editing && authType !== "none" && (
+									<FormField
+										htmlFor="src-secret"
+										label="Secret (optional; leave empty to generate)"
+									>
+										<Input
+											id="src-secret"
+											autoComplete="off"
+											{...form.register("secret", {
+												setValueAs: (v) => (v === "" ? undefined : v),
+											})}
 										/>
-									)}
-								/>
-							</div>
-							<div>
-								<Label htmlFor="src-hmac-enc">Encoding</Label>
-								<Controller
-									control={form.control}
-									name="auth_config.encoding"
-									render={({ field }) => (
-										<SimpleSelect
-											id="src-hmac-enc"
-											label="Encoding"
-											value={field.value as string}
-											onChange={field.onChange}
-											options={[
-												["hex", "hex"],
-												["base64", "base64"],
-											]}
+										<FieldError message={e.secret?.message} />
+									</FormField>
+								)}
+							</FormSection>
+							<FormSection title="Event ID">
+								<div className="grid grid-cols-2 gap-3">
+									<FormField htmlFor="src-eid" label="Event ID from">
+										<Controller
+											control={form.control}
+											name="event_id_from"
+											render={({ field }) => (
+												<SimpleSelect
+													id="src-eid"
+													label="Event ID from"
+													value={field.value}
+													onChange={field.onChange}
+													options={EVENT_ID_FROM.map((v) => [
+														v,
+														EVENT_ID_LABEL[v],
+													])}
+												/>
+											)}
 										/>
+									</FormField>
+									{eventFrom !== "none" && (
+										<FormField
+											htmlFor="src-eid-sel"
+											label={
+												eventFrom === "header" ? "Header name" : "JSON path"
+											}
+										>
+											<Input
+												id="src-eid-sel"
+												placeholder={
+													eventFrom === "header" ? "X-Event-Id" : "$.id"
+												}
+												{...form.register("event_id_selector")}
+											/>
+											<FieldError
+												message={
+													e.event_id_selector?.message &&
+													`selector: ${e.event_id_selector.message}`
+												}
+											/>
+										</FormField>
 									)}
-								/>
-							</div>
-						</div>
-					)}
-					{authType === "token" && (
-						<div className="grid grid-cols-2 gap-3">
-							<div>
-								<Label htmlFor="src-token-in">Token in</Label>
-								<Controller
-									control={form.control}
-									name="auth_config.in"
-									render={({ field }) => (
-										<SimpleSelect
-											id="src-token-in"
-											label="Token in"
-											value={field.value as string}
-											onChange={field.onChange}
-											options={[
-												["header", "Header"],
-												["query", "Query parameter"],
-											]}
-										/>
-									)}
-								/>
-							</div>
-							<div>
-								<Label htmlFor="src-token-name">Name</Label>
-								<Input
-									id="src-token-name"
-									{...form.register("auth_config.name")}
-								/>
-								<FieldError message={e.auth_config?.name?.message} />
-							</div>
-						</div>
-					)}
-					{!editing && authType !== "none" && (
-						<div>
-							<Label htmlFor="src-secret">
-								Secret (optional; leave empty to generate)
-							</Label>
-							<Input
-								id="src-secret"
-								autoComplete="off"
-								{...form.register("secret", {
-									setValueAs: (v) => (v === "" ? undefined : v),
-								})}
-							/>
-							<FieldError message={e.secret?.message} />
-						</div>
-					)}
-					<div className="grid grid-cols-2 gap-3">
-						<div>
-							<Label htmlFor="src-eid">Event ID from</Label>
-							<Controller
-								control={form.control}
-								name="event_id_from"
-								render={({ field }) => (
-									<SimpleSelect
-										id="src-eid"
-										label="Event ID from"
-										value={field.value}
-										onChange={field.onChange}
-										options={EVENT_ID_FROM.map((v) => [v, EVENT_ID_LABEL[v]])}
+								</div>
+							</FormSection>
+							<FormSection title="Limits">
+								<FormField
+									htmlFor="src-max"
+									label="Max body bytes (empty = default)"
+								>
+									<Input
+										id="src-max"
+										type="number"
+										{...form.register(
+											"max_body_bytes",
+											editing ? nullableNumber : optionalNumber,
+										)}
 									/>
-								)}
-							/>
-						</div>
-						{eventFrom !== "none" && (
-							<div>
-								<Label htmlFor="src-eid-sel">
-									{eventFrom === "header" ? "Header name" : "JSON path"}
-								</Label>
-								<Input
-									id="src-eid-sel"
-									placeholder={eventFrom === "header" ? "X-Event-Id" : "$.id"}
-									{...form.register("event_id_selector")}
-								/>
-								<FieldError
-									message={
-										e.event_id_selector?.message &&
-										`selector: ${e.event_id_selector.message}`
-									}
-								/>
-							</div>
-						)}
-					</div>
-					<div>
-						<Label htmlFor="src-max">Max body bytes (empty = default)</Label>
-						<Input
-							id="src-max"
-							type="number"
-							{...form.register(
-								"max_body_bytes",
-								editing ? nullableNumber : optionalNumber,
-							)}
-						/>
-						<FieldError message={e.max_body_bytes?.message} />
-					</div>
-					<FieldError message={e.root?.message} />
-					<DialogFooter>
-						<Button type="submit" disabled={form.formState.isSubmitting}>
-							{editing ? "Save" : "Create"}
-						</Button>
-					</DialogFooter>
-				</form>
-			</DialogContent>
-		</Dialog>
+									<FieldError message={e.max_body_bytes?.message} />
+								</FormField>
+							</FormSection>
+							<FieldError message={e.root?.message} />
+							<DialogFooter>
+								<Button
+									type="button"
+									variant="outline"
+									onClick={() => requestClose(onDone)}
+								>
+									Cancel
+								</Button>
+								<Button type="submit" disabled={form.formState.isSubmitting}>
+									{editing ? "Save" : "Create"}
+								</Button>
+							</DialogFooter>
+						</form>
+					</DialogContent>
+				</Dialog>
+			)}
+		</DirtyFormGuard>
 	);
 }

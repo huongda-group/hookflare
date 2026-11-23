@@ -13,7 +13,6 @@ function normalize(value: unknown): string | null {
 	return s && s.length <= MAX_EVENT_ID_LENGTH ? s : null;
 }
 
-/** Best effort: any failure yields null and never rejects the request (§6.2). Runs after verification. */
 export function extractEventId(
 	from: EventIdFrom,
 	selector: string | null,

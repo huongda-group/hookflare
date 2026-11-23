@@ -7,30 +7,68 @@ import type { Db, Deps } from "../../deps";
 
 export const D1_LIMIT_BYTES = 10 * 1024 ** 3;
 export const DEAD_CURSOR_KEY = "alerts.dead_cursor";
-/** Room for clock skew between isolates stamping completed_at (plan deviation). */
 export const DEAD_CURSOR_LAG_MS = 10_000;
 const NEWEST_IDS = 5;
-/** Per-run bounds of the new_dead scan (Minor 6); the rest is read next run. */
 export const DEAD_SCAN_LIMIT = 1_000;
 export const DEAD_MAX_DESTINATIONS = 100;
+
+export const FAILURES_QUIET_MS = 10 * 60_000;
+
+function parseDetails(json: string): Record<string, unknown> {
+	try {
+		const v: unknown = JSON.parse(json);
+		if (v && typeof v === "object" && !Array.isArray(v))
+			return v as Record<string, unknown>;
+	} catch {}
+	return {};
+}
 
 export async function consecutiveFailures(
 	db: Db,
 	rules: AlertRules,
+	open: OpenAlertRow[],
+	now: number,
 ): Promise<ActiveAlert[]> {
 	const rows = await db.all<{ id: string; project_id: string; n: number }>(sql`
 		SELECT id, project_id, consecutive_failures AS n FROM destinations
 		WHERE consecutive_failures >= ${rules.failure_threshold} AND status = 'active'`);
-	return rows.map((r) => ({
-		rule: "consecutive_failures",
-		resourceType: "destination",
-		resourceId: r.id,
-		projectId: r.project_id,
-		details: { consecutive_failures: r.n },
-	}));
+	const openCf = new Map(
+		open
+			.filter((o) => o.rule === "consecutive_failures")
+			.map((o) => [o.resourceId, o]),
+	);
+	const active: ActiveAlert[] = rows.map((r) => {
+		const prev = openCf.get(r.id);
+		openCf.delete(r.id);
+		return {
+			rule: "consecutive_failures",
+			resourceType: "destination",
+			resourceId: r.id,
+			projectId: r.project_id,
+			details: { consecutive_failures: r.n },
+			...(prev && "cleared_at" in parseDetails(prev.detailsJson)
+				? { updateDetails: true }
+				: {}),
+		};
+	});
+	for (const o of openCf.values()) {
+		const details = parseDetails(o.detailsJson);
+		const clearedAt =
+			typeof details.cleared_at === "number" ? details.cleared_at : null;
+		if (clearedAt !== null && clearedAt <= now - FAILURES_QUIET_MS) continue;
+		active.push({
+			rule: "consecutive_failures",
+			resourceType: "destination",
+			resourceId: o.resourceId,
+			projectId: o.projectId,
+			details: clearedAt === null ? { ...details, cleared_at: now } : details,
+			carryOver: true,
+			...(clearedAt === null ? { updateDetails: true } : {}),
+		});
+	}
+	return active;
 }
 
-/** Paused destinations hold `paused` deliveries, so they never match (spec §6.2). */
 export async function stuckPending(
 	db: Db,
 	rules: AlertRules,
@@ -67,11 +105,6 @@ async function readDeadCursor(db: Db): Promise<number | null> {
 	return typeof at === "number" ? at : null;
 }
 
-/**
- * M5-13. New dead deliveries in (cursor, now − lag] open or refresh an incident;
- * an open incident stays active until dead_quiet_s passes with nothing new.
- * A missing cursor starts at now − lag without alerting on history.
- */
 export async function newDead(
 	db: Db,
 	rules: AlertRules,
@@ -137,12 +170,6 @@ const deadRows = (db: Db, where: ReturnType<typeof sql>, limit?: number) =>
 		ORDER BY d.completed_at ASC, d.id ASC
 		${limit === undefined ? sql`` : sql`LIMIT ${limit}`}`);
 
-/**
- * Oldest first, at most DEAD_SCAN_LIMIT rows and DEAD_MAX_DESTINATIONS
- * destinations per run. When the window is cut short, `to` stops just before
- * the first unprocessed millisecond, so the cursor only passes rows this run
- * counted and the rest are read next minute. Returns newest first.
- */
 export async function scanDead(
 	db: Db,
 	from: number,
@@ -167,12 +194,10 @@ export async function scanDead(
 	const boundary = rows[cut].completed_at;
 	const kept = rows.slice(0, cut).filter((r) => r.completed_at < boundary);
 	if (kept.length > 0) return { rows: kept.reverse(), to: boundary - 1 };
-	// Every scanned row shares one millisecond: take it whole so the cursor still moves.
 	const tied = await deadRows(db, sql`d.completed_at = ${boundary}`);
 	return { rows: tied.reverse(), to: boundary };
 }
 
-/** Never moves the cursor backwards, even when an older run writes last. */
 export function deadCursorStatement(db: Db, at: number, now: number) {
 	return db
 		.insert(settings)
@@ -191,7 +216,6 @@ export function deadCursorStatement(db: Db, at: number, now: number) {
 		});
 }
 
-/** `meta.size_after` of any query is the database size in bytes. */
 export async function readD1SizeBytes(db: Db): Promise<number> {
 	const r = (await db.run(sql`SELECT 1`)) as unknown as {
 		meta: { size_after?: number };
@@ -199,7 +223,6 @@ export async function readD1SizeBytes(db: Db): Promise<number> {
 	return r.meta.size_after ?? 0;
 }
 
-/** Hysteresis: opens at d1_warn_pct, stays open down to d1_warn_pct − 5. */
 export async function d1Storage(
 	db: Db,
 	rules: AlertRules,
@@ -229,12 +252,6 @@ export type Evaluation = {
 
 export const ARCHIVE_STUCK_AFTER_MS = 48 * 3_600_000;
 
-/**
- * Spec §7.4 monitoring: a failed batch needs an operator until a later batch of
- * the same kind and day succeeds (failed days are retried); one stuck in
- * building is a dead run, and one verified long ago but never purged means
- * purge keeps failing.
- */
 export async function archiveStuck(
 	db: Db,
 	now: number,
@@ -262,11 +279,6 @@ export async function archiveStuck(
 
 export const BACKUP_STALE_AFTER_MS = 36 * 3_600_000;
 
-/**
- * M6: a verified full-DB backup must land at least every 36 h. Disabled
- * backups never alert, and a deployment with no backup row yet whose
- * backups migration landed recently gets a grace period instead of an incident.
- */
 export async function backupStale(
 	deps: Pick<Deps, "db" | "now">,
 	storage: StorageSettings,
@@ -285,9 +297,6 @@ export async function backupStale(
 			sql`SELECT 1 AS one FROM backups LIMIT 1`,
 		);
 		if (rows.length === 0) {
-			// The grace runs from when backups became possible: the `0000_init`
-			// migration that creates the backups table. Without that row (a
-			// hand-built or restored ledger), the newest migration.
 			const [since] = await deps.db.all<{ since: number | null }>(sql`
 				SELECT COALESCE(
 					(SELECT MIN(unixepoch(applied_at)) FROM d1_migrations
@@ -320,12 +329,11 @@ export async function evaluateRules(
 ): Promise<Evaluation> {
 	const now = deps.now();
 	const [cf, stuck, dead, d1, stuckArchive, staleBackup] = await Promise.all([
-		consecutiveFailures(deps.db, rules),
+		consecutiveFailures(deps.db, rules, open, now),
 		stuckPending(deps.db, rules, now),
 		newDead(deps.db, rules, open, now),
 		d1Storage(deps.db, rules, open),
 		archiveStuck(deps.db, now),
-		// A corrupt storage row falls back to the defaults (enabled).
 		readSetting(deps.db, STORAGE_SETTING).then(({ value }) =>
 			backupStale(deps, value),
 		),

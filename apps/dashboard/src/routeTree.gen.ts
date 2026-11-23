@@ -13,7 +13,9 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ArchivesRouteImport } from './routes/archives'
 import { Route as AuditRouteImport } from './routes/audit'
 import { Route as FailuresRouteImport } from './routes/failures'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as SetupRouteImport } from './routes/setup'
 import { Route as AlertsIndexRouteImport } from './routes/alerts/index'
 import { Route as AlertsAlertIdRouteImport } from './routes/alerts/$alertId'
 import { Route as EndpointsIndexRouteImport } from './routes/endpoints/index'
@@ -44,9 +46,19 @@ const FailuresRoute = FailuresRouteImport.update({
   path: '/failures',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SetupRoute = SetupRouteImport.update({
+  id: '/setup',
+  path: '/setup',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AlertsIndexRoute = AlertsIndexRouteImport.update({
@@ -102,7 +114,9 @@ export interface FileRoutesByFullPath {
   '/archives': typeof ArchivesRoute
   '/audit': typeof AuditRoute
   '/failures': typeof FailuresRoute
+  '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
+  '/setup': typeof SetupRoute
   '/alerts/$alertId': typeof AlertsAlertIdRoute
   '/events/$eventId': typeof EventsEventIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
@@ -118,7 +132,9 @@ export interface FileRoutesByTo {
   '/archives': typeof ArchivesRoute
   '/audit': typeof AuditRoute
   '/failures': typeof FailuresRoute
+  '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
+  '/setup': typeof SetupRoute
   '/alerts/$alertId': typeof AlertsAlertIdRoute
   '/events/$eventId': typeof EventsEventIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
@@ -135,7 +151,9 @@ export interface FileRoutesById {
   '/archives': typeof ArchivesRoute
   '/audit': typeof AuditRoute
   '/failures': typeof FailuresRoute
+  '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
+  '/setup': typeof SetupRoute
   '/alerts/$alertId': typeof AlertsAlertIdRoute
   '/events/$eventId': typeof EventsEventIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
@@ -153,7 +171,9 @@ export interface FileRouteTypes {
     | '/archives'
     | '/audit'
     | '/failures'
+    | '/login'
     | '/settings'
+    | '/setup'
     | '/alerts/$alertId'
     | '/events/$eventId'
     | '/projects/$projectId'
@@ -169,7 +189,9 @@ export interface FileRouteTypes {
     | '/archives'
     | '/audit'
     | '/failures'
+    | '/login'
     | '/settings'
+    | '/setup'
     | '/alerts/$alertId'
     | '/events/$eventId'
     | '/projects/$projectId'
@@ -185,7 +207,9 @@ export interface FileRouteTypes {
     | '/archives'
     | '/audit'
     | '/failures'
+    | '/login'
     | '/settings'
+    | '/setup'
     | '/alerts/$alertId'
     | '/events/$eventId'
     | '/projects/$projectId'
@@ -202,7 +226,9 @@ export interface RootRouteChildren {
   ArchivesRoute: typeof ArchivesRoute
   AuditRoute: typeof AuditRoute
   FailuresRoute: typeof FailuresRoute
+  LoginRoute: typeof LoginRoute
   SettingsRoute: typeof SettingsRoute
+  SetupRoute: typeof SetupRoute
   AlertsAlertIdRoute: typeof AlertsAlertIdRoute
   EventsEventIdRoute: typeof EventsEventIdRoute
   ProjectsProjectIdRoute: typeof ProjectsProjectIdRoute
@@ -244,11 +270,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof FailuresRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/setup': {
+      id: '/setup'
+      path: '/setup'
+      fullPath: '/setup'
+      preLoaderRoute: typeof SetupRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/alerts/': {
@@ -322,7 +362,9 @@ const rootRouteChildren: RootRouteChildren = {
   ArchivesRoute: ArchivesRoute,
   AuditRoute: AuditRoute,
   FailuresRoute: FailuresRoute,
+  LoginRoute: LoginRoute,
   SettingsRoute: SettingsRoute,
+  SetupRoute: SetupRoute,
   AlertsAlertIdRoute: AlertsAlertIdRoute,
   EventsEventIdRoute: EventsEventIdRoute,
   ProjectsProjectIdRoute: ProjectsProjectIdRoute,

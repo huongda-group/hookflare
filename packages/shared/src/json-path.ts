@@ -3,11 +3,6 @@ export type PathSegment = { key: string } | { index: number };
 const MAX_PATH_LENGTH = 256;
 const SEGMENT = /\.([A-Za-z0-9_$-]+)|\[(\d{1,6})\]/y;
 
-/**
- * Parses the provider-event-ID selector subset: `$` followed by one or more
- * `.key` / `[index]` segments (`$.id`, `$.data.object.id`, `$.items[0].id`).
- * Returns null for anything else, including a bare `$`.
- */
 export function parseJsonPath(path: string): PathSegment[] | null {
 	if (!path.startsWith("$") || path.length > MAX_PATH_LENGTH) {
 		return null;

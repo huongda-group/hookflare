@@ -1,21 +1,3 @@
-/**
- * B5 admin query timer: `node src/queries.ts [--reps 10] [--project <id>]
- * [--source <id>] [--destination <id>]`.
- *
- * Reads HOOKFLARE_URL, CF_ACCESS_CLIENT_ID, and CF_ACCESS_CLIENT_SECRET,
- * refuses a production URL, then issues each read-only admin query of
- * spec §6 B5 `--reps` times in sequence and prints p50/p95/max per query
- * (wall time from request to fully read body, so it includes network RTT;
- * compare against a cheap baseline such as `overview: 24h`). Results are
- * also written to `results/b5-queries-<iso>.json`.
- *
- * Not covered: the stats rollup has no admin API trigger (time it from the
- * scheduled handler's logs), and POST /archives/run mutates, so only the
- * archive preview is timed here; time a real run from its batch record.
- *
- * Node 24 runs this file directly through type stripping.
- */
-
 import { mkdir, writeFile } from "node:fs/promises";
 import {
 	assertNotProductionUrl,
@@ -53,11 +35,6 @@ function withParams(
 	return query === "" ? `${API}${path}` : `${API}${path}?${query}`;
 }
 
-/**
- * The B5 read paths: event search with sparse filters (selective status,
- * HTTP status, and a provider_event_id that matches nothing), the failures
- * views, overview ranges, destination stats, and the archive preview.
- */
 export function b5Queries(scope: QueryScope): Query[] {
 	const project: [string, string | undefined] = ["project_id", scope.projectId];
 	const source: [string, string | undefined] = ["source_id", scope.sourceId];
@@ -79,7 +56,6 @@ export function b5Queries(scope: QueryScope): Query[] {
 				destination,
 			]),
 		},
-		// The API only accepts provider_event_id together with source_id.
 		...(scope.sourceId
 			? [
 					{
@@ -121,7 +97,6 @@ export function b5Queries(scope: QueryScope): Query[] {
 	];
 }
 
-/** Resolve relative `from=-7d` placeholders to epoch ms at run time. */
 function resolvePath(path: string, nowMs: number): string {
 	return path.replace(/([?&]from=)-(\d+)d/, (_, key: string, days: string) => {
 		return `${key}${nowMs - Number(days) * 86_400_000}`;
@@ -186,7 +161,6 @@ export type QueryDeps = {
 	now: () => number;
 	log: (line: string) => void;
 	exit: (code: number) => never;
-	/** Writes the JSON report; omitted in tests. */
 	save?: (timings: QueryTiming[]) => Promise<void>;
 };
 
@@ -225,17 +199,10 @@ export async function main(
 	const { log, exit } = deps;
 	const reps = Number(flag(argv, "reps") ?? "10");
 	const url = deps.env.HOOKFLARE_URL ?? "";
-	const clientId = deps.env.CF_ACCESS_CLIENT_ID ?? "";
-	const clientSecret = deps.env.CF_ACCESS_CLIENT_SECRET ?? "";
-	if (
-		!Number.isInteger(reps) ||
-		reps < 1 ||
-		!url ||
-		!clientId ||
-		!clientSecret
-	) {
+	const token = deps.env.HOOKFLARE_API_TOKEN ?? "";
+	if (!Number.isInteger(reps) || reps < 1 || !url || !token) {
 		log(
-			"usage: HOOKFLARE_URL=… CF_ACCESS_CLIENT_ID=… CF_ACCESS_CLIENT_SECRET=… node src/queries.ts [--reps 10] [--project <id>] [--source <id>] [--destination <id>]",
+			"usage: HOOKFLARE_URL=… HOOKFLARE_API_TOKEN=… node src/queries.ts [--reps 10] [--project <id>] [--source <id>] [--destination <id>]",
 		);
 		return exit(2);
 	}
@@ -247,8 +214,7 @@ export async function main(
 	}
 	const base = url.replace(/\/$/, "");
 	const headers = {
-		"CF-Access-Client-Id": clientId,
-		"CF-Access-Client-Secret": clientSecret,
+		authorization: `Bearer ${token}`,
 	};
 	const queries = b5Queries({
 		projectId: flag(argv, "project"),

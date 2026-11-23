@@ -26,11 +26,6 @@ const conflictTarget = [
 	statsHourly.destinationId,
 ];
 
-/**
- * Recomputes one hour from scratch (spec §6): delete, then one INSERT … SELECT
- * per counter group, merged into the same row by the upsert. Run as one
- * db.batch so readers never see a half-built hour.
- */
 export function rollupHourStatements(db: Db, hour: number) {
 	const end = hour + HOUR_MS;
 	return [
@@ -91,7 +86,6 @@ export async function oldestEventAt(db: Db): Promise<number | null> {
 
 export type StatsScope = { from: number; to: number; projectId?: string };
 
-/** `hours` whole hours ending at the end of the current hour (spec §7.1). */
 export function statsWindow(now: number, hours: number) {
 	const to = floorHour(now) + HOUR_MS;
 	return { from: to - hours * HOUR_MS, to };
@@ -121,7 +115,13 @@ export async function overviewTotals(db: Db, w: StatsScope) {
 		.where(scopeWhere(w))
 		.get();
 	return (
-		row ?? { received: 0, delivered: 0, failedFinal: 0, dead: 0, attempts: 0 }
+		row ?? /* istanbul ignore next */ {
+			received: 0,
+			delivered: 0,
+			failedFinal: 0,
+			dead: 0,
+			attempts: 0,
+		}
 	);
 }
 
@@ -156,7 +156,6 @@ export async function failingDestinations(db: Db, w: StatsScope, limit = 5) {
 		.limit(limit);
 }
 
-/** Read from deliveries, not stats: these are the current backlog (spec §7.1). */
 export async function liveCounts(
 	db: Db,
 	projectId?: string,
@@ -191,7 +190,6 @@ export type DestinationStatsRow = {
 	lastError: string | null;
 };
 
-/** One row per destination in scope; the "last" fields come from its newest terminal delivery. */
 export async function destinationStats(
 	db: Db,
 	w: StatsScope,

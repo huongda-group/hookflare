@@ -10,10 +10,13 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { AlertChannelDialog } from "@/components/AlertChannelDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DataState } from "@/components/DataState";
+import { DirtyFormGuard } from "@/components/DirtyFormGuard";
+import { FormField } from "@/components/FormField";
+import { FormSection } from "@/components/FormSection";
 import { FieldError } from "@/components/ProjectFormDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
 	Table,
 	TableBody,
@@ -42,7 +45,7 @@ export function AlertsTab() {
 			{settings.data ? (
 				<RulesForm initial={settings.data.alert_rules} />
 			) : (
-				<p className="text-neutral-500">Loading…</p>
+				<p className="text-muted-foreground">Loading…</p>
 			)}
 			<Channels />
 		</div>
@@ -61,6 +64,7 @@ function RulesForm({ initial }: { initial: AlertRules }) {
 		try {
 			await api.patch("/settings", { alert_rules });
 			await qc.invalidateQueries({ queryKey: qk.settings });
+			form.reset(alert_rules);
 			setSaved(true);
 		} catch (err) {
 			applyServerIssues(form, err);
@@ -68,31 +72,50 @@ function RulesForm({ initial }: { initial: AlertRules }) {
 	});
 	const e = form.formState.errors;
 	return (
-		<form onSubmit={submit} className="max-w-xl space-y-4">
-			<h2 className="font-medium">Rules</h2>
-			<div className="grid grid-cols-2 gap-3">
-				{RULE_FIELDS.map(([key, label]) => (
-					<div key={key}>
-						<Label htmlFor={`ar-${key}`}>{label}</Label>
-						<Input
-							id={`ar-${key}`}
-							type="number"
-							{...form.register(key, { valueAsNumber: true })}
-						/>
-						<FieldError message={e[key]?.message} />
-					</div>
-				))}
-			</div>
-			<FieldError message={e.root?.message} />
-			<Button type="submit" disabled={form.formState.isSubmitting}>
-				Save rules
-			</Button>
-			{saved && (
-				<p className="text-sm text-green-800">
-					Saved. Applies within about a minute.
-				</p>
+		<DirtyFormGuard dirty={form.formState.isDirty}>
+			{() => (
+				<form onSubmit={submit}>
+					<FormSection
+						title="Rules"
+						description="When delivery, storage, and backup signals raise alerts."
+					>
+						<div className="grid grid-cols-2 gap-3">
+							{RULE_FIELDS.map(([key, label]) => (
+								<FormField key={key} htmlFor={`ar-${key}`} label={label}>
+									<Input
+										id={`ar-${key}`}
+										type="number"
+										{...form.register(key, { valueAsNumber: true })}
+									/>
+									<FieldError message={e[key]?.message} />
+								</FormField>
+							))}
+						</div>
+						<FieldError message={e.root?.message} />
+						<div className="flex gap-2">
+							<Button type="submit" disabled={form.formState.isSubmitting}>
+								Save rules
+							</Button>
+							<Button
+								type="button"
+								variant="outline"
+								onClick={() => {
+									form.reset(initial);
+									setSaved(false);
+								}}
+							>
+								Revert
+							</Button>
+						</div>
+						{saved && (
+							<p className="text-sm text-success">
+								Saved. Applies within about a minute.
+							</p>
+						)}
+					</FormSection>
+				</form>
 			)}
-		</form>
+		</DirtyFormGuard>
 	);
 }
 
@@ -102,6 +125,7 @@ function Channels() {
 		queryKey: qk.alertChannels.all,
 		queryFn: () => api.get<{ data: AlertChannel[] }>("/alert-channels"),
 	});
+	const channels = list.data?.data ?? [];
 	const [editing, setEditing] = useState<AlertChannel | "new" | null>(null);
 	const [deleting, setDeleting] = useState<AlertChannel | null>(null);
 	const [results, setResults] = useState<Record<string, ChannelTestResult>>({});
@@ -118,87 +142,100 @@ function Channels() {
 		onSuccess: invalidate,
 	});
 	return (
-		<section className="space-y-3">
+		<FormSection
+			title="Channels"
+			description="Where alerts are delivered. Config values are write-only and never shown back."
+		>
 			<div className="flex items-center justify-between">
-				<h2 className="font-medium">Channels</h2>
+				<span className="text-sm text-muted-foreground">
+					{list.data ? `${channels.length} channel(s)` : null}
+				</span>
 				<Button onClick={() => setEditing("new")}>Add channel</Button>
 			</div>
-			<Table>
-				<TableHeader>
-					<TableRow>
-						<TableHead>Name</TableHead>
-						<TableHead>Type</TableHead>
-						<TableHead>Fingerprint</TableHead>
-						<TableHead>Rules</TableHead>
-						<TableHead>Projects</TableHead>
-						<TableHead />
-					</TableRow>
-				</TableHeader>
-				<TableBody>
-					{(list.data?.data ?? []).map((c) => (
-						<TableRow key={c.id}>
-							<TableCell>
-								{c.name}
-								{c.enabled ? "" : " (disabled)"}
-							</TableCell>
-							<TableCell>
-								{c.type}
-								{c.chat_id ? ` · ${c.chat_id}` : ""}
-							</TableCell>
-							<TableCell className="font-mono">
-								{c.config_fingerprint}
-							</TableCell>
-							<TableCell>
-								{c.rules.length ? c.rules.join(", ") : "All"}
-							</TableCell>
-							<TableCell>
-								{c.project_ids.length ? c.project_ids.length : "All"}
-							</TableCell>
-							<TableCell className="space-x-2 text-right">
-								<Button
-									size="sm"
-									variant="outline"
-									onClick={() => test.mutate(c.id)}
-								>
-									Send test
-								</Button>
-								<Button
-									size="sm"
-									variant="outline"
-									onClick={() => toggle.mutate(c)}
-								>
-									{c.enabled ? "Disable" : "Enable"}
-								</Button>
-								<Button
-									size="sm"
-									variant="outline"
-									onClick={() => setEditing(c)}
-								>
-									Edit
-								</Button>
-								<Button
-									size="sm"
-									variant="destructive"
-									onClick={() => setDeleting(c)}
-								>
-									Delete
-								</Button>
-								{results[c.id] && (
-									<span
-										className={
-											results[c.id].ok ? "text-green-800" : "text-red-700"
-										}
-									>
-										{results[c.id].ok
-											? "Sent"
-											: `Failed: ${results[c.id].error}`}
-									</span>
-								)}
-							</TableCell>
+			<DataState
+				pending={list.isPending}
+				error={list.error}
+				hasData={list.data !== undefined}
+				retrying={list.isRefetching}
+				onRetry={() => void list.refetch()}
+			>
+				<Table>
+					<TableHeader>
+						<TableRow>
+							<TableHead>Name</TableHead>
+							<TableHead>Type</TableHead>
+							<TableHead>Fingerprint</TableHead>
+							<TableHead>Rules</TableHead>
+							<TableHead>Projects</TableHead>
+							<TableHead />
 						</TableRow>
-					))}
-				</TableBody>
-			</Table>
+					</TableHeader>
+					<TableBody>
+						{channels.map((c) => (
+							<TableRow key={c.id}>
+								<TableCell>
+									{c.name}
+									{c.enabled ? "" : " (disabled)"}
+								</TableCell>
+								<TableCell>
+									{c.type}
+									{c.chat_id ? ` · ${c.chat_id}` : ""}
+								</TableCell>
+								<TableCell className="font-mono">
+									{c.config_fingerprint}
+								</TableCell>
+								<TableCell>
+									{c.rules.length ? c.rules.join(", ") : "All"}
+								</TableCell>
+								<TableCell>
+									{c.project_ids.length ? c.project_ids.length : "All"}
+								</TableCell>
+								<TableCell className="space-x-2 text-right">
+									<Button
+										size="sm"
+										variant="outline"
+										onClick={() => test.mutate(c.id)}
+									>
+										Send test
+									</Button>
+									<Button
+										size="sm"
+										variant="outline"
+										onClick={() => toggle.mutate(c)}
+									>
+										{c.enabled ? "Disable" : "Enable"}
+									</Button>
+									<Button
+										size="sm"
+										variant="outline"
+										onClick={() => setEditing(c)}
+									>
+										Edit
+									</Button>
+									<Button
+										size="sm"
+										variant="destructive"
+										onClick={() => setDeleting(c)}
+									>
+										Delete
+									</Button>
+									{results[c.id] && (
+										<span
+											className={
+												results[c.id].ok ? "text-success" : "text-failure"
+											}
+										>
+											{results[c.id].ok
+												? "Sent"
+												: `Failed: ${results[c.id].error}`}
+										</span>
+									)}
+								</TableCell>
+							</TableRow>
+						))}
+					</TableBody>
+				</Table>
+			</DataState>
 			{editing && (
 				<AlertChannelDialog
 					channel={editing === "new" ? undefined : editing}
@@ -216,13 +253,16 @@ function Channels() {
 					description="Its notification history is deleted too."
 					confirmLabel="Delete"
 					onOpenChange={(o) => !o && setDeleting(null)}
-					onConfirm={async () => {
-						await api.delete(`/alert-channels/${deleting.id}`);
+					onConfirm={async (reason) => {
+						await api.delete(
+							`/alert-channels/${deleting.id}`,
+							reason ? { reason } : undefined,
+						);
 						setDeleting(null);
 						invalidate();
 					}}
 				/>
 			)}
-		</section>
+		</FormSection>
 	);
 }

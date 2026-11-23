@@ -1,5 +1,5 @@
 {
-	"$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+	"$schema": "https://biomejs.dev/schemas/2.6.8/schema.json",
 	"files": {
 		"includes": [
 			"**",
@@ -10,7 +10,9 @@
 			"!**/routeTree.gen.ts",
 			"!apps/dashboard/src/components/ui",
 			"!**/worker-configuration.d.ts",
-			"!pnpm-lock.yaml"
+			"!pnpm-lock.yaml",
+			"!**/*.md",
+			"!apps/gateway/migrations/meta"
 		]
 	},
 	"vcs": {
@@ -20,6 +22,11 @@
 	},
 	"formatter": {
 		"enabled": true
+	},
+	"css": {
+		"parser": {
+			"tailwindDirectives": true
+		}
 	},
 	"linter": {
 		"enabled": true

@@ -14,11 +14,20 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { api } from "@/lib/api";
+import { api, projectScopedPath } from "@/lib/api";
 import { useCan } from "@/lib/permissions";
-import { qk } from "@/lib/queries/keys";
+import { invalidateDeliveryViews } from "@/lib/queries/invalidate-delivery-views";
+import { invalidateEndpointViews } from "@/lib/queries/invalidate-endpoint-views";
 
-type Open = null | "edit" | "pause" | "resume" | "disable" | "test" | "rotate";
+type Open =
+	| null
+	| "edit"
+	| "pause"
+	| "resume"
+	| "disable"
+	| "enable"
+	| "test"
+	| "rotate";
 
 export function DestinationActions({
 	destination: d,
@@ -26,15 +35,22 @@ export function DestinationActions({
 	destination: Destination;
 }) {
 	const qc = useQueryClient();
+	const path = (suffix = "") =>
+		projectScopedPath(`/destinations/${d.id}${suffix}`, d.project_id);
 	const canConfig = useCan("config.write");
 	const canOperate = useCan("destinations.operate");
 	const [open, setOpen] = useState<Open>(null);
 	const [secret, setSecret] = useState<string | null>(null);
 	if (!canConfig && !canOperate) return null;
 	const close = (o: boolean) => {
+		/* istanbul ignore else -- @preserve */
 		if (!o) setOpen(null);
 	};
-	const refresh = () => qc.invalidateQueries({ queryKey: qk.destinations.all });
+	const refresh = () =>
+		Promise.all([
+			invalidateEndpointViews(qc, "destination", d.project_id),
+			invalidateDeliveryViews(qc, d.project_id),
+		]);
 	return (
 		// biome-ignore lint/a11y/noStaticElementInteractions: only stops clicks and keys from bubbling to the clickable table row; the menu trigger inside is the interactive element.
 		<div
@@ -78,10 +94,20 @@ export function DestinationActions({
 							Disable
 						</DropdownMenuItem>
 					)}
+					{canConfig && d.status === "disabled" && (
+						<DropdownMenuItem onSelect={() => setOpen("enable")}>
+							Enable
+						</DropdownMenuItem>
+					)}
 				</DropdownMenuContent>
 			</DropdownMenu>
 			{open === "edit" && (
-				<DestinationFormDialog open onOpenChange={close} destination={d} />
+				<DestinationFormDialog
+					open
+					onOpenChange={close}
+					destination={d}
+					projectId={d.project_id}
+				/>
 			)}
 			<ConfirmDialog
 				open={open === "pause"}
@@ -90,7 +116,7 @@ export function DestinationActions({
 				description="New and retrying deliveries are held as paused until you resume."
 				confirmLabel="Pause"
 				onConfirm={async (reason) => {
-					await api.post(`/destinations/${d.id}/pause`, { reason });
+					await api.post(path("/pause"), { reason });
 					await refresh();
 				}}
 			/>
@@ -101,7 +127,7 @@ export function DestinationActions({
 				description="Paused deliveries are enqueued again."
 				confirmLabel="Resume"
 				onConfirm={async (reason) => {
-					await api.post(`/destinations/${d.id}/resume`, { reason });
+					await api.post(path("/resume"), { reason });
 					await refresh();
 				}}
 			/>
@@ -113,8 +139,22 @@ export function DestinationActions({
 				confirmLabel="Disable"
 				destructive
 				onConfirm={async (reason) => {
-					await api.patch(`/destinations/${d.id}`, {
+					await api.patch(path(), {
 						status: "disabled",
+						reason,
+					});
+					await refresh();
+				}}
+			/>
+			<ConfirmDialog
+				open={open === "enable"}
+				onOpenChange={close}
+				title={`Enable ${d.name}?`}
+				description="New events are delivered to this destination again. Deliveries that already failed stay failed; replay them from Failures."
+				confirmLabel="Enable"
+				onConfirm={async (reason) => {
+					await api.patch(path(), {
+						status: "active",
 						reason,
 					});
 					await refresh();
@@ -124,12 +164,15 @@ export function DestinationActions({
 				open={open === "test"}
 				onOpenChange={close}
 				destinationId={d.id}
+				projectId={d.project_id}
 			/>
 			<RotateSecretDialog
 				open={open === "rotate"}
 				onOpenChange={close}
 				resource="destination"
 				id={d.id}
+				projectId={d.project_id}
+				name={d.name}
 				onRotated={setSecret}
 			/>
 			<SecretRevealDialog
