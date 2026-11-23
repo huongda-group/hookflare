@@ -36,33 +36,47 @@ test("exit criteria: configure everything from the UI, then see the DLQ", async 
 	await page
 		.getByLabel("Confirm password", { exact: true })
 		.fill("e2e-password-1234");
-	await page.getByLabel("Setup token", { exact: true }).fill("e2e-setup-token");
 	const createAdmin = page.getByRole("button", {
 		name: "Create admin account",
 	});
 	await passTurnstile(page, createAdmin);
 	await createAdmin.click();
-	await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+	await expect(page).toHaveURL(/\/projects$/);
+	const blocked = await page.request.get("/api/admin/v1/overview");
+	expect(blocked.status()).toBe(409);
+	expect(await blocked.json()).toEqual({ error: "project_required" });
+	await page.goto("/events");
+	await expect(page).toHaveURL(/\/projects$/);
 
-	const slug = `e2e-${Date.now().toString(36)}`;
+	const run = `e2e-${Date.now().toString(36)}`;
+	const projectName = `E2E ${run}`;
 
 	// Exit criterion 2: project → destination → source, UI only.
-	await page.goto("/projects");
 	await page
 		.locator("header", { has: page.getByRole("heading", { name: "Projects" }) })
 		.getByRole("button", { name: "New project" })
 		.click();
-	await page.getByLabel("Name").fill(`E2E ${slug}`);
-	await page.getByLabel("Slug").fill(slug);
+	await page.getByLabel("Name").fill(projectName);
+	const projectCreated = page.waitForResponse(
+		(r) =>
+			new URL(r.url()).pathname === "/api/admin/v1/projects" &&
+			r.request().method() === "POST" &&
+			r.status() === 201,
+	);
 	await page.getByRole("button", { name: "Create" }).click();
-	await expect(page.getByText(`E2E ${slug}`)).toBeVisible();
+	const project = await (await projectCreated).json();
+	await expect(page.getByRole("link", { name: projectName })).toHaveAttribute(
+		"href",
+		`/projects/${project.id}`,
+	);
+	await expect(page.getByRole("link", { name: "Overview" })).toBeVisible();
 
 	await page.goto("/endpoints?tab=destinations");
+	const picker = page.getByRole("combobox", { name: "Active project" });
+	await expect(picker).toHaveText(projectName);
 	// Header and empty-state buttons both open the same dialog.
 	await page.getByRole("button", { name: "New destination" }).first().click();
-	await page.getByRole("combobox", { name: "Project", exact: true }).click();
-	await page.getByRole("option", { name: `E2E ${slug}` }).click();
-	await page.getByLabel("Name").fill(`Dest ${slug}`);
+	await page.getByLabel("Name").fill(`Dest ${run}`);
 	await page.getByLabel("URL").fill("https://example.com/hooks");
 	await page.getByRole("button", { name: "Create" }).click();
 	const destSecret = page.getByText(/^whsec_/);
@@ -72,24 +86,68 @@ test("exit criteria: configure everything from the UI, then see the DLQ", async 
 
 	await page.goto("/endpoints?tab=sources");
 	await page.getByRole("button", { name: "New source" }).first().click();
-	await page.getByRole("combobox", { name: "Project", exact: true }).click();
-	await page.getByRole("option", { name: `E2E ${slug}` }).click();
 	await page
 		.getByRole("combobox", { name: "Destination", exact: true })
 		.click();
-	await page.getByRole("option", { name: `Dest ${slug}` }).click();
-	await page.getByLabel("Name").fill(`Src ${slug}`);
+	await page.getByRole("option", { name: `Dest ${run}` }).click();
+	await page.getByLabel("Name").fill(`Src ${run}`);
 	await page.getByRole("button", { name: "Create" }).click();
-	const row = page.getByRole("row", { name: new RegExp(`Src ${slug}`) });
+	const row = page.getByRole("row", { name: new RegExp(`Src ${run}`) });
 	await expect(row.getByText(/\/in\/src_/)).toBeVisible();
 
 	// Collect the IDs the UI created, via the same admin API the UI uses.
 	const api = (path: string) =>
 		page.request.get(`/api/admin/v1${path}`).then((r) => r.json());
-	const projects = await api("/projects?limit=200");
-	const project = projects.data.find((p: { slug: string }) => p.slug === slug);
 	const dest = (await api(`/destinations?project_id=${project.id}`)).data[0];
 	const src = (await api(`/sources?project_id=${project.id}`)).data[0];
+
+	// Seed a second pipeline through the real API and verify the list boundary.
+	const origin = new URL(page.url()).origin;
+	const create = async (path: string, data: Record<string, unknown>) => {
+		const res = await page.request.post(`/api/admin/v1${path}`, {
+			headers: { Origin: origin },
+			data,
+		});
+		expect(res.status()).toBe(201);
+		return res.json();
+	};
+	const other = await create("/projects", { name: `Other ${run}` });
+	const otherDest = await create("/destinations", {
+		project_id: other.id,
+		name: `Other destination ${run}`,
+		url: "https://example.com/other",
+	});
+	await create("/sources", {
+		project_id: other.id,
+		destination_id: otherDest.id,
+		name: `Other source ${run}`,
+		auth_type: "none",
+		auth_config: {},
+	});
+	await page.reload();
+	await picker.click();
+	await page.getByRole("option", { name: `Other ${run}`, exact: true }).click();
+	await expect(
+		page.getByRole("link", { name: `Other source ${run}`, exact: true }),
+	).toBeVisible();
+	await expect(
+		page.getByRole("link", { name: `Src ${run}`, exact: true }),
+	).toHaveCount(0);
+	await page.getByRole("tab", { name: "Destinations" }).click();
+	await expect(
+		page.getByRole("link", { name: `Other destination ${run}`, exact: true }),
+	).toBeVisible();
+	await expect(
+		page.getByRole("link", { name: `Dest ${run}`, exact: true }),
+	).toHaveCount(0);
+	await picker.click();
+	await page.getByRole("option", { name: projectName, exact: true }).click();
+	await expect(
+		page.getByRole("link", { name: `Dest ${run}`, exact: true }),
+	).toBeVisible();
+	await expect(
+		page.getByRole("link", { name: `Other destination ${run}`, exact: true }),
+	).toHaveCount(0);
 
 	// Exit criterion 1: a dead delivery appears under Failures › Dead Letter.
 	const { deliveryId, eventId } = seedDeadDelivery({
@@ -106,7 +164,9 @@ test("exit criteria: configure everything from the UI, then see the DLQ", async 
 		page.getByRole("row", { name: new RegExp(deliveryId) }),
 	).toBeVisible();
 	await page.getByRole("link", { name: eventId }).click();
-	await expect(page).toHaveURL(new RegExp(`/events/${eventId}$`));
+	await expect(page).toHaveURL(
+		new RegExp(`/events/${eventId}\\?project_id=${project.id}$`),
+	);
 	// Scoped to this delivery's timeline: "dead" also appears in badges elsewhere.
 	const timeline = page.locator("section").filter({ hasText: deliveryId });
 	await expect(timeline.locator('li[data-step="dead"]')).toBeVisible();
@@ -132,7 +192,12 @@ test("exit criteria: configure everything from the UI, then see the DLQ", async 
 	expect(deep.headers()["content-type"]).toContain("text/html");
 
 	// Log out and back in as the onboarded admin.
-	await page.getByRole("button", { name: "Log out" }).click();
+	await page.getByRole("button", { name: /^Account:/ }).click();
+	await page.getByRole("menuitem", { name: "Log out" }).click();
+	await page
+		.getByRole("dialog", { name: "Log out?" })
+		.getByRole("button", { name: "Log out" })
+		.click();
 	await expect(page).toHaveURL(/\/login/);
 	await page.getByLabel("Username", { exact: true }).fill("e2e-admin");
 	await page.getByLabel("Password", { exact: true }).fill("e2e-password-1234");

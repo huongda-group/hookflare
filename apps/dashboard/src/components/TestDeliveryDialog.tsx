@@ -1,6 +1,7 @@
 import type { TestDelivery } from "@hookflare/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { FormField } from "@/components/FormField";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -10,9 +11,8 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { api } from "@/lib/api";
+import { api, projectScopedPath } from "@/lib/api";
 import { errorText } from "@/lib/forms";
 import { qk } from "@/lib/queries/keys";
 
@@ -22,10 +22,12 @@ export function TestDeliveryDialog({
 	open,
 	onOpenChange,
 	destinationId,
+	projectId,
 }: {
 	open: boolean;
 	onOpenChange: (o: boolean) => void;
 	destinationId: string;
+	projectId: string;
 }) {
 	const qc = useQueryClient();
 	const [text, setText] = useState("");
@@ -33,12 +35,12 @@ export function TestDeliveryDialog({
 	const m = useMutation({
 		mutationFn: (payload: unknown) =>
 			api.post<Omit<TestDelivery, "destination_id" | "actor" | "started_at">>(
-				`/destinations/${destinationId}/test`,
+				projectScopedPath(`/destinations/${destinationId}/test`, projectId),
 				payload === undefined ? {} : { payload },
 			),
 		onSuccess: () =>
 			void qc.invalidateQueries({
-				queryKey: qk.destinations.tests(destinationId),
+				queryKey: qk.destinations.tests(destinationId, projectId),
 			}),
 	});
 	const send = () => {
@@ -70,15 +72,16 @@ export function TestDeliveryDialog({
 						Signed like a real delivery. Leave empty for the default test event.
 					</DialogDescription>
 				</DialogHeader>
-				<Label htmlFor="test-payload">JSON payload (optional)</Label>
-				<Textarea
-					id="test-payload"
-					className="font-mono"
-					rows={8}
-					value={text}
-					onChange={(e) => setText(e.target.value)}
-				/>
-				{invalid && <p className="text-sm text-failure">{invalid}</p>}
+				<FormField htmlFor="test-payload" label="JSON payload (optional)">
+					<Textarea
+						id="test-payload"
+						className="font-mono"
+						rows={8}
+						value={text}
+						onChange={(e) => setText(e.target.value)}
+					/>
+					{invalid && <p className="text-sm text-failure">{invalid}</p>}
+				</FormField>
 				{m.error && (
 					<p className="text-sm text-failure">{errorText(m.error)}</p>
 				)}

@@ -59,16 +59,19 @@ export function AuthLayout({
 							</div>
 							<ol
 								aria-labelledby="auth-delivery-path"
-								className="grid grid-cols-3 gap-2 px-4 py-4 xl:px-5"
+								className="grid grid-cols-3 gap-x-(--step-gap) px-4 py-4 text-center [--step-gap:3.5rem] xl:px-5"
 							>
 								{deliverySteps.map(({ label, detail, Icon }, index) => (
 									<li key={label} className="min-w-0">
-										<div aria-hidden="true" className="flex items-center gap-2">
+										<div
+											aria-hidden="true"
+											className="relative flex justify-center"
+										>
 											<span className="grid size-9 shrink-0 place-items-center rounded-md bg-info-surface text-info">
 												<Icon className="size-4" />
 											</span>
 											{index < deliverySteps.length - 1 && (
-												<span className="flex min-w-0 flex-1 items-center text-muted-foreground">
+												<span className="absolute top-1/2 right-[calc(-50%-var(--step-gap)+1.5rem)] left-[calc(50%+1.5rem)] flex -translate-y-1/2 items-center text-muted-foreground">
 													<span className="h-px flex-1 bg-border" />
 													<ArrowRight className="size-3 shrink-0" />
 												</span>

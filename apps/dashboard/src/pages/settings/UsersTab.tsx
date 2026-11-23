@@ -5,6 +5,7 @@ import { ApiTokensDialog } from "@/components/ApiTokensDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CursorTable } from "@/components/CursorTable";
 import { DirtyFormGuard } from "@/components/DirtyFormGuard";
+import { FormField } from "@/components/FormField";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TimeText } from "@/components/TimeText";
 import { Button } from "@/components/ui/button";
@@ -16,7 +17,6 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
 	Select,
 	SelectContent,
@@ -79,28 +79,32 @@ export function UsersTab() {
 		<div className="space-y-4">
 			<DirtyFormGuard dirty={username !== "" || password !== ""}>
 				{() => (
-					<div className="flex items-end gap-3">
-						<div>
-							<Label htmlFor="u-username">Username</Label>
+					<div className="flex flex-wrap items-end gap-3">
+						<FormField
+							className="w-56 max-w-full"
+							htmlFor="u-username"
+							label="Username"
+						>
 							<Input
 								id="u-username"
-								className="w-56"
 								autoComplete="off"
 								value={username}
 								onChange={(e) => setUsername(e.target.value)}
 							/>
-						</div>
-						<div>
-							<Label htmlFor="u-password">Password</Label>
+						</FormField>
+						<FormField
+							className="w-56 max-w-full"
+							htmlFor="u-password"
+							label="Password"
+						>
 							<Input
 								id="u-password"
 								type="password"
-								className="w-56"
 								autoComplete="new-password"
 								value={password}
 								onChange={(e) => setPassword(e.target.value)}
 							/>
-						</div>
+						</FormField>
 						<Select value={role} onValueChange={(v) => setRole(v as Role)}>
 							<SelectTrigger className="w-36" aria-label="Role">
 								<SelectValue />
@@ -329,8 +333,7 @@ function ResetPasswordDialog({
 					</>
 				) : (
 					<>
-						<div>
-							<Label htmlFor="reset-password">New password</Label>
+						<FormField htmlFor="reset-password" label="New password">
 							<Input
 								id="reset-password"
 								type="password"
@@ -338,7 +341,7 @@ function ResetPasswordDialog({
 								value={password}
 								onChange={(e) => setPassword(e.target.value)}
 							/>
-						</div>
+						</FormField>
 						{error && <p className="text-sm text-failure">{error}</p>}
 						<DialogFooter>
 							<Button

@@ -12,7 +12,7 @@
  * for an admin user (the smoke creates projects, destinations, and
  * sources through `config.manage`-gated routes), sent as
  * `authorization: Bearer <token>`.
- * @typedef {{ url: string, token: string, sinkUrl: string }} SmokeEnv
+ * @typedef {{ url: string, token: string, sinkUrl: string, projectId?: string }} SmokeEnv
  */
 
 /**
@@ -30,7 +30,9 @@ export function smokeEnv(env = process.env, { urlVar = "HOOKFLARE_URL" } = {}) {
 	if (!url || !token || !sinkUrl) {
 		return null;
 	}
-	return { url, token, sinkUrl };
+	const projectId =
+		env[`${urlVar.replace(/_URL$/, "")}_SMOKE_PROJECT_ID`]?.trim();
+	return { url, token, sinkUrl, ...(projectId ? { projectId } : {}) };
 }
 
 /**
@@ -312,9 +314,9 @@ const PAGE = 100;
 
 /**
  * Build the HTTP SmokeApi for a deployed gateway plus sink Worker. The
- * project (by slug), destination, and source (by name `smoke`) are reused
- * across runs: the destination is repointed at the run's sink URL, and the
- * source gets the run's HMAC secret through rotate-secret.
+ * project (by configured ID or unique name), destination, and source are
+ * reused across runs: the destination is repointed at the run's sink URL,
+ * and the source gets the run's HMAC secret through rotate-secret.
  * @param {SmokeEnv} env
  * @param {typeof fetch} [fetchFn]
  * @returns {SmokeApi}
@@ -351,15 +353,17 @@ export function httpSmokeApi(env, fetchFn = fetch) {
 	}
 
 	/**
-	 * First row of an admin list that matches `pick`, following
-	 * `next_cursor` at the API's maximum page size. Null when none match.
+	 * First matching row across pages, or null. When `unique` is set,
+	 * scan subsequent pages too and reject a second match.
 	 * @param {string} kind e.g. `projects`.
 	 * @param {Record<string, string>} filters
 	 * @param {(row: any) => boolean} pick
+	 * @param {boolean} [unique]
 	 * @returns {Promise<any | null>}
 	 */
-	async function findListed(kind, filters, pick) {
+	async function findListed(kind, filters, pick, unique = false) {
 		let cursor = null;
+		let found = null;
 		do {
 			const params = new URLSearchParams({ ...filters, limit: String(PAGE) });
 			if (cursor !== null) {
@@ -369,22 +373,40 @@ export function httpSmokeApi(env, fetchFn = fetch) {
 				`list ${kind}`,
 				await fetchFn(`${base}/api/admin/v1/${kind}?${params}`, { headers }),
 			);
-			const found = (page.data ?? []).find(pick);
-			if (found) {
-				return found;
+			for (const row of page.data ?? []) {
+				if (!pick(row)) continue;
+				if (!unique) return row;
+				if (found !== null) {
+					throw new Error(
+						`smoke: multiple ${kind} match; configure the dedicated smoke project ID`,
+					);
+				}
+				found = row;
 			}
 			cursor = page.next_cursor ?? null;
 		} while (cursor !== null);
-		return null;
+		return found;
 	}
 
 	return {
 		sinkUrl,
 		async ensureProject(name) {
+			if (env.projectId) {
+				const project = await readJson(
+					`get project ${env.projectId}`,
+					await fetchFn(
+						`${base}/api/admin/v1/projects/${encodeURIComponent(env.projectId)}`,
+						{ headers },
+					),
+				);
+				projectId = project.id;
+				return { id: project.id };
+			}
 			const existing = await findListed(
 				"projects",
 				{},
-				(project) => project.slug === name || project.name === name,
+				(project) => project.name === name,
+				true,
 			);
 			if (existing) {
 				projectId = existing.id;
@@ -395,7 +417,7 @@ export function httpSmokeApi(env, fetchFn = fetch) {
 				await fetchFn(`${base}/api/admin/v1/projects`, {
 					method: "POST",
 					headers,
-					body: JSON.stringify({ name, slug: name }),
+					body: JSON.stringify({ name }),
 				}),
 			);
 			projectId = created.id;

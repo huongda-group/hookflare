@@ -3,12 +3,12 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { z } from "zod";
 import { CursorTable } from "@/components/CursorTable";
+import { FormField } from "@/components/FormField";
 import { IdText } from "@/components/IdText";
 import { JsonViewer } from "@/components/JsonViewer";
 import { PageHeader } from "@/components/PageHeader";
 import { TimeText } from "@/components/TimeText";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { useCan } from "@/lib/permissions";
 import { qk } from "@/lib/queries/keys";
@@ -61,8 +61,7 @@ export function AuditPage({
 	});
 	if (!allowed) return <p>The audit log requires the admin role.</p>;
 	const filter = (key: keyof AuditSearch, label: string) => (
-		<div>
-			<Label htmlFor={`a-${key}`}>{label}</Label>
+		<FormField htmlFor={`a-${key}`} label={label}>
 			<Input
 				id={`a-${key}`}
 				className="w-48"
@@ -71,13 +70,13 @@ export function AuditPage({
 				defaultValue={search[key]}
 				onBlur={(e) => setSearch({ [key]: e.target.value || undefined })}
 			/>
-		</div>
+		</FormField>
 	);
 	return (
 		<div className="space-y-4">
 			<PageHeader
 				title="Audit"
-				description="Admin-only: who changed what, with the redacted diff behind each change."
+				description="Deployment-wide audit trail. Admins can see who changed what and review redacted changes."
 			>
 				<div className="flex flex-wrap gap-3">
 					{filter("actor", "Actor")}

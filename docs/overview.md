@@ -10,6 +10,8 @@ Overview summarizes webhook intake, delivery outcomes, active backlog, and alert
 
 UI `/` uses GET `/api/admin/v1/overview`; destination statistics use GET `/api/admin/v1/destinations/stats`. Read permission is `events.read`.
 
+Dashboard totals, recent events, and incident counts are for the active project. The dashboard sends `alert_scope=project` with `project_id` to count only that project's open incidents. For API clients, omitting `alert_scope` preserves legacy behavior: a `project_id` filters project incidents but also counts deployment incidents. Using `alert_scope=project` without `project_id` returns `400`.
+
 The Needs attention section comes before Delivery performance: current open-alert count and destination failures are separate signals. Destination failures are **historical in the selected period**, never unresolved-current counts; Investigate links carry destination, project (when scoped), and `from`/`to`. An empty snapshot makes no whole-system health claim.
 
 Reporting groups received, completed, success rate, terminal failures, a data-driven traffic chart, and a separate current-state strip. `pending + queued + in_flight` is the displayed Pending value. Range controls update the query and chart; daily grouping outside 24h uses local day labels. `generated_at` is API response generation time, not rollup execution time. Recent events show source → latest destination, latest-delivery status, and received time together on narrow screens, with exact ID fallback when names cannot be resolved. Project detail reuses the Overview content; loading, retry, and no-activity states remain distinct.

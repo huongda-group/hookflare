@@ -1,3 +1,4 @@
+import { PASSWORD_MIN_LENGTH } from "@hookflare/shared";
 import { useState } from "react";
 import { PasswordField } from "@/components/PasswordField";
 import { Button } from "@/components/ui/button";
@@ -16,14 +17,16 @@ import { changePassword } from "@/lib/queries/auth";
 export function ChangePasswordDialog({
 	open,
 	onOpenChange,
+	onCloseAutoFocus,
 }: {
 	open: boolean;
 	onOpenChange: (o: boolean) => void;
+	onCloseAutoFocus: (event: Event) => void;
 }) {
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			{/* Unmounts on close, so every open starts with empty fields. */}
-			<DialogContent>
+			<DialogContent onCloseAutoFocus={onCloseAutoFocus}>
 				<ChangePasswordForm onOpenChange={onOpenChange} />
 			</DialogContent>
 		</Dialog>
@@ -42,11 +45,11 @@ function ChangePasswordForm({
 	const [saved, setSaved] = useState(false);
 	const [busy, setBusy] = useState(false);
 
-	// Client-side only; the server re-checks length (12–256, never trimmed),
+	// Client-side only; the server re-checks length (never trimmed),
 	// equality with the username, and the current password.
 	const clientError =
-		next.length > 0 && next.length < 12
-			? "New password must be at least 12 characters"
+		next.length > 0 && next.length < PASSWORD_MIN_LENGTH
+			? `New password must be at least ${PASSWORD_MIN_LENGTH} characters`
 			: confirm && next !== confirm
 				? "Passwords do not match"
 				: null;
@@ -90,33 +93,27 @@ function ChangePasswordForm({
 			<DialogHeader>
 				<DialogTitle>Change password</DialogTitle>
 			</DialogHeader>
-			<div className="space-y-2">
-				<PasswordField
-					id="pw-current"
-					label="Current password"
-					autoComplete="current-password"
-					value={current}
-					onChange={(e) => setCurrent(e.target.value)}
-				/>
-			</div>
-			<div className="space-y-2">
-				<PasswordField
-					id="pw-new"
-					label="New password"
-					autoComplete="new-password"
-					value={next}
-					onChange={(e) => setNext(e.target.value)}
-				/>
-			</div>
-			<div className="space-y-2">
-				<PasswordField
-					id="pw-confirm"
-					label="Confirm new password"
-					autoComplete="new-password"
-					value={confirm}
-					onChange={(e) => setConfirm(e.target.value)}
-				/>
-			</div>
+			<PasswordField
+				id="pw-current"
+				label="Current password"
+				autoComplete="current-password"
+				value={current}
+				onChange={(e) => setCurrent(e.target.value)}
+			/>
+			<PasswordField
+				id="pw-new"
+				label="New password"
+				autoComplete="new-password"
+				value={next}
+				onChange={(e) => setNext(e.target.value)}
+			/>
+			<PasswordField
+				id="pw-confirm"
+				label="Confirm new password"
+				autoComplete="new-password"
+				value={confirm}
+				onChange={(e) => setConfirm(e.target.value)}
+			/>
 			{(clientError ?? error) && (
 				<p
 					data-field-error

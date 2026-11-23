@@ -78,6 +78,9 @@ export function NamedResourceLink({
 	return (
 		<Link
 			to={href}
+			search={
+				kind !== "project" && projectId ? { project_id: projectId } : undefined
+			}
 			className="font-medium hover:underline"
 			onClick={(e) => e.stopPropagation()}
 		>

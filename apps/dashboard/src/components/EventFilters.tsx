@@ -1,13 +1,13 @@
 import { DELIVERY_STATUS_VALUES } from "@hookflare/shared";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { FormField } from "@/components/FormField";
 import { ResourcePicker } from "@/components/ResourcePicker";
 import { TimeRangeFilter } from "@/components/TimeRangeFilter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import type { EventsSearch } from "@/pages/EventsPage";
 import { cn } from "@/lib/utils";
+import type { EventsSearch } from "@/pages/EventsPage";
 
 /**
  * Committed filters stay in URL state; the text draft inside is local only and
@@ -57,7 +57,11 @@ export function EventFilters({
 		const v = provider.trim();
 		setHint(null);
 		if (v.startsWith("evt_")) {
-			void navigate({ to: "/events/$eventId", params: { eventId: v } });
+			void navigate({
+				to: "/events/$eventId",
+				params: { eventId: v },
+				search: { project_id: value.project_id },
+			});
 			return;
 		}
 		if (v && !value.source_id) {
@@ -119,8 +123,7 @@ export function EventFilters({
 	return (
 		<div className="space-y-3">
 			<div className="flex flex-wrap items-end gap-3">
-				<div className="min-w-52 flex-1">
-					<Label htmlFor="f-q">Search</Label>
+				<FormField className="min-w-52 flex-1" htmlFor="f-q" label="Search">
 					<Input
 						id="f-q"
 						placeholder="evt_… or provider event ID"
@@ -129,7 +132,7 @@ export function EventFilters({
 						onKeyDown={(e) => e.key === "Enter" && commit()}
 						aria-describedby="events-search-help"
 					/>
-				</div>
+				</FormField>
 				<ResourcePicker
 					kind="source"
 					projectId={value.project_id}
@@ -148,8 +151,8 @@ export function EventFilters({
 				/>
 			</div>
 			<p id="events-search-help" className="text-xs text-muted-foreground">
-				Event IDs starting with evt_ open directly. Provider event ID search
-				is an exact match and needs a source selected first.
+				Event IDs starting with evt_ open directly. Provider event ID search is
+				an exact match and needs a source selected first.
 			</p>
 			<fieldset className="flex flex-wrap gap-2" aria-label="Status">
 				{DELIVERY_STATUS_VALUES.map((s) => (
@@ -170,8 +173,7 @@ export function EventFilters({
 				))}
 			</fieldset>
 			<div className="flex flex-wrap items-end gap-3">
-				<div>
-					<Label htmlFor="f-http">HTTP status</Label>
+				<FormField htmlFor="f-http" label="HTTP status">
 					<Input
 						id="f-http"
 						type="number"
@@ -182,7 +184,7 @@ export function EventFilters({
 						aria-invalid={httpError ? true : undefined}
 						aria-describedby={httpError ? "f-http-error" : undefined}
 					/>
-				</div>
+				</FormField>
 				<TimeRangeFilter
 					from={from}
 					to={to}
@@ -197,9 +199,7 @@ export function EventFilters({
 					{httpError}
 				</p>
 			)}
-			{hint && (
-				<p className="text-sm text-warning">{hint}</p>
-			)}
+			{hint && <p className="text-sm text-warning">{hint}</p>}
 			<div className="flex flex-wrap gap-2">
 				<Button type="button" onClick={commit}>
 					Apply filters

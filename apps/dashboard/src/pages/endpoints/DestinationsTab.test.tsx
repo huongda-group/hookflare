@@ -60,8 +60,6 @@ describe("Destinations tab", () => {
 		await user.click(
 			await screen.findByRole("button", { name: "New destination" }),
 		);
-		await user.click(screen.getByLabelText("Project"));
-		await user.click(await screen.findByRole("option", { name: "Payments" }));
 		await user.type(screen.getByLabelText("Name"), "Billing API");
 		await user.type(
 			screen.getByLabelText("URL"),
@@ -87,8 +85,6 @@ describe("Destinations tab", () => {
 		await user.click(
 			await screen.findByRole("button", { name: "New destination" }),
 		);
-		await user.click(screen.getByLabelText("Project"));
-		await user.click(await screen.findByRole("option", { name: "Payments" }));
 		await user.type(screen.getByLabelText("Name"), "Local");
 		await user.type(screen.getByLabelText("URL"), "https://10.0.0.1/hooks");
 		await user.click(screen.getByRole("button", { name: "Create" }));

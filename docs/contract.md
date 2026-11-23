@@ -37,6 +37,10 @@ A backend 2xx completes delivery. 408, 429, 5xx, timeout, and network errors are
 
 Admin bodies and responses use the shared Zod/TypeScript contracts below. Paginated endpoints expose `data` and `next_cursor`; preserve opaque cursors and reset them when filters change. On protected routes, use a [session cookie](login.md) or [Bearer token](api-tokens.md), not both (`400 ambiguous_credentials`). Cookie-authenticated mutations require a matching `Origin`. Error bodies use `error`, with validation issues where applicable. Use each feature's route document and the actual schema for exact fields, limits, and exceptions.
 
+Until at least one project exists (including a disabled project), authenticated Admin API requests return `409` with `{"error":"project_required"}` except `GET /me` and `GET` or `POST /projects`. These endpoints still enforce their existing authentication and permissions; `GET /me` returns `project_required: true` while there are no projects. The public `/auth` routes, webhook ingress, and `/healthz` are unaffected.
+
+The dashboard passes `project_id` explicitly for project-scoped data. Source and destination details, actions, and test history, event details, deliveries, payloads, and replay, and bulk failure replay accept this optional query parameter. A resource outside the requested project returns `404 not_found`; a mixed-project replay request is rejected before applying any replay. For source and destination creation, an optional query scope must match `project_id` in the body (`400` otherwise). Omitting scope preserves the unscoped API contract. Project scope does not add a project-level authorization boundary or replace existing permissions. See [alerts](alerts.md) and [overview](overview.md) for incident scoping.
+
 ## Ideas, boundaries, and open work
 
 Generated OpenAPI documentation is not currently provided.

@@ -5,6 +5,7 @@ import {
 	type AlertChannelType,
 } from "@hookflare/shared";
 import { useState } from "react";
+import { FormField } from "@/components/FormField";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -99,16 +100,14 @@ export function AlertChannelDialog({
 					<DialogTitle>{editing ? "Edit channel" : "Add channel"}</DialogTitle>
 				</DialogHeader>
 				<div className="space-y-3">
-					<div>
-						<Label htmlFor="ach-name">Name</Label>
+					<FormField htmlFor="ach-name" label="Name">
 						<Input
 							id="ach-name"
 							value={name}
 							onChange={(e) => setName(e.target.value)}
 						/>
-					</div>
-					<div>
-						<Label htmlFor="ach-type">Type</Label>
+					</FormField>
+					<FormField htmlFor="ach-type" label="Type">
 						<select
 							id="ach-type"
 							className="block w-full rounded border px-2 py-1"
@@ -122,13 +121,13 @@ export function AlertChannelDialog({
 								</option>
 							))}
 						</select>
-					</div>
+					</FormField>
 					{type === "telegram" ? (
 						<>
-							<div>
-								<Label htmlFor="ach-token">
-									{editing ? "New bot token" : "Bot token"}
-								</Label>
+							<FormField
+								htmlFor="ach-token"
+								label={editing ? "New bot token" : "Bot token"}
+							>
 								<Input
 									id="ach-token"
 									type="password"
@@ -137,21 +136,20 @@ export function AlertChannelDialog({
 									value={botToken}
 									onChange={(e) => setBotToken(e.target.value)}
 								/>
-							</div>
-							<div>
-								<Label htmlFor="ach-chat">Chat ID</Label>
+							</FormField>
+							<FormField htmlFor="ach-chat" label="Chat ID">
 								<Input
 									id="ach-chat"
 									value={chatId}
 									onChange={(e) => setChatId(e.target.value)}
 								/>
-							</div>
+							</FormField>
 						</>
 					) : (
-						<div>
-							<Label htmlFor="ach-url">
-								{editing ? "New webhook URL" : "Webhook URL"}
-							</Label>
+						<FormField
+							htmlFor="ach-url"
+							label={editing ? "New webhook URL" : "Webhook URL"}
+						>
 							<Input
 								id="ach-url"
 								type="password"
@@ -160,7 +158,7 @@ export function AlertChannelDialog({
 								value={url}
 								onChange={(e) => setUrl(e.target.value)}
 							/>
-						</div>
+						</FormField>
 					)}
 					<fieldset>
 						<legend className="text-sm font-medium">

@@ -12,6 +12,10 @@ const HEADER_NAME = /^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,100}$/;
 
 const name = z.string().trim().min(1).max(100);
 const projectId = z.string().startsWith("prj_").max(64);
+
+export const projectScopeQuery = z.object({
+	project_id: projectId.optional(),
+});
 const destinationId = z.string().startsWith("dst_").max(64);
 const url = z.url().max(2048);
 const timeoutMs = z.number().int().min(1000).max(30000);
@@ -111,7 +115,6 @@ export const listQuery = z.object({
 
 export const createProjectRequest = z.strictObject({
 	name,
-	slug: z.string().regex(/^[a-z0-9][a-z0-9-]{1,62}$/),
 	...optionalReason,
 });
 export const patchProjectRequest = z.strictObject({
@@ -200,7 +203,6 @@ export type Page<T> = { data: T[]; next_cursor: string | null };
 export type Project = {
 	id: string;
 	name: string;
-	slug: string;
 	status: (typeof PROJECT_STATUSES)[number];
 	created_at: number;
 	updated_at: number;
@@ -320,8 +322,13 @@ const queryBool = z.enum(["true", "false"]).transform((v) => v === "true");
  */
 export const USERNAME_PATTERN = /^[a-z0-9][a-z0-9._@+-]{2,63}$/;
 export const username = z.string().trim().toLowerCase().regex(USERNAME_PATTERN);
-/** 12–256 characters, no composition rules, and never trimmed (spec M7). */
-export const password = z.string().min(12).max(256);
+export const PASSWORD_MIN_LENGTH = 6;
+export const PASSWORD_MAX_LENGTH = 256;
+/** No composition rules, and never trimmed. */
+export const password = z
+	.string()
+	.min(PASSWORD_MIN_LENGTH)
+	.max(PASSWORD_MAX_LENGTH);
 
 export const loginRequest = z.strictObject({
 	/** Free-form, not `username`: legacy keys like `svc:legacy` can still log in. */
@@ -502,7 +509,12 @@ export type User = {
 	disabled_at: number | null;
 	has_password: boolean;
 };
-export type Me = { username: string; role: Role; permissions: Permission[] };
+export type Me = {
+	username: string;
+	role: Role;
+	permissions: Permission[];
+	project_required: boolean;
+};
 export type ApiToken = {
 	id: string;
 	username: string;
@@ -540,6 +552,13 @@ export const statsQuery = z.object({
 	project_id: projectId.optional(),
 	range: z.enum(STATS_RANGES).default("24h"),
 });
+
+export const overviewQuery = statsQuery
+	.extend({ alert_scope: z.literal("project").optional() })
+	.refine((v) => !v.alert_scope || v.project_id !== undefined, {
+		path: ["project_id"],
+		message: "Project alert scope requires a project",
+	});
 
 /** Same bounds as the destination policy fields (spec §7.3). */
 export const retryDefaultsSchema = z
@@ -676,10 +695,25 @@ export const patchAlertChannelRequest = z.strictObject({
 	...optionalReason,
 });
 
-export const alertsQuery = listQuery.extend({
-	status: z.enum(["open", "resolved"]).optional(),
-	rule: z.enum(ALERT_RULES).optional(),
-});
+const alertScopeFields = { scope: z.literal("deployment").optional() };
+const validAlertScope = (v: { scope?: "deployment"; project_id?: string }) =>
+	!v.scope || v.project_id === undefined;
+const alertScopeIssue = {
+	path: ["scope"],
+	message: "Deployment alert scope cannot be combined with a project",
+};
+
+export const alertScopeQuery = projectScopeQuery
+	.extend(alertScopeFields)
+	.refine(validAlertScope, alertScopeIssue);
+
+export const alertsQuery = listQuery
+	.extend({
+		...alertScopeFields,
+		status: z.enum(["open", "resolved"]).optional(),
+		rule: z.enum(ALERT_RULES).optional(),
+	})
+	.refine(validAlertScope, alertScopeIssue);
 
 export type AlertChannel = {
 	id: string;

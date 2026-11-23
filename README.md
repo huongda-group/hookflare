@@ -160,7 +160,7 @@ curl -c jar -b jar -H "origin: http://localhost:8787" -X POST $API/auth/login \
 # From here on, -b jar -H "origin: http://localhost:8787" authenticates you.
 # (Or skip the jar: -H "authorization: Bearer $HOOKFLARE_API_TOKEN" instead.)
 PROJECT=$(curl -s -b jar -H "origin: http://localhost:8787" -X POST $API/projects -H 'content-type: application/json' \
-  -d '{"name":"Shop","slug":"shop"}' | jq -r .id)
+  -d '{"name":"Shop"}' | jq -r .id)
 curl -s -b jar -H "origin: http://localhost:8787" -X POST $API/destinations -H 'content-type: application/json' \
   -d "{\"project_id\":\"$PROJECT\",\"name\":\"Backend\",\"url\":\"https://backend.example.com/hooks\"}"
 # → save signing_secret: it is shown only once

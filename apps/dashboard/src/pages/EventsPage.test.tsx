@@ -2,7 +2,7 @@ import { screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { eventSummary, project, T } from "@/test/fixtures";
-import { renderApp } from "@/test/render";
+import { chooseProject, renderApp } from "@/test/render";
 import { apiUrl, server } from "@/test/server";
 
 describe("Events", () => {
@@ -17,7 +17,9 @@ describe("Events", () => {
 		renderApp(
 			"/events?status=%5B%22dead%22%2C%22retrying%22%5D&http_status=503",
 		);
-		expect(await screen.findByRole("link", { name: "evt_1" })).toBeInTheDocument();
+		expect(
+			await screen.findByRole("link", { name: "evt_1" }),
+		).toBeInTheDocument();
 		expect(seen.getAll("status")).toEqual(["dead", "retrying"]);
 		expect(seen.get("http_status")).toBe("503");
 		expect(screen.getByText("HTTP 503")).toBeInTheDocument();
@@ -54,7 +56,9 @@ describe("Events", () => {
 		);
 		const { user } = renderApp("/events");
 		await user.click(await screen.findByRole("button", { name: "Load more" }));
-		expect(await screen.findByRole("link", { name: "evt_2" })).toBeInTheDocument();
+		expect(
+			await screen.findByRole("link", { name: "evt_2" }),
+		).toBeInTheDocument();
 		expect(screen.getByRole("link", { name: "evt_1" })).toBeInTheDocument();
 		expect(
 			screen.queryByRole("button", { name: "Load more" }),
@@ -62,7 +66,9 @@ describe("Events", () => {
 	});
 
 	it("refreshes named filter inputs on back/forward", async () => {
-		const { router } = renderApp("/events?source_id=src_1&destination_id=dst_1");
+		const { router } = renderApp(
+			"/events?source_id=src_1&destination_id=dst_1",
+		);
 		expect(await screen.findByLabelText("Source")).toHaveTextContent("src_1");
 		expect(screen.getByLabelText("Destination")).toHaveTextContent("dst_1");
 		await router.navigate({ to: "/events", search: { source_id: "src_2" } });
@@ -130,7 +136,9 @@ describe("Events", () => {
 				return HttpResponse.json({ data: [eventSummary()], next_cursor: null });
 			}),
 		);
-		const { user, router } = renderApp("/events?project_id=prj_1&source_id=src_1");
+		const { user, router } = renderApp(
+			"/events?project_id=prj_1&source_id=src_1",
+		);
 		await screen.findByRole("link", { name: "evt_1" });
 		const box = screen.getByLabelText("Search");
 		await user.type(box, "pi_123");
@@ -200,11 +208,11 @@ describe("Events", () => {
 		);
 		const { user } = renderApp("/events?project_id=prj_1&source_id=src_1");
 		await user.click(await screen.findByRole("button", { name: "Load more" }));
-		expect(await screen.findByRole("link", { name: "evt_2" })).toBeInTheDocument();
+		expect(
+			await screen.findByRole("link", { name: "evt_2" }),
+		).toBeInTheDocument();
 		await user.type(screen.getByLabelText("Search"), "pi_9{Enter}");
-		await waitFor(() =>
-			expect(cursors.at(-1)).toBeNull(),
-		);
+		await waitFor(() => expect(cursors.at(-1)).toBeNull());
 		expect(cursors.length).toBeGreaterThan(2);
 		await waitFor(() =>
 			expect(screen.queryByRole("link", { name: "evt_2" })).toBeNull(),
@@ -231,18 +239,18 @@ describe("Events", () => {
 		const { user, router } = renderApp(
 			"/events?project_id=prj_1&source_id=src_1&destination_id=dst_1",
 		);
-		await screen.findByLabelText("Project");
-		await user.click(screen.getByLabelText("Project"));
-		await user.click(await screen.findByRole("option", { name: "Ledger" }));
+		await chooseProject(user, "Ledger");
 		await waitFor(() =>
 			expect(router.state.location.search).toMatchObject({
 				project_id: "prj_2",
 			}),
 		);
 		await waitFor(() =>
-			expect(seen.at(-1)?.has("source_id")).toBe(false),
+			expect(seen.map((params) => Object.fromEntries(params))).toContainEqual({
+				project_id: "prj_2",
+				limit: "50",
+			}),
 		);
-		expect(seen.at(-1)?.has("destination_id")).toBe(false);
 	});
 
 	it("uses named pickers, latest-delivery wording, and real resource links", async () => {
@@ -252,7 +260,9 @@ describe("Events", () => {
 			),
 		);
 		renderApp("/events");
-		expect(await screen.findByRole("link", { name: "evt_1" })).toBeInTheDocument();
+		expect(
+			await screen.findByRole("link", { name: "evt_1" }),
+		).toBeInTheDocument();
 		expect(screen.getByLabelText("Source")).toBeInTheDocument();
 		expect(screen.getByLabelText("Destination")).toBeInTheDocument();
 		expect(
@@ -261,12 +271,12 @@ describe("Events", () => {
 		expect(
 			screen.getByRole("columnheader", { name: "Latest destination" }),
 		).toBeInTheDocument();
-		expect(screen.getAllByText(/latest delivery/i).length).toBeGreaterThanOrEqual(
-			2,
-		);
+		expect(
+			screen.getAllByText(/latest delivery/i).length,
+		).toBeGreaterThanOrEqual(2);
 		expect(screen.queryByText(/last delivery/i)).toBeNull();
 		const link = screen.getByRole("link", { name: "evt_1" });
-		expect(link).toHaveAttribute("href", "/events/evt_1");
+		expect(link).toHaveAttribute("href", "/events/evt_1?project_id=prj_1");
 	});
 
 	it("sends supported exact HTTP and time filters", async () => {
@@ -279,7 +289,9 @@ describe("Events", () => {
 		);
 		const from = T - 86_400_000;
 		renderApp(`/events?http_status=503&from=${from}&to=${T}`);
-		expect(await screen.findByRole("link", { name: "evt_1" })).toBeInTheDocument();
+		expect(
+			await screen.findByRole("link", { name: "evt_1" }),
+		).toBeInTheDocument();
 		expect(seen.get("http_status")).toBe("503");
 		expect(seen.get("from")).toBe(String(from));
 		expect(seen.get("to")).toBe(String(T));

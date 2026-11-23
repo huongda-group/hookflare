@@ -1,6 +1,7 @@
 import {
 	type EventSummary,
 	eventSearchQuery,
+	projectScopeQuery,
 	type ReplayResult,
 	replayRequest,
 } from "@hookflare/shared";
@@ -17,7 +18,13 @@ import { loadPayload } from "../../core/payloads";
 import { requirePermission } from "../auth/permission";
 import { decodeCursor, encodeCursor } from "../cursor";
 import { toAttempt, toDelivery } from "../dto";
-import { auditStmt, badCursor, readJson, readQuery } from "../http";
+import {
+	auditStmt,
+	badCursor,
+	readJson,
+	readProjectResource,
+	readQuery,
+} from "../http";
 import { precheck, writeReplays } from "../replay";
 
 export function eventRoutes() {
@@ -79,7 +86,13 @@ export function eventRoutes() {
 	});
 
 	routes.get("/:id/deliveries", requirePermission("events.read"), async (c) => {
-		const detail = await getEventDetail(c.var.deps.db, c.req.param("id"));
+		const q = readQuery(c, projectScopeQuery);
+		if (!q.ok) return q.response;
+		const detail = await getEventDetail(
+			c.var.deps.db,
+			c.req.param("id"),
+			q.value.project_id,
+		);
 		if (!detail) return c.json({ error: "not_found" }, 404);
 		return c.json({
 			data: detail.deliveries.map((d) => ({
@@ -91,8 +104,14 @@ export function eventRoutes() {
 	});
 
 	routes.get("/:id/payload", requirePermission("payload.read"), async (c) => {
+		const q = readQuery(c, projectScopeQuery);
+		if (!q.ok) return q.response;
 		const deps = c.var.deps;
-		const ref = await getEventPayloadRef(deps.db, c.req.param("id"));
+		const ref = await getEventPayloadRef(
+			deps.db,
+			c.req.param("id"),
+			q.value.project_id,
+		);
 		if (!ref) return c.json({ error: "not_found" }, 404);
 		let body: Uint8Array | null;
 		try {
@@ -137,8 +156,11 @@ export function eventRoutes() {
 			if (!body.ok) return body.response;
 			const deps = c.var.deps;
 			const eventId = c.req.param("id");
-			const initial = await getInitialDelivery(deps.db, eventId);
-			if (!initial) return c.json({ error: "not_found" }, 404);
+			const found = await readProjectResource(c, () =>
+				getInitialDelivery(deps.db, eventId),
+			);
+			if (!found.ok) return found.response;
+			const initial = found.value;
 			let checked: Awaited<ReturnType<typeof precheck>>;
 			try {
 				checked = await precheck(deps, [
@@ -175,7 +197,13 @@ export function eventRoutes() {
 	);
 
 	routes.get("/:id", requirePermission("events.read"), async (c) => {
-		const detail = await getEventDetail(c.var.deps.db, c.req.param("id"));
+		const q = readQuery(c, projectScopeQuery);
+		if (!q.ok) return q.response;
+		const detail = await getEventDetail(
+			c.var.deps.db,
+			c.req.param("id"),
+			q.value.project_id,
+		);
 		if (!detail) return c.json({ error: "not_found" }, 404);
 		const { event, deliveries } = detail;
 		return c.json({

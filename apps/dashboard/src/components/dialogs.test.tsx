@@ -1,20 +1,20 @@
+import type { AlertChannel } from "@hookflare/shared";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
 import {
 	createMemoryHistory,
 	createRootRoute,
 	createRouter,
 	RouterProvider,
 } from "@tanstack/react-router";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { type ReactNode, useState } from "react";
-import type { AlertChannel } from "@hookflare/shared";
 import { describe, expect, it, vi } from "vitest";
+import { invalidateDeliveryViews } from "@/lib/queries/invalidate-delivery-views";
 import { createQueryClient } from "@/router";
 import { destination, project } from "@/test/fixtures";
 import { apiUrl, server } from "@/test/server";
-import { invalidateDeliveryViews } from "@/lib/queries/invalidate-delivery-views";
 import { AlertChannelDialog } from "./AlertChannelDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { DestinationFormDialog } from "./DestinationFormDialog";
@@ -71,6 +71,7 @@ describe("ReplayDialog", () => {
 		);
 		await wrap(
 			<ReplayDialog
+				projectId="prj_1"
 				open
 				onOpenChange={() => {}}
 				target={{ kind: "bulk", deliveryIds: ["dlv_1"] }}
@@ -94,6 +95,7 @@ describe("ReplayDialog", () => {
 		);
 		await wrap(
 			<ReplayDialog
+				projectId="prj_1"
 				open
 				onOpenChange={() => {}}
 				target={{ kind: "bulk", deliveryIds: ["dlv_1", "dlv_2"] }}
@@ -110,7 +112,8 @@ describe("ReplayDialog", () => {
 });
 
 describe("ReplayDialog result", () => {
-	it("keeps the sent count after the caller clears its selection", async () => {		server.use(
+	it("keeps the sent count after the caller clears its selection", async () => {
+		server.use(
 			http.post(apiUrl("/failures/replay"), () =>
 				HttpResponse.json({
 					replayed: [
@@ -125,6 +128,7 @@ describe("ReplayDialog result", () => {
 			const [ids, setIds] = useState(["dlv_1", "dlv_2"]);
 			return (
 				<ReplayDialog
+					projectId="prj_1"
 					open
 					onOpenChange={() => {}}
 					target={{ kind: "bulk", deliveryIds: ids }}
@@ -219,6 +223,7 @@ describe("RotateSecretDialog", () => {
 	it("warns when grace_hours is 0", async () => {
 		await wrap(
 			<RotateSecretDialog
+				projectId="prj_1"
 				open
 				onOpenChange={() => {}}
 				resource="destination"
@@ -246,6 +251,7 @@ describe("RotateSecretDialog", () => {
 		const onRotated = vi.fn();
 		await wrap(
 			<RotateSecretDialog
+				projectId="prj_1"
 				open
 				onOpenChange={() => {}}
 				resource="destination"
@@ -260,6 +266,7 @@ describe("RotateSecretDialog", () => {
 	it("masks the supplied secret and clears every field after cancel", async () => {
 		const { rerender } = await wrap(
 			<RotateSecretDialog
+				projectId="prj_1"
 				open
 				onOpenChange={() => {}}
 				resource="source"
@@ -284,12 +291,12 @@ describe("RotateSecretDialog", () => {
 		const client = createQueryClient();
 		rerender(
 			<QueryClientProvider client={client}>
-				<RotateSecretDialog open={false} {...props} />
+				<RotateSecretDialog projectId="prj_1" open={false} {...props} />
 			</QueryClientProvider>,
 		);
 		rerender(
 			<QueryClientProvider client={client}>
-				<RotateSecretDialog open {...props} />
+				<RotateSecretDialog projectId="prj_1" open {...props} />
 			</QueryClientProvider>,
 		);
 		expect(await screen.findByLabelText(/New secret/)).toHaveValue("");
@@ -311,6 +318,7 @@ describe("RotateSecretDialog", () => {
 						reopen
 					</button>
 					<RotateSecretDialog
+						projectId="prj_1"
 						open={open}
 						onOpenChange={setOpen}
 						resource="source"
@@ -370,13 +378,12 @@ describe("DestinationFormDialog limits", () => {
 		const user = userEvent.setup();
 		await wrap(
 			<DestinationFormDialog
+				projectId="prj_1"
 				open
 				onOpenChange={() => {}}
 				onCreated={() => {}}
 			/>,
 		);
-		await user.click(screen.getByLabelText("Project"));
-		await user.click(await screen.findByRole("option", { name: "Payments" }));
 		await user.type(screen.getByLabelText("Name"), "Billing API");
 		await user.type(
 			screen.getByLabelText("URL"),
@@ -403,6 +410,7 @@ describe("DestinationFormDialog limits", () => {
 		);
 		const { user } = await wrap(
 			<DestinationFormDialog
+				projectId="prj_1"
 				open
 				onOpenChange={() => {}}
 				destination={destination({ id: "dst_1", rate_limit_per_s: 10 })}
@@ -424,6 +432,7 @@ describe("DestinationFormDialog limits", () => {
 		);
 		const { user } = await wrap(
 			<DestinationFormDialog
+				projectId="prj_1"
 				open
 				onOpenChange={() => {}}
 				destination={destination({ id: "dst_1", max_attempts: 5 })}
@@ -449,6 +458,7 @@ describe("DestinationFormDialog limits", () => {
 		);
 		const { user } = await wrap(
 			<DestinationFormDialog
+				projectId="prj_1"
 				open
 				onOpenChange={() => {}}
 				destination={destination({ id: "dst_1" })}
@@ -464,9 +474,7 @@ describe("DestinationFormDialog limits", () => {
 		).toBeInTheDocument();
 		expect(bodies).toHaveLength(0);
 		expect(screen.getByLabelText("Max attempts")).toHaveValue(0);
-		expect(
-			screen.getByRole("button", { name: /save/i }),
-		).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /save/i })).toBeInTheDocument();
 	});
 
 	it("never leaks the project into the patch body", async () => {
@@ -479,6 +487,7 @@ describe("DestinationFormDialog limits", () => {
 		);
 		const { user } = await wrap(
 			<DestinationFormDialog
+				projectId="prj_1"
 				open
 				onOpenChange={() => {}}
 				destination={destination({ id: "dst_1" })}
@@ -491,42 +500,6 @@ describe("DestinationFormDialog limits", () => {
 		await user.click(screen.getByRole("button", { name: /save/i }));
 		await waitFor(() => expect(bodies).toHaveLength(1));
 		expect(bodies[0]).not.toHaveProperty("project_id");
-	});
-
-	it("reaches a project beyond the first option page", async () => {
-		const first = Array.from({ length: 50 }, (_, i) =>
-			project({ id: `prj_${i + 2}`, name: `Project ${i + 2}` }),
-		);
-		server.use(
-			http.get(apiUrl("/projects"), ({ request }) => {
-				const url = new URL(request.url);
-				if (url.searchParams.get("cursor") === "c1") {
-					return HttpResponse.json({
-						data: [project({ id: "prj_far", name: "Faraway Project" })],
-						next_cursor: null,
-					});
-				}
-				return HttpResponse.json({ data: first, next_cursor: "c1" });
-			}),
-		);
-		const { user } = await wrap(
-			<DestinationFormDialog
-				open
-				onOpenChange={() => {}}
-				onCreated={() => {}}
-			/>,
-		);
-		await user.click(screen.getByRole("combobox", { name: "Project" }));
-		expect(
-			screen.queryByRole("option", { name: "Faraway Project" }),
-		).not.toBeInTheDocument();
-		await user.click(screen.getByRole("button", { name: "Load more" }));
-		await user.click(
-			await screen.findByRole("option", { name: "Faraway Project" }),
-		);
-		expect(
-			screen.getByRole("combobox", { name: "Project" }),
-		).toHaveTextContent("Faraway Project");
 	});
 
 	it("keeps a server SSRF rejection inline on the URL field", async () => {
@@ -552,25 +525,19 @@ describe("DestinationFormDialog limits", () => {
 		);
 		const { user } = await wrap(
 			<DestinationFormDialog
+				projectId="prj_1"
 				open
 				onOpenChange={() => {}}
 				onCreated={() => {}}
 			/>,
 		);
-		await user.click(screen.getByRole("combobox", { name: "Project" }));
-		await user.click(await screen.findByRole("option", { name: "Payments" }));
 		await user.type(screen.getByLabelText("Name"), "Billing API");
-		await user.type(
-			screen.getByLabelText("URL"),
-			"https://10.0.0.1/hooks",
-		);
+		await user.type(screen.getByLabelText("URL"), "https://10.0.0.1/hooks");
 		await user.click(screen.getByRole("button", { name: /create/i }));
 		expect(
 			await screen.findByText("URL resolves to a private address."),
 		).toBeInTheDocument();
-		expect(
-			screen.getByRole("button", { name: /create/i }),
-		).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /create/i })).toBeInTheDocument();
 	});
 
 	it("blocks an accidental cancel and keeps the edits", async () => {
@@ -581,6 +548,7 @@ describe("DestinationFormDialog limits", () => {
 		);
 		const { user } = await wrap(
 			<DestinationFormDialog
+				projectId="prj_1"
 				open
 				onOpenChange={() => {}}
 				onCreated={() => {}}
@@ -607,6 +575,7 @@ describe("ReplayDialog validation and outcomes (spec §8.8)", () => {
 		);
 		await wrap(
 			<ReplayDialog
+				projectId="prj_1"
 				open
 				onOpenChange={() => {}}
 				target={{ kind: "bulk", deliveryIds: ["dlv_1"] }}
@@ -633,6 +602,7 @@ describe("ReplayDialog validation and outcomes (spec §8.8)", () => {
 		);
 		await wrap(
 			<ReplayDialog
+				projectId="prj_1"
 				open
 				onOpenChange={() => {}}
 				target={{ kind: "bulk", deliveryIds: ["dlv_1"] }}
@@ -661,6 +631,7 @@ describe("ReplayDialog validation and outcomes (spec §8.8)", () => {
 		);
 		await wrap(
 			<ReplayDialog
+				projectId="prj_1"
 				open
 				onOpenChange={() => {}}
 				target={{ kind: "bulk", deliveryIds: ["dlv_1"] }}
@@ -685,6 +656,7 @@ describe("ReplayDialog validation and outcomes (spec §8.8)", () => {
 		);
 		await wrap(
 			<ReplayDialog
+				projectId="prj_1"
 				open
 				onOpenChange={() => {}}
 				target={{ kind: "bulk", deliveryIds: ["dlv_1"] }}
@@ -712,6 +684,7 @@ describe("ReplayDialog validation and outcomes (spec §8.8)", () => {
 		);
 		wrapWithRouter(
 			<ReplayDialog
+				projectId="prj_1"
 				open
 				onOpenChange={() => {}}
 				target={{ kind: "event", eventId: "evt_1" }}
@@ -748,6 +721,7 @@ describe("ReplayDialog validation and outcomes (spec §8.8)", () => {
 		const { rerender } = render(
 			<QueryClientProvider client={qc}>
 				<ReplayDialog
+					projectId="prj_1"
 					open
 					onOpenChange={() => {}}
 					target={{ kind: "bulk", deliveryIds: ["dlv_1"] }}
@@ -759,6 +733,7 @@ describe("ReplayDialog validation and outcomes (spec §8.8)", () => {
 		rerender(
 			<QueryClientProvider client={qc}>
 				<ReplayDialog
+					projectId="prj_1"
 					open
 					onOpenChange={() => {}}
 					target={{ kind: "bulk", deliveryIds: ["dlv_2"] }}
@@ -796,6 +771,7 @@ describe("RotateSecretDialog naming", () => {
 	it("names the resource being rotated", async () => {
 		await wrap(
 			<RotateSecretDialog
+				projectId="prj_1"
 				open
 				onOpenChange={() => {}}
 				resource="destination"
@@ -908,6 +884,7 @@ describe("TestDeliveryDialog", () => {
 		);
 		const { user } = await wrap(
 			<TestDeliveryDialog
+				projectId="prj_1"
 				open
 				onOpenChange={() => {}}
 				destinationId="dst_1"

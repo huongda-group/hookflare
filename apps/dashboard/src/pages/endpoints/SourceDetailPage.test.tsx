@@ -27,9 +27,8 @@ describe("Source detail", () => {
 		expect(screen.queryByText(/previous secret/i)).not.toBeInTheDocument();
 		expect(
 			await screen.findByRole("link", { name: "Billing API" }),
-		).toHaveAttribute("href", "/endpoints/destinations/dst_1");
+		).toHaveAttribute("href", "/endpoints/destinations/dst_1?project_id=prj_1");
 	});
-
 
 	it("shows the grace window when a previous secret is still valid", async () => {
 		server.use(
@@ -71,7 +70,7 @@ describe("Source detail", () => {
 		renderApp(PATH);
 		expect(
 			await screen.findByRole("link", { name: "Billing API" }),
-		).toHaveAttribute("href", "/endpoints/destinations/dst_1");
+		).toHaveAttribute("href", "/endpoints/destinations/dst_1?project_id=prj_1");
 		const stream = screen
 			.getByText("Scoped events")
 			.closest("div") as HTMLElement;
@@ -86,9 +85,7 @@ describe("Source detail", () => {
 		);
 		renderApp(PATH);
 		await screen.findByRole("heading", { name: "Stripe" });
-		const field = screen
-			.getByText("Ingress URL")
-			.closest("div") as HTMLElement;
+		const field = screen.getByText("Ingress URL").closest("div") as HTMLElement;
 		expect(
 			within(field).getByRole("button", {
 				name: /copy/i,

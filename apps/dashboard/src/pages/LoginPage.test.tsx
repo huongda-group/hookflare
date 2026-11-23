@@ -170,6 +170,9 @@ describe("LoginPage", () => {
 		expect(
 			await screen.findByText("Invalid username or password"),
 		).toBeInTheDocument();
+		await waitFor(() =>
+			expect(screen.getByText("Could not log in")).toBeVisible(),
+		);
 		await waitFor(() => expect(turnstile.reset).toHaveBeenCalled());
 	});
 
@@ -199,6 +202,9 @@ describe("LoginPage", () => {
 		await user.type(screen.getByLabelText("Password"), "correct-horse-battery");
 		await user.click(screen.getByRole("button", { name: "Sign in" }));
 		expect(await screen.findByText("turnstile_failed")).toBeInTheDocument();
+		await waitFor(() =>
+			expect(screen.getByText("Could not log in")).toBeVisible(),
+		);
 	});
 
 	it("navigates to safeNext(next) on success", async () => {
@@ -208,6 +214,9 @@ describe("LoginPage", () => {
 		await user.click(screen.getByRole("button", { name: "Sign in" }));
 		await waitFor(() =>
 			expect(router.state.location.pathname).toBe("/projects"),
+		);
+		await waitFor(() =>
+			expect(screen.getByText("Login session")).toBeVisible(),
 		);
 	});
 

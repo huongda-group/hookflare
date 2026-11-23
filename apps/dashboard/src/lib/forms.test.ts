@@ -7,18 +7,18 @@ import { applyServerIssues, errorText } from "./forms";
 describe("applyServerIssues", () => {
 	it("maps server issues onto fields, nested paths included", () => {
 		const { result } = renderHook(() =>
-			useForm({ defaultValues: { slug: "", auth_config: { header: "" } } }),
+			useForm({ defaultValues: { name: "", auth_config: { header: "" } } }),
 		);
 		const mapped = applyServerIssues(
 			result.current,
 			new ApiError(400, "invalid_request", [
-				{ path: "slug", code: "invalid", message: "Slug taken" },
+				{ path: "name", code: "invalid", message: "Bad name" },
 				{ path: "auth_config.header", code: "invalid", message: "Bad header" },
 			]),
 		);
 		expect(mapped).toBe(true);
-		expect(result.current.getFieldState("slug").error?.message).toBe(
-			"Slug taken",
+		expect(result.current.getFieldState("name").error?.message).toBe(
+			"Bad name",
 		);
 		expect(
 			result.current.getFieldState("auth_config.header").error?.message,
@@ -36,6 +36,6 @@ describe("applyServerIssues", () => {
 		expect(result.current.formState.errors.root?.message).toBe(
 			"unsafe_url: private_ip",
 		);
-		expect(errorText(new ApiError(409, "slug_taken"))).toBe("slug_taken");
+		expect(errorText(new ApiError(409, "conflict"))).toBe("conflict");
 	});
 });

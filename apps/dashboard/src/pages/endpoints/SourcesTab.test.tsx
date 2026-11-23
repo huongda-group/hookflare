@@ -16,8 +16,6 @@ const base = () => [
 
 async function fillBasics(user: ReturnType<typeof renderApp>["user"]) {
 	await user.click(await screen.findByRole("button", { name: "New source" }));
-	await user.click(screen.getByLabelText("Project"));
-	await user.click(await screen.findByRole("option", { name: "Payments" }));
 	await user.click(screen.getByLabelText("Destination"));
 	await user.click(await screen.findByRole("option", { name: "Billing API" }));
 	await user.type(screen.getByLabelText("Name"), "Stripe");
@@ -115,7 +113,7 @@ describe("Sources tab", () => {
 		) as HTMLElement;
 		expect(
 			await within(row).findByRole("link", { name: "Billing API" }),
-		).toHaveAttribute("href", "/endpoints/destinations/dst_1");
+		).toHaveAttribute("href", "/endpoints/destinations/dst_1?project_id=prj_1");
 	});
 
 	it("offers New source as the empty next step", async () => {

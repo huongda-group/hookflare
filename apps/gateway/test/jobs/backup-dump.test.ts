@@ -102,7 +102,6 @@ describe("dumpPage", () => {
 			await deps.db.insert(projects).values({
 				id,
 				name: `Paged ${i}`,
-				slug: `paged-${i}`,
 				status: "active",
 				createdAt: now,
 				updatedAt: now,

@@ -1,4 +1,3 @@
-import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { testDeps } from "./helpers/deps";
@@ -10,13 +9,6 @@ async function columns(table: string) {
 	).results.map((c) => c.name);
 }
 
-/**
- * The pre-migration (0000_init) legacy actor column name: `actor_email`. This
- * test seeds a 1.0.0-era schema and then migrates it, so it must name the old
- * column to insert rows into it before the rename to `actor`.
- */
-const LEGACY_ACTOR_COLUMN = "actor_email";
-
 async function indexNames(table: string) {
 	return (
 		await env.DB.prepare(
@@ -27,45 +19,18 @@ async function indexNames(table: string) {
 	).results.map((r) => r.name);
 }
 
-/**
- * Drop every table in dependency order (D1 refuses `PRAGMA foreign_keys`), then
- * re-apply only `0000_init`, so the upgrade is exercised from the pre-M7 shape.
- * A failed `DROP TABLE` means a referencing table still exists; retry it next
- * pass, once its children are gone.
- */
-async function resetToInit() {
-	const { results } = await env.DB.prepare(
-		"SELECT name FROM sqlite_master WHERE type = 'table'",
-	).all<{ name: string }>();
-	// `_cf_METADATA` is miniflare's own table and cannot be dropped.
-	let remaining = results
-		.map((r) => r.name)
-		.filter((name) => !name.startsWith("sqlite_") && !name.startsWith("_cf_"));
-	while (remaining.length > 0) {
-		const next: string[] = [];
-		for (const name of remaining) {
-			try {
-				await env.DB.prepare(`DROP TABLE IF EXISTS "${name}"`).run();
-			} catch {
-				next.push(name);
-			}
-		}
-		if (next.length === remaining.length) {
-			throw new Error(`could not drop tables: ${next.join(", ")}`);
-		}
-		remaining = next;
-	}
-	const init = env.TEST_MIGRATIONS[0];
-	if (!init) throw new Error("0000_init migration missing");
-	await applyD1Migrations(env.DB, [init]);
-}
+describe("baseline migration", () => {
+	it("initializes a fresh database with a single baseline migration", () => {
+		expect(env.TEST_MIGRATIONS.map((m) => m.name)).toEqual(["0000_baseline.sql"]);
+	});
 
-describe("0000_init", () => {
-	it("applies 0000_init, then the built-in-auth migrations", () => {
-		expect(env.TEST_MIGRATIONS.map((m) => m.name)).toEqual([
-			expect.stringMatching(/^0000_init/),
-			expect.stringMatching(/^0001_/),
-			expect.stringMatching(/^0002_/),
+	it("creates projects without a slug column", async () => {
+		expect(await columns("projects")).toEqual([
+			"id",
+			"name",
+			"status",
+			"created_at",
+			"updated_at",
 		]);
 	});
 
@@ -171,8 +136,8 @@ describe("0000_init", () => {
 	});
 });
 
-describe("built-in auth migrations", () => {
-	it("renames the identity and actor columns and adds user credentials", async () => {
+describe("baseline auth schema", () => {
+	it("creates user identity, credential, and actor columns", async () => {
 		const userCols = await columns("users");
 		expect(userCols).toEqual(
 			expect.arrayContaining([
@@ -183,9 +148,9 @@ describe("built-in auth migrations", () => {
 		);
 		expect(userCols).not.toContain("email");
 		expect(await columns("audit_logs")).toContain("actor");
-		expect(await columns("audit_logs")).not.toContain(LEGACY_ACTOR_COLUMN);
+		expect(await columns("audit_logs")).not.toContain("actor_email");
 		expect(await columns("test_deliveries")).toContain("actor");
-		expect(await columns("test_deliveries")).not.toContain(LEGACY_ACTOR_COLUMN);
+		expect(await columns("test_deliveries")).not.toContain("actor_email");
 	});
 
 	it("creates sessions with its indexes", async () => {
@@ -243,47 +208,5 @@ describe("built-in auth migrations", () => {
 				.run();
 		await ins("tok_1");
 		await expect(ins("tok_2")).rejects.toThrow(/UNIQUE/);
-	});
-
-	it("upgrades a 0000_init database without losing identity or actor rows", async () => {
-		await resetToInit();
-		await env.DB.batch([
-			env.DB.prepare(
-				"INSERT INTO users (email, role, created_at, updated_at, disabled_at) VALUES ('a@x.io', 'admin', 1, 1, NULL)",
-			),
-			env.DB.prepare(
-				"INSERT INTO users (email, role, created_at, updated_at, disabled_at) VALUES ('svc:bot', 'operator', 1, 1, NULL)",
-			),
-			env.DB.prepare(
-				`INSERT INTO audit_logs (id, ${LEGACY_ACTOR_COLUMN}, action, resource_type, resource_id, at) VALUES ('aud_ll', 'a@x.io', 'user.created', 'user', 'a@x.io', 1)`,
-			),
-			env.DB.prepare(
-				"INSERT INTO projects (id, name, slug, status, created_at, updated_at) VALUES ('prj_ll', 'P', 'prj-ll', 'active', 1, 1)",
-			),
-			env.DB.prepare(
-				"INSERT INTO destinations (id, project_id, name, url, status, signing_secret_enc, created_at, updated_at) VALUES ('dst_ll', 'prj_ll', 'D', 'https://example.com', 'active', 'x', 1, 1)",
-			),
-			env.DB.prepare(
-				`INSERT INTO test_deliveries (id, destination_id, project_id, ${LEGACY_ACTOR_COLUMN}, started_at, duration_ms) VALUES ('tst_ll', 'dst_ll', 'prj_ll', 'a@x.io', 1, 5)`,
-			),
-		]);
-
-		await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
-
-		const users = await env.DB.prepare(
-			"SELECT username, disabled_at FROM users ORDER BY username",
-		).all<{ username: string; disabled_at: number | null }>();
-		expect(users.results).toEqual([
-			{ username: "a@x.io", disabled_at: null },
-			{ username: "svc:bot", disabled_at: expect.any(Number) },
-		]);
-		const audit = await env.DB.prepare(
-			"SELECT actor FROM audit_logs WHERE id = 'aud_ll'",
-		).first<{ actor: string }>();
-		expect(audit?.actor).toBe("a@x.io");
-		const testDelivery = await env.DB.prepare(
-			"SELECT actor FROM test_deliveries WHERE id = 'tst_ll'",
-		).first<{ actor: string }>();
-		expect(testDelivery?.actor).toBe("a@x.io");
 	});
 });

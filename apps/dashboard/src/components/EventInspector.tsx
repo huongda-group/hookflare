@@ -102,6 +102,7 @@ export function EventInspector({
 					</div>
 				) : canReadPayload ? (
 					<PayloadPanel
+						projectId={event.project_id}
 						eventId={event.id}
 						contentType={event.content_type}
 						size={event.size_bytes}

@@ -2,6 +2,7 @@ import type { BulkReplayResult, ReplayResult } from "@hookflare/shared";
 import { asc, eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import {
+	auditLogs,
 	deliveries,
 	destinations,
 	webhookEvents,
@@ -13,6 +14,35 @@ import { faultyDeps } from "../helpers/faults";
 import { seedDelivery, seedPipeline } from "../helpers/seed";
 
 const reason = "backend fixed";
+
+it("does not partially replay IDs spanning projects", async () => {
+	const queue = recordingQueue();
+	const deps = testDeps({ queue });
+	const a = await seedPipeline(deps);
+	const b = await seedPipeline(deps);
+	const first = await seedDelivery(deps, a, { status: "dead" });
+	const second = await seedDelivery(deps, b, { status: "dead" });
+	const api = await adminApp(deps, { role: "operator" });
+	const scope = `project_id=${a.project.id}`;
+	const before = await deps.db.select().from(auditLogs);
+	const single = await api.request(
+		"POST",
+		`/events/${second.eventId}/replay?${scope}`,
+		{ reason },
+	);
+	const bulk = await api.request("POST", `/failures/replay?${scope}`, {
+		reason,
+		delivery_ids: [first.deliveryId, second.deliveryId],
+	});
+	for (const res of [single, bulk]) {
+		expect.soft(res.status).toBe(404);
+		expect.soft(await res.json()).toEqual({ error: "not_found" });
+	}
+	expect.soft(await eventDeliveries(deps, first.eventId)).toHaveLength(1);
+	expect.soft(await eventDeliveries(deps, second.eventId)).toHaveLength(1);
+	expect.soft(await deps.db.select().from(auditLogs)).toEqual(before);
+	expect(queue.sent).toEqual([]);
+});
 
 async function eventDeliveries(
 	deps: ReturnType<typeof testDeps>,

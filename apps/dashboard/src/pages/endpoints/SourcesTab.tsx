@@ -12,7 +12,7 @@ import { Can } from "@/lib/permissions";
 import { useSourcesPage } from "@/lib/queries/endpoints";
 import { SourceActions } from "./SourceActions";
 
-export function SourcesTab({ projectId }: { projectId?: string }) {
+export function SourcesTab({ projectId }: { projectId: string }) {
 	const query = useSourcesPage({ project_id: projectId });
 	const navigate = useNavigate();
 	const [creating, setCreating] = useState(false);
@@ -37,6 +37,7 @@ export function SourcesTab({ projectId }: { projectId?: string }) {
 					void navigate({
 						to: "/endpoints/sources/$sourceId",
 						params: { sourceId: s.id },
+						search: { project_id: projectId },
 					})
 				}
 				columns={[
@@ -45,6 +46,7 @@ export function SourcesTab({ projectId }: { projectId?: string }) {
 						cell: (s) => (
 							<Link
 								to="/endpoints/sources/$sourceId"
+								search={{ project_id: projectId }}
 								params={{ sourceId: s.id }}
 								className="font-medium hover:underline"
 								onClick={(e) => e.stopPropagation()}
@@ -71,6 +73,7 @@ export function SourcesTab({ projectId }: { projectId?: string }) {
 				]}
 			/>
 			<SourceFormDialog
+				projectId={projectId}
 				open={creating}
 				onOpenChange={setCreating}
 				onCreated={(sec) => setSecret(sec)}

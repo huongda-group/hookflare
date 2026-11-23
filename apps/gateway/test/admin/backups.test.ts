@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { backups } from "../../src/core/db/schema";
-import { adminApp, auditRows } from "../helpers/admin";
+import { adminApp, auditRows, seedAdminProject } from "../helpers/admin";
 import { fakeBackup, testDeps } from "../helpers/deps";
 import { faultyDeps } from "../helpers/faults";
 
 describe("backups API", () => {
+	beforeEach(seedAdminProject);
 	async function cleanBackups(deps: ReturnType<typeof testDeps>) {
 		await deps.db.delete(backups);
 	}

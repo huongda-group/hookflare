@@ -1,22 +1,23 @@
 import { loginRequest } from "@hookflare/shared";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { AuthLayout, focusFirstInvalidField } from "@/components/AuthLayout";
+import { FormField } from "@/components/FormField";
 import { PasswordField } from "@/components/PasswordField";
 import { FieldError } from "@/components/ProjectFormDialog";
 import { TurnstileWidget } from "@/components/TurnstileWidget";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { ApiError } from "@/lib/api";
 import { applyServerIssues } from "@/lib/forms";
 import { safeNext } from "@/lib/next";
 import { authStateQuery, login } from "@/lib/queries/auth";
+import { qk } from "@/lib/queries/keys";
 
 export const loginSearch = z.object({
 	next: z.string().optional().catch(undefined),
@@ -30,6 +31,7 @@ const FIELD_IDS: Record<string, string> = {
 
 export function LoginPage({ next }: { next?: string }) {
 	const navigate = useNavigate();
+	const qc = useQueryClient();
 	const {
 		data: state,
 		isPending: authPending,
@@ -57,6 +59,7 @@ export function LoginPage({ next }: { next?: string }) {
 			form.clearErrors("root");
 			try {
 				await login({ ...values, turnstile_token: token ?? undefined });
+				qc.removeQueries({ queryKey: qk.me });
 				await navigate({ href: safeNext(next) });
 			} catch (err) {
 				// Turnstile tokens are single-use: drop it and reset the widget.
@@ -98,24 +101,22 @@ export function LoginPage({ next }: { next?: string }) {
 				</div>
 			) : null}
 			<form onSubmit={submit} className="space-y-5">
-				<div className="space-y-2">
-					<Label htmlFor="login-username">Username</Label>
+				<FormField htmlFor="login-username" label="Username">
 					<Input
 						id="login-username"
 						autoComplete="username"
 						{...form.register("username")}
 					/>
 					<FieldError message={errors.username?.message} />
-				</div>
-				<div className="space-y-2">
-					<PasswordField
-						id="login-password"
-						label="Password"
-						autoComplete="current-password"
-						{...form.register("password")}
-					/>
+				</FormField>
+				<PasswordField
+					id="login-password"
+					label="Password"
+					autoComplete="current-password"
+					{...form.register("password")}
+				>
 					<FieldError message={errors.password?.message} />
-				</div>
+				</PasswordField>
 				{blocked ? null : (
 					<TurnstileWidget
 						siteKey={siteKey}

@@ -55,10 +55,6 @@ export function ProjectsPage() {
 							</Link>
 						),
 					},
-					{
-						header: "Slug",
-						cell: (p) => <span className="font-mono text-xs">{p.slug}</span>,
-					},
 					{ header: "ID", cell: (p) => <IdText id={p.id} /> },
 					{ header: "Status", cell: (p) => <StatusBadge status={p.status} /> },
 					{ header: "Created", cell: (p) => <TimeText ms={p.created_at} /> },

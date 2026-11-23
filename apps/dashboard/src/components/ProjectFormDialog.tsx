@@ -1,8 +1,11 @@
-import { createProjectRequest, type Project } from "@hookflare/shared";
+import { createProjectRequest, type Me, type Project } from "@hookflare/shared";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import type { z } from "zod";
+import { DirtyFormGuard } from "@/components/DirtyFormGuard";
+import { FormField } from "@/components/FormField";
+import { FormSection } from "@/components/FormSection";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -11,33 +14,18 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
-import { DirtyFormGuard } from "@/components/DirtyFormGuard";
-import { FormSection } from "@/components/FormSection";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { applyServerIssues } from "@/lib/forms";
 import { qk } from "@/lib/queries/keys";
 
-export function FieldError({
-	message,
-	id,
-}: {
-	message?: string;
-	id?: string;
-}) {
+export function FieldError({ message, id }: { message?: string; id?: string }) {
 	return message ? (
 		<p id={id} data-field-error className="text-sm text-failure">
 			{message}
 		</p>
 	) : null;
 }
-
-/**
- * One schema for both modes: in edit mode only `name` is registered, so `slug`
- * stays undefined; in create mode it defaults to "" and the regex rejects it.
- */
-const projectForm = createProjectRequest.partial({ slug: true });
 
 export function ProjectFormDialog({
 	open,
@@ -50,9 +38,7 @@ export function ProjectFormDialog({
 }) {
 	// Unmount on close so every open starts from the current project.
 	if (!open) return null;
-	return (
-		<ProjectForm project={project} onDone={() => onOpenChange(false)} />
-	);
+	return <ProjectForm project={project} onDone={() => onOpenChange(false)} />;
 }
 
 function ProjectForm({
@@ -65,18 +51,25 @@ function ProjectForm({
 	const qc = useQueryClient();
 	const editing = project !== undefined;
 	const form = useForm<
-		z.input<typeof projectForm>,
+		z.input<typeof createProjectRequest>,
 		unknown,
-		z.output<typeof projectForm>
+		z.output<typeof createProjectRequest>
 	>({
-		resolver: zodResolver(projectForm),
-		defaultValues: editing ? { name: project.name } : { name: "", slug: "" },
+		resolver: zodResolver(createProjectRequest),
+		defaultValues: { name: project?.name ?? "" },
 	});
 	const submit = form.handleSubmit(async (values) => {
 		try {
 			if (editing)
 				await api.patch(`/projects/${project.id}`, { name: values.name });
-			else await api.post("/projects", values);
+			else {
+				await api.post("/projects", values);
+				// A focus refetch started before creation could still return "required".
+				await qc.cancelQueries({ queryKey: qk.me });
+				qc.setQueryData<Me>(qk.me, (me) =>
+					me ? { ...me, project_required: false } : me,
+				);
+			}
 			await qc.invalidateQueries({ queryKey: qk.projects.all });
 			onDone();
 		} catch (err) {
@@ -84,33 +77,28 @@ function ProjectForm({
 		}
 	});
 	const errors = form.formState.errors;
+	const nameField = (
+		<FormField htmlFor="project-name" label="Name">
+			<Input id="project-name" {...form.register("name")} />
+			<FieldError message={errors.name?.message} />
+		</FormField>
+	);
 	return (
 		<DirtyFormGuard dirty={form.formState.isDirty}>
 			{(requestClose) => (
 				<Dialog open onOpenChange={(o) => !o && requestClose(onDone)}>
 					<DialogContent>
 						<DialogHeader>
-							<DialogTitle>{editing ? "Edit project" : "New project"}</DialogTitle>
+							<DialogTitle>
+								{editing ? "Edit project" : "New project"}
+							</DialogTitle>
 						</DialogHeader>
 						<form onSubmit={submit} className="space-y-3">
-							<FormSection title="Project">
-								<div>
-									<Label htmlFor="project-name">Name</Label>
-									<Input id="project-name" {...form.register("name")} />
-									<FieldError message={errors.name?.message} />
-								</div>
-								{!editing && (
-									<div>
-										<Label htmlFor="project-slug">Slug</Label>
-										<Input id="project-slug" {...form.register("slug")} />
-										<FieldError
-											message={
-												errors.slug?.message && `slug: ${errors.slug.message}`
-											}
-										/>
-									</div>
-								)}
-							</FormSection>
+							{editing ? (
+								<FormSection title="Project">{nameField}</FormSection>
+							) : (
+								nameField
+							)}
 							<FieldError message={errors.root?.message} />
 							<DialogFooter>
 								<Button

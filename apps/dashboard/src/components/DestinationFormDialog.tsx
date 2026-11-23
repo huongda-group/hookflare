@@ -5,7 +5,10 @@ import {
 } from "@hookflare/shared";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
-import { Controller, useForm } from "react-hook-form";
+import { useForm } from "react-hook-form";
+import { DirtyFormGuard } from "@/components/DirtyFormGuard";
+import { FormField } from "@/components/FormField";
+import { FormSection } from "@/components/FormSection";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -14,15 +17,11 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
-import { DirtyFormGuard } from "@/components/DirtyFormGuard";
-import { FormSection } from "@/components/FormSection";
-import { ResourcePicker } from "@/components/ResourcePicker";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { api } from "@/lib/api";
+import { api, projectScopedPath } from "@/lib/api";
 import { applyServerIssues, nullableNumber, optionalNumber } from "@/lib/forms";
 import { useSettings } from "@/lib/queries/endpoints";
-import { qk } from "@/lib/queries/keys";
+import { invalidateEndpointViews } from "@/lib/queries/invalidate-endpoint-views";
 import { FieldError } from "./ProjectFormDialog";
 
 const POLICY = [
@@ -51,17 +50,18 @@ type Values = {
 
 /**
  * Empty policy fields mean "use the default"; on edit, emptying sends null
- * (spec §10). The project picker pages past the old single-page limit
- * (spec §7); the project is create-only — the strict patch schema rejects it.
+ * (spec §10). Creation uses the active project; the patch body cannot change it.
  */
 export function DestinationFormDialog({
 	open,
 	onOpenChange,
+	projectId,
 	destination,
 	onCreated,
 }: {
 	open: boolean;
 	onOpenChange: (o: boolean) => void;
+	projectId: string;
 	destination?: Destination;
 	onCreated?: (secret: string) => void;
 }) {
@@ -69,6 +69,7 @@ export function DestinationFormDialog({
 	if (!open) return null;
 	return (
 		<DestinationForm
+			projectId={projectId}
 			destination={destination}
 			onDone={() => onOpenChange(false)}
 			onCreated={onCreated}
@@ -77,10 +78,12 @@ export function DestinationFormDialog({
 }
 
 function DestinationForm({
+	projectId,
 	destination,
 	onDone,
 	onCreated,
 }: {
+	projectId: string;
 	destination?: Destination;
 	onDone: () => void;
 	onCreated?: (secret: string) => void;
@@ -103,20 +106,23 @@ function DestinationForm({
 					max_in_flight: destination.max_in_flight,
 					rate_limit_per_s: destination.rate_limit_per_s,
 				}
-			: { name: "", url: "" },
+			: { project_id: projectId, name: "", url: "" },
 	});
 	const submit = form.handleSubmit(async (values) => {
 		try {
 			if (editing) {
-				await api.patch(`/destinations/${destination.id}`, values);
+				await api.patch(
+					projectScopedPath(`/destinations/${destination.id}`, projectId),
+					values,
+				);
 			} else {
 				const res = await api.post<{ signing_secret: string }>(
-					"/destinations",
+					projectScopedPath("/destinations", projectId),
 					values,
 				);
 				onCreated?.(res.signing_secret);
 			}
-			await qc.invalidateQueries({ queryKey: qk.destinations.all });
+			await invalidateEndpointViews(qc, "destination", projectId);
 			onDone();
 		} catch (err) {
 			applyServerIssues(form, err);
@@ -135,38 +141,18 @@ function DestinationForm({
 						</DialogHeader>
 						<form onSubmit={submit} className="space-y-3">
 							<FormSection title="Destination">
-								{!editing && (
-									<div>
-										<Label>Project</Label>
-										<Controller
-											control={form.control}
-											name="project_id"
-											render={({ field }) => (
-												<ResourcePicker
-													kind="project"
-													label="Project"
-													value={field.value}
-													onChange={field.onChange}
-												/>
-											)}
-										/>
-										<FieldError message={e.project_id?.message} />
-									</div>
-								)}
-								<div>
-									<Label htmlFor="dst-name">Name</Label>
+								<FormField htmlFor="dst-name" label="Name">
 									<Input id="dst-name" {...form.register("name")} />
 									<FieldError message={e.name?.message} />
-								</div>
-								<div>
-									<Label htmlFor="dst-url">URL</Label>
+								</FormField>
+								<FormField htmlFor="dst-url" label="URL">
 									<Input
 										id="dst-url"
 										placeholder="https://…"
 										{...form.register("url")}
 									/>
 									<FieldError message={e.url?.message} />
-								</div>
+								</FormField>
 							</FormSection>
 							<FormSection
 								title="Retry policy"
@@ -176,8 +162,7 @@ function DestinationForm({
 									{POLICY.map(([key, label]) => {
 										const fallback = defaults?.[key];
 										return (
-											<div key={key}>
-												<Label htmlFor={`dst-${key}`}>{label}</Label>
+											<FormField key={key} htmlFor={`dst-${key}`} label={label}>
 												<Input
 													id={`dst-${key}`}
 													type="number"
@@ -192,7 +177,7 @@ function DestinationForm({
 													)}
 												/>
 												<FieldError message={e[key]?.message} />
-											</div>
+											</FormField>
 										);
 									})}
 								</div>
@@ -203,8 +188,7 @@ function DestinationForm({
 							>
 								<div className="grid grid-cols-2 gap-3">
 									{LIMITS.map(([key, label]) => (
-										<div key={key}>
-											<Label htmlFor={`dst-${key}`}>{label}</Label>
+										<FormField key={key} htmlFor={`dst-${key}`} label={label}>
 											<Input
 												id={`dst-${key}`}
 												type="number"
@@ -215,7 +199,7 @@ function DestinationForm({
 												)}
 											/>
 											<FieldError message={e[key]?.message} />
-										</div>
+										</FormField>
 									))}
 								</div>
 							</FormSection>

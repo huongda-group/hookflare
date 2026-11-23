@@ -136,8 +136,6 @@ function request(
 	);
 }
 
-const slug = () => `p-${crypto.randomUUID().slice(0, 8)}`;
-
 describe("authMiddleware", () => {
 	it("returns 401 with no credential", async () => {
 		const { deps } = clock();
@@ -249,7 +247,6 @@ describe("authMiddleware", () => {
 		const headers = { cookie: `${SESSION_COOKIE}=${token}`, origin: ORIGIN };
 		const created = await request(deps, "POST", "/projects", headers, {
 			name: "Demote",
-			slug: slug(),
 		});
 		expect(created.status).toBeLessThan(300);
 		await deps.db
@@ -258,7 +255,6 @@ describe("authMiddleware", () => {
 			.where(eq(users.username, username));
 		const res = await request(deps, "POST", "/projects", headers, {
 			name: "Demoted",
-			slug: slug(),
 		});
 		expect(res.status).toBe(403);
 		expect(await res.json()).toMatchObject({ error: "forbidden" });
@@ -281,7 +277,7 @@ describe("authMiddleware", () => {
 					cookie: `${SESSION_COOKIE}=${token}`,
 					...extra,
 				},
-				{ name: "Nope", slug: slug() },
+				{ name: "Nope" },
 			);
 			expect(res.status).toBe(403);
 			expect(await res.json()).toEqual({ error: "bad_origin" });
@@ -306,7 +302,7 @@ describe("authMiddleware", () => {
 			"POST",
 			"/projects",
 			{ cookie: `${SESSION_COOKIE}=${token}`, origin: other },
-			{ name: "Other host", slug: slug() },
+			{ name: "Other host" },
 			other,
 		);
 		expect(res.status).toBeLessThan(300);
@@ -320,7 +316,7 @@ describe("authMiddleware", () => {
 			"POST",
 			"/projects",
 			{ authorization: `Bearer ${token}` },
-			{ name: "Bearer", slug: slug() },
+			{ name: "Bearer" },
 		);
 		expect(res.status).toBeLessThan(300);
 	});

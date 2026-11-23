@@ -6,6 +6,43 @@ import { renderApp } from "@/test/render";
 import { apiUrl, server } from "@/test/server";
 
 describe("Projects", () => {
+	it("keeps management independent until following a project-scoped link", async () => {
+		const a = project({ id: "prj_a", name: "Payments" });
+		const b = project({ id: "prj_b", name: "Shipping" });
+		localStorage.setItem("hookflare.activeProjectId", a.id);
+		server.use(
+			http.get(apiUrl("/projects"), ({ request }) => {
+				expect(new URL(request.url).searchParams.has("project_id")).toBe(false);
+				return HttpResponse.json({ data: [a, b], next_cursor: null });
+			}),
+			http.get(apiUrl("/projects/prj_b"), () => HttpResponse.json(b)),
+			http.get(apiUrl("/overview"), () => HttpResponse.error()),
+		);
+		const { user, router } = renderApp("/projects");
+		try {
+			expect(
+				await screen.findByRole("link", { name: "Payments" }),
+			).toBeVisible();
+			await user.click(screen.getByRole("link", { name: "Shipping" }));
+			const picker = await screen.findByRole("combobox", {
+				name: "Active project",
+			});
+			expect(picker).toHaveTextContent(a.name);
+			await user.click(
+				within(
+					await screen.findByRole("navigation", { name: "Project resources" }),
+				).getByRole("link", { name: "Events" }),
+			);
+			await waitFor(() =>
+				expect(router.state.location.search).toMatchObject({
+					project_id: b.id,
+				}),
+			);
+			expect(picker).toHaveTextContent(b.name);
+		} finally {
+			localStorage.removeItem("hookflare.activeProjectId");
+		}
+	});
 	it("hides Create from viewers", async () => {
 		server.use(
 			http.get(apiUrl("/projects"), () =>
@@ -13,9 +50,23 @@ describe("Projects", () => {
 			),
 		);
 		renderApp("/projects", { role: "viewer" });
-		expect(await screen.findByText("Payments")).toBeInTheDocument();
+		expect(
+			await screen.findByRole("link", { name: "Payments" }),
+		).toBeInTheDocument();
 		expect(
 			screen.queryByRole("button", { name: "New project" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("shows the name field without a redundant project heading when creating", async () => {
+		const { user } = renderApp("/projects");
+		await user.click(
+			await screen.findByRole("button", { name: "New project" }),
+		);
+		const dialog = within(screen.getByRole("dialog", { name: "New project" }));
+		expect(dialog.getByRole("textbox", { name: "Name" })).toBeVisible();
+		expect(
+			dialog.queryByRole("heading", { name: "Project" }),
 		).not.toBeInTheDocument();
 	});
 
@@ -31,11 +82,9 @@ describe("Projects", () => {
 		await user.click(
 			await screen.findByRole("button", { name: "New project" }),
 		);
-		await user.type(screen.getByLabelText("Name"), "Billing");
-		await user.type(screen.getByLabelText("Slug"), "Bad Slug!");
 		await user.click(screen.getByRole("button", { name: "Create" }));
 		expect(
-			await screen.findByText(/slug/i, { selector: "[data-field-error]" }),
+			await screen.findByText(/too small/i, { selector: "[data-field-error]" }),
 		).toBeInTheDocument();
 		expect(called).toBe(false);
 	});
@@ -43,7 +92,7 @@ describe("Projects", () => {
 	it("maps a server error onto the form", async () => {
 		server.use(
 			http.post(apiUrl("/projects"), () =>
-				HttpResponse.json({ error: "slug_taken" }, { status: 409 }),
+				HttpResponse.json({ error: "internal_error" }, { status: 500 }),
 			),
 		);
 		const { user } = renderApp("/projects");
@@ -51,17 +100,18 @@ describe("Projects", () => {
 			await screen.findByRole("button", { name: "New project" }),
 		);
 		await user.type(screen.getByLabelText("Name"), "Billing");
-		await user.type(screen.getByLabelText("Slug"), "billing");
 		await user.click(screen.getByRole("button", { name: "Create" }));
-		expect(await screen.findByText("slug_taken")).toBeInTheDocument();
+		expect(await screen.findByText("internal_error")).toBeInTheDocument();
 	});
 
-	it("creates a project and refreshes the list", async () => {
+	it("creates a project with only its name and refreshes the list", async () => {
 		let created = false;
+		let submitted: unknown;
 		server.use(
 			http.post(apiUrl("/projects"), async ({ request }) => {
+				submitted = await request.json();
 				created = true;
-				return HttpResponse.json(project((await request.json()) as object), {
+				return HttpResponse.json(project({ name: "Billing" }), {
 					status: 201,
 				});
 			}),
@@ -77,11 +127,12 @@ describe("Projects", () => {
 			await screen.findByRole("button", { name: "New project" }),
 		);
 		await user.type(screen.getByLabelText("Name"), "Billing");
-		await user.type(screen.getByLabelText("Slug"), "billing");
+		expect(screen.queryByLabelText("Slug")).not.toBeInTheDocument();
 		await user.click(screen.getByRole("button", { name: "Create" }));
 		await waitFor(() =>
-			expect(screen.getByText("Billing")).toBeInTheDocument(),
+			expect(screen.getByRole("link", { name: "Billing" })).toBeInTheDocument(),
 		);
+		expect(submitted).toEqual({ name: "Billing" });
 	});
 
 	it("shows the current name when Edit is reopened after a rename", async () => {
@@ -120,6 +171,9 @@ describe("Projects", () => {
 		renderApp("/projects");
 		const link = await screen.findByRole("link", { name: "Payments" });
 		expect(link).toHaveAttribute("href", "/projects/prj_1");
+		expect(
+			within(screen.getByRole("row", { name: /Payments/ })).getByText("prj_1"),
+		).toBeVisible();
 	});
 
 	it("offers New project as the empty next step when creation is allowed", async () => {

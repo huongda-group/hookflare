@@ -2,6 +2,7 @@ import type { ApiToken, CreatedApiToken } from "@hookflare/shared";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { FormField } from "@/components/FormField";
 import { SecretRevealDialog } from "@/components/SecretRevealDialog";
 import { TimeText } from "@/components/TimeText";
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,6 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { errorText } from "@/lib/forms";
 
@@ -129,14 +129,17 @@ export function ApiTokensDialog({
 						<p className="text-sm text-muted-foreground">Loading…</p>
 					)}
 					<div className="flex items-end gap-2">
-						<div className="flex-1">
-							<Label htmlFor="token-name">Token name</Label>
+						<FormField
+							className="flex-1"
+							htmlFor="token-name"
+							label="Token name"
+						>
 							<Input
 								id="token-name"
 								value={name}
 								onChange={(e) => setName(e.target.value)}
 							/>
-						</div>
+						</FormField>
 						<Button
 							disabled={creating || !name.trim()}
 							onClick={() => void create()}

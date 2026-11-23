@@ -14,6 +14,7 @@ function renderPanel(props?: { onMissing?: () => void }) {
 	render(
 		<QueryClientProvider client={queryClient}>
 			<PayloadPanel
+				projectId="prj_1"
 				eventId="evt_1"
 				contentType="application/json"
 				size={17}
@@ -75,10 +76,7 @@ describe("PayloadPanel request lifecycle", () => {
 		server.use(
 			http.get(apiUrl("/events/evt_1/payload"), () => {
 				loads++;
-				return HttpResponse.json(
-					{ error: "payload_missing" },
-					{ status: 404 },
-				);
+				return HttpResponse.json({ error: "payload_missing" }, { status: 404 });
 			}),
 		);
 		const onMissing = vi.fn();

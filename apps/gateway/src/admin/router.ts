@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AppBindings } from "../app";
+import { hasProject } from "../core/db/projects";
 import { authMiddleware } from "./auth/session";
 import { alertChannelRoutes } from "./routes/alert-channels";
 import { alertRoutes } from "./routes/alerts";
@@ -17,13 +18,29 @@ import { settingsRoutes } from "./routes/settings";
 import { sourceRoutes } from "./routes/sources";
 import { userRoutes } from "./routes/users";
 
-/** /api/admin/v1 — built-in auth, then a per-route permission. */
+export const ADMIN_API_PREFIX = "/api/admin/v1";
+
+/** Built-in auth, first-project prerequisite, then per-route permissions. */
 export function adminRoutes() {
 	const routes = new Hono<AppBindings>();
 	// Public auth routes are registered before the middleware, so their
 	// handlers respond first and authMiddleware never runs for /auth/*.
 	routes.route("/auth", authRoutes());
 	routes.use("*", authMiddleware());
+	routes.use("*", async (c, next) => {
+		const { path, method } = c.req;
+		if (
+			(path === `${ADMIN_API_PREFIX}/me` && method === "GET") ||
+			(path === `${ADMIN_API_PREFIX}/projects` &&
+				(method === "GET" || method === "POST"))
+		) {
+			return next();
+		}
+		if (!(await hasProject(c.var.deps.db))) {
+			return c.json({ error: "project_required" }, 409);
+		}
+		await next();
+	});
 	routes.route("/me", meRoutes());
 	routes.route("/overview", overviewRoutes());
 	routes.route("/projects", projectRoutes());

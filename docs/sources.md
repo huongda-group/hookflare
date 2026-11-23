@@ -12,6 +12,8 @@ Ingress enforces source/project/destination state, rate limits, and body-size li
 
 Endpoints → Sources supports configuration, detail, and secret rotation. API prefix `/api/admin/v1/sources` provides GET/POST collection, GET/PATCH `/:id`, and POST `/:id/rotate-secret`. Read metadata with `events.read`; mutate with `config.write`.
 
+The Sources tab lists and creates sources in the active project. The destination picker in the source form only offers destinations from that project.
+
 Expose source URL, auth type, destination, provider-ID extraction, and body limit clearly. Credential-bearing headers are redacted and excluded from forwarding. Rotation must communicate the grace window and show a new secret only once. See [contract](contract.md) for response meanings.
 
 ## Ideas, boundaries, and open work

@@ -116,7 +116,9 @@ describe("Failures", () => {
 				"true",
 			);
 			await waitFor(() =>
-				expect(screen.getByLabelText("Project")).toHaveTextContent("Payments"),
+				expect(
+					screen.getByRole("combobox", { name: "Active project" }),
+				).toHaveTextContent("Payments"),
 			);
 			expect(screen.getByLabelText(/unresolved only/i)).not.toBeChecked();
 		});
@@ -200,7 +202,9 @@ describe("Failures", () => {
 				),
 			);
 			const { user } = renderApp("/failures", { role: "operator" });
-			await user.click(await screen.findByRole("button", { name: "Select loaded" }));
+			await user.click(
+				await screen.findByRole("button", { name: "Select loaded" }),
+			);
 			expect(
 				screen.getByRole("button", { name: "Replay selected (100)" }),
 			).toBeInTheDocument();
@@ -224,7 +228,9 @@ describe("Failures", () => {
 				}),
 			);
 			const { user } = renderApp("/failures", { role: "operator" });
-			await user.click(await screen.findByRole("button", { name: "Select loaded" }));
+			await user.click(
+				await screen.findByRole("button", { name: "Select loaded" }),
+			);
 			expect(
 				screen.getByRole("button", { name: "Replay selected (1)" }),
 			).toBeInTheDocument();
@@ -312,7 +318,11 @@ describe("Failures", () => {
 				http.post(apiUrl("/failures/replay"), () =>
 					HttpResponse.json({
 						replayed: [
-							{ delivery_id: "dlv_1", new_delivery_id: "dlv_9", enqueued: true },
+							{
+								delivery_id: "dlv_1",
+								new_delivery_id: "dlv_9",
+								enqueued: true,
+							},
 							{
 								delivery_id: "dlv_2",
 								new_delivery_id: "dlv_8",
@@ -340,18 +350,16 @@ describe("Failures", () => {
 			const dialog = within(await screen.findByRole("dialog"));
 			expect(dialog.getByRole("link", { name: "dlv_9" })).toHaveAttribute(
 				"href",
-				"/events/evt_1",
+				"/events/evt_1?project_id=prj_1",
 			);
 			expect(dialog.getByRole("link", { name: "dlv_8" })).toHaveAttribute(
 				"href",
-				"/events/evt_2",
+				"/events/evt_2?project_id=prj_1",
 			);
 			expect(dialog.getByText("dlv_1")).toBeInTheDocument();
 			expect(dialog.getByText(/not_found/)).toBeInTheDocument();
 			expect(dialog.getByText("Paused")).toBeInTheDocument();
-			expect(
-				dialog.getByText(/destination is paused/i),
-			).toBeInTheDocument();
+			expect(dialog.getByText(/destination is paused/i)).toBeInTheDocument();
 			expect(dialog.queryByText(/delivered/i)).not.toBeInTheDocument();
 			// Original rows stay listed; the completed replay cleared the selection.
 			await user.keyboard("{Escape}");

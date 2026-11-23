@@ -15,8 +15,14 @@ import { ApiError } from "@/lib/api";
 import { Can, useCan } from "@/lib/permissions";
 import { useEvent } from "@/lib/queries/events";
 
-export function EventDetailPage({ eventId }: { eventId: string }) {
-	const event = useEvent(eventId);
+export function EventDetailPage({
+	eventId,
+	projectId,
+}: {
+	eventId: string;
+	projectId: string;
+}) {
+	const event = useEvent(eventId, projectId);
 	const [replaying, setReplaying] = useState(false);
 	const [selection, setSelection] = useState<{
 		eventId: string;
@@ -84,7 +90,9 @@ export function EventDetailPage({ eventId }: { eventId: string }) {
 					<div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
 						<IdText id={e.id} />
 						<span>Project {e.project_id}</span>
-						{e.source_id && <SourceName id={e.source_id} />}
+						{e.source_id && (
+							<SourceName id={e.source_id} projectId={e.project_id} />
+						)}
 					</div>
 				</div>
 				{deliveries[0] && <StatusBadge status={deliveries[0].status} />}
@@ -154,6 +162,7 @@ export function EventDetailPage({ eventId }: { eventId: string }) {
 				/>
 			</div>
 			<ReplayDialog
+				projectId={projectId}
 				open={replaying}
 				onOpenChange={setReplaying}
 				target={{ kind: "event", eventId: e.id }}

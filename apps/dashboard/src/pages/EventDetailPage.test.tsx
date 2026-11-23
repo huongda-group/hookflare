@@ -54,7 +54,7 @@ describe("Event Detail", () => {
 		const page = (id: string) => (
 			<QueryClientProvider client={queryClient}>
 				<TooltipProvider>
-					<EventDetailPage eventId={id} />
+					<EventDetailPage eventId={id} projectId="prj_1" />
 				</TooltipProvider>
 			</QueryClientProvider>
 		);
@@ -177,11 +177,11 @@ describe("Event Detail", () => {
 	});
 
 	it("loads the payload only on click", async () => {
-		let loads = 0;
+		const scopes: (string | null)[] = [];
 		server.use(
 			detail(),
-			http.get(apiUrl("/events/evt_1/payload"), () => {
-				loads++;
+			http.get(apiUrl("/events/evt_1/payload"), ({ request }) => {
+				scopes.push(new URL(request.url).searchParams.get("project_id"));
 				return HttpResponse.text('{"a":1}', {
 					headers: { "content-type": "application/json" },
 				});
@@ -189,9 +189,9 @@ describe("Event Detail", () => {
 		);
 		const { user } = renderApp("/events/evt_1", { role: "operator" });
 		await screen.findByText("dlv_1");
-		expect(loads).toBe(0);
+		expect(scopes).toEqual([]);
 		await user.click(screen.getByRole("tab", { name: /payload/i }));
-		expect(loads).toBe(0);
+		expect(scopes).toEqual([]);
 		await user.click(screen.getByRole("button", { name: "Show payload" }));
 		const payloadSection = screen.getByText("Payload").closest("section");
 		expect(payloadSection).not.toBeNull();
@@ -200,7 +200,7 @@ describe("Event Detail", () => {
 				name: "JSON",
 			}),
 		).toBeInTheDocument();
-		expect(loads).toBe(1);
+		expect(scopes).toEqual(["prj_1"]);
 	});
 
 	it("renders an HTML payload as text without tripping the session banner", async () => {

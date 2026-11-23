@@ -13,10 +13,10 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { api } from "@/lib/api";
-import { invalidateDeliveryViews } from "@/lib/queries/invalidate-delivery-views";
+import { api, projectScopedPath } from "@/lib/api";
 import { useCan } from "@/lib/permissions";
-import { qk } from "@/lib/queries/keys";
+import { invalidateDeliveryViews } from "@/lib/queries/invalidate-delivery-views";
+import { invalidateEndpointViews } from "@/lib/queries/invalidate-endpoint-views";
 
 export function SourceActions({ source: s }: { source: Source }) {
 	const qc = useQueryClient();
@@ -54,13 +54,19 @@ export function SourceActions({ source: s }: { source: Source }) {
 				</DropdownMenuContent>
 			</DropdownMenu>
 			{open === "edit" && (
-				<SourceFormDialog open onOpenChange={close} source={s} />
+				<SourceFormDialog
+					open
+					onOpenChange={close}
+					source={s}
+					projectId={s.project_id}
+				/>
 			)}
 			<RotateSecretDialog
 				open={open === "rotate"}
 				onOpenChange={close}
 				resource="source"
 				id={s.id}
+				projectId={s.project_id}
 				name={s.name}
 				onRotated={setSecret}
 			/>
@@ -81,9 +87,12 @@ export function SourceActions({ source: s }: { source: Source }) {
 				confirmLabel={next === "disabled" ? "Disable" : "Enable"}
 				destructive={next === "disabled"}
 				onConfirm={async (reason) => {
-					await api.patch(`/sources/${s.id}`, { status: next, reason });
-					await qc.invalidateQueries({ queryKey: qk.sources.all });
-					await invalidateDeliveryViews(qc);
+					await api.patch(projectScopedPath(`/sources/${s.id}`, s.project_id), {
+						status: next,
+						reason,
+					});
+					await invalidateEndpointViews(qc, "source", s.project_id);
+					await invalidateDeliveryViews(qc, s.project_id);
 				}}
 			/>
 		</div>

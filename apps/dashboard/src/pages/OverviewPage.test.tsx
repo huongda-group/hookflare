@@ -2,8 +2,8 @@ import type { Overview } from "@hookflare/shared";
 import { screen, waitFor, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
-import { eventSummary, T } from "@/test/fixtures";
-import { renderApp } from "@/test/render";
+import { eventSummary, project, T } from "@/test/fixtures";
+import { chooseProject, renderApp } from "@/test/render";
 import { apiUrl, server } from "@/test/server";
 
 const H = 3_600_000;
@@ -35,6 +35,58 @@ const overview = (o: Partial<Overview> = {}): Overview => ({
 });
 
 describe("Overview", () => {
+	it("switches totals and recent events without leaking previous project rows", async () => {
+		const seen: URLSearchParams[] = [];
+		server.use(
+			http.get(apiUrl("/projects"), () =>
+				HttpResponse.json({
+					data: [project(), project({ id: "prj_2", name: "Shipping" })],
+					next_cursor: null,
+				}),
+			),
+			http.get(apiUrl("/overview"), ({ request }) => {
+				seen.push(new URL(request.url).searchParams);
+				return HttpResponse.json(overview());
+			}),
+			http.get(apiUrl("/events"), ({ request }) => {
+				const id = new URL(request.url).searchParams.get("project_id");
+				return HttpResponse.json({
+					data: [
+						eventSummary({
+							id: id === "prj_2" ? "evt_shipping" : "evt_payments",
+							project_id: id ?? "",
+						}),
+					],
+					next_cursor: null,
+				});
+			}),
+		);
+		const { user, router } = renderApp("/?project_id=prj_1&range=7d");
+		expect(
+			await screen.findByRole("link", { name: "evt_payments" }),
+		).toBeVisible();
+		await chooseProject(user, "Shipping");
+		expect(
+			await screen.findByRole("link", { name: "evt_shipping" }),
+		).toHaveAttribute("href", expect.stringContaining("project_id=prj_2"));
+		expect(
+			screen.queryByRole("link", { name: "evt_payments" }),
+		).not.toBeInTheDocument();
+		expect(router.state.location.search).toMatchObject({
+			project_id: "prj_2",
+			range: "7d",
+		});
+		expect(
+			seen.map((q) => [
+				q.get("project_id"),
+				q.get("range"),
+				q.get("alert_scope"),
+			]),
+		).toEqual([
+			["prj_1", "7d", "project"],
+			["prj_2", "7d", "project"],
+		]);
+	});
 	it("shows totals, live counts, failing destinations, and recent events", async () => {
 		server.use(
 			http.get(apiUrl("/overview"), () => HttpResponse.json(overview())),
@@ -121,7 +173,7 @@ describe("Overview", () => {
 		expect(banner).toHaveTextContent("2 open alerts");
 		expect(within(banner).getByRole("link")).toHaveAttribute(
 			"href",
-			"/alerts?status=open",
+			"/alerts?status=open&project_id=prj_1",
 		);
 	});
 
@@ -167,7 +219,7 @@ describe("Overview", () => {
 		const table = await screen.findByRole("table", { name: /recent events/i });
 		expect(within(table).getByRole("link", { name: "evt_1" })).toHaveAttribute(
 			"href",
-			"/events/evt_1",
+			"/events/evt_1?project_id=prj_1",
 		);
 		expect(within(table).getAllByText("No delivery")).toHaveLength(2);
 	});
@@ -330,6 +382,12 @@ describe("Overview redesign (spec §8.3)", () => {
 			success_rate: 1,
 		});
 		server.use(
+			http.get(apiUrl("/projects"), () =>
+				HttpResponse.json({
+					data: [project({ id: "prj_old" }), project({ id: "prj_new" })],
+					next_cursor: null,
+				}),
+			),
 			http.get(apiUrl("/overview"), async ({ request }) => {
 				if (new URL(request.url).searchParams.get("project_id") === "prj_old") {
 					oldStarted = true;

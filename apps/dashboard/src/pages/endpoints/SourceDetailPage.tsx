@@ -16,8 +16,14 @@ import {
 } from "./detail";
 import { SourceActions } from "./SourceActions";
 
-export function SourceDetailPage({ sourceId }: { sourceId: string }) {
-	const source = useSource(sourceId);
+export function SourceDetailPage({
+	sourceId,
+	projectId,
+}: {
+	sourceId: string;
+	projectId: string;
+}) {
+	const source = useSource(sourceId, projectId);
 	if (source.error instanceof ApiError && source.error.status === 404)
 		return <p>Source {sourceId} was not found.</p>;
 	if (source.error)

@@ -1,11 +1,16 @@
 import type { ApiToken, CreatedApiToken } from "@hookflare/shared";
 import { eq } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { sha256Hex } from "../../../src/admin/auth/secrets";
 import { createApp } from "../../../src/app";
 import { apiTokens, users } from "../../../src/core/db/schema";
 import type { Deps } from "../../../src/deps";
-import { adminApp, auditRows, uniqueUsername } from "../../helpers/admin";
+import {
+	adminApp,
+	auditRows,
+	seedAdminProject,
+	uniqueUsername,
+} from "../../helpers/admin";
 import { testDeps } from "../../helpers/deps";
 
 const ORIGIN = "https://hookflare.example.com";
@@ -33,6 +38,7 @@ async function withUser(deps: Deps, role: "viewer" | "operator" = "viewer") {
 }
 
 describe("/users/:username/tokens", () => {
+	beforeEach(seedAdminProject);
 	it("returns the plaintext token once and never lists it", async () => {
 		const deps = testDeps();
 		const { api, username } = await withUser(deps);

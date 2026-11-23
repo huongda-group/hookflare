@@ -1,3 +1,4 @@
+import { projectScopeQuery } from "@hookflare/shared";
 import type { Context } from "hono";
 import type { z } from "zod";
 import type { AppBindings } from "../app";
@@ -89,6 +90,33 @@ export function readQuery<S extends z.ZodType>(
 	return result.success
 		? { ok: true, value: result.data }
 		: { ok: false, response: invalid(c, issuesOf(result.error)) };
+}
+
+/** Preserve unscoped reads; an explicitly out-of-scope row is not found. */
+export async function readProjectResource<R extends { projectId: string }>(
+	c: Context<AppBindings>,
+	load: () => Promise<R | null | undefined>,
+): Promise<Parsed<R>> {
+	const q = readQuery(c, projectScopeQuery);
+	if (!q.ok) return q;
+	const row = await load();
+	const scope = q.value.project_id;
+	return row && (scope === undefined || scope === row.projectId)
+		? { ok: true, value: row }
+		: { ok: false, response: c.json({ error: "not_found" }, 404) };
+}
+
+export function checkCreateProject(c: Context<AppBindings>, projectId: string) {
+	const q = readQuery(c, projectScopeQuery);
+	if (!q.ok) return q.response;
+	if (q.value.project_id !== undefined && q.value.project_id !== projectId)
+		return invalid(c, [
+			{
+				path: "project_id",
+				code: "custom",
+				message: "Project must match the query scope",
+			},
+		]);
 }
 
 /** rows holds up to limit + 1 entries (see list* helpers). */

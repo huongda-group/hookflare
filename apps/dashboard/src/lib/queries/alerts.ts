@@ -3,11 +3,12 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import { qk } from "./keys";
 
-export type AlertFilters = {
+export type AlertScope = { project_id: string } | { scope: "deployment" };
+
+type AlertFilters = {
 	status?: "open" | "resolved";
 	rule?: string;
-	project_id?: string;
-};
+} & AlertScope;
 
 /** Incidents change every minute at most (the job's cadence). */
 export function useAlertsPage(f: AlertFilters) {
@@ -22,11 +23,12 @@ export function useAlertsPage(f: AlertFilters) {
 	});
 }
 
-export function useAlert(id: string) {
+export function useAlert(id: string, scope?: AlertScope) {
 	return useQuery({
-		queryKey: qk.alerts.one(id),
-		queryFn: () => api.get<AlertDetail>(`/alerts/${id}`),
-		refetchInterval: (q) => (q.state.data?.status === "open" ? 60_000 : false),
+		queryKey: qk.alerts.one(id, scope ?? null),
+		queryFn: () => api.get<AlertDetail>(`/alerts/${id}`, scope),
+		refetchInterval: (q) =>
+			scope && q.state.data?.status === "open" ? 60_000 : false,
 		refetchIntervalInBackground: false,
 	});
 }

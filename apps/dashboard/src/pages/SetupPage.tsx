@@ -1,4 +1,8 @@
-import { setupRequest } from "@hookflare/shared";
+import {
+	PASSWORD_MAX_LENGTH,
+	PASSWORD_MIN_LENGTH,
+	setupRequest,
+} from "@hookflare/shared";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -6,13 +10,16 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { AuthLayout, focusFirstInvalidField } from "@/components/AuthLayout";
-import { PasswordField } from "@/components/PasswordField";
+import { FormField } from "@/components/FormField";
+import {
+	PasswordInput,
+	PasswordVisibilityButton,
+} from "@/components/PasswordField";
 import { FieldError } from "@/components/ProjectFormDialog";
 import { TurnstileWidget } from "@/components/TurnstileWidget";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { ApiError } from "@/lib/api";
 import { applyServerIssues } from "@/lib/forms";
 import { authStateQuery, setup } from "@/lib/queries/auth";
@@ -46,6 +53,8 @@ export function SetupPage() {
 	const [token, setToken] = useState<string | null>(null);
 	const [resetKey, setResetKey] = useState(0);
 	const [error, setError] = useState<string | null>(null);
+	const [showPassword, setShowPassword] = useState(false);
+	const [showConfirm, setShowConfirm] = useState(false);
 	const form = useForm<
 		z.input<typeof setupForm>,
 		unknown,
@@ -110,8 +119,7 @@ export function SetupPage() {
 				</div>
 			) : null}
 			<form onSubmit={submit} className="flex flex-col gap-5">
-				<div className="grid gap-2">
-					<Label htmlFor="setup-username">Username</Label>
+				<FormField htmlFor="setup-username" label="Username">
 					<Input
 						id="setup-username"
 						autoComplete="username"
@@ -129,40 +137,77 @@ export function SetupPage() {
 						id="setup-username-error"
 						message={errors.username?.message}
 					/>
-				</div>
-				<div className="grid gap-2">
-					<PasswordField
+				</FormField>
+				{/* Share row tracks so the toggles can overlay their controls while
+				    staying after both inputs in the natural Tab order. */}
+				<div className="relative grid grid-cols-1 gap-2">
+					<FormField
+						htmlFor="setup-password"
+						label="Password"
+						className="row-span-3 grid-rows-subgrid"
+					>
+						<PasswordInput
+							id="setup-password"
+							shown={showPassword}
+							autoComplete="new-password"
+							aria-describedby={
+								errors.password
+									? "setup-password-help setup-password-error"
+									: "setup-password-help"
+							}
+							{...form.register("password")}
+						/>
+						<div className="grid gap-2">
+							<p
+								id="setup-password-help"
+								className="text-sm text-muted-foreground"
+							>
+								{PASSWORD_MIN_LENGTH}–{PASSWORD_MAX_LENGTH} characters. Leading
+								and trailing spaces are kept.
+							</p>
+							<FieldError
+								id="setup-password-error"
+								message={errors.password?.message}
+							/>
+						</div>
+					</FormField>
+					<FormField
+						htmlFor="setup-confirm"
+						label="Confirm password"
+						className={
+							errors.confirm
+								? "row-span-3 grid-rows-subgrid"
+								: "row-span-2 grid-rows-subgrid"
+						}
+						labelClassName="mt-3"
+					>
+						<PasswordInput
+							id="setup-confirm"
+							shown={showConfirm}
+							autoComplete="new-password"
+							aria-describedby={
+								errors.confirm ? "setup-confirm-error" : undefined
+							}
+							{...form.register("confirm")}
+						/>
+						<FieldError
+							id="setup-confirm-error"
+							message={errors.confirm?.message}
+						/>
+					</FormField>
+					<PasswordVisibilityButton
 						id="setup-password"
 						label="Password"
-						autoComplete="new-password"
-						aria-describedby={
-							errors.password
-								? "setup-password-help setup-password-error"
-								: "setup-password-help"
-						}
-						{...form.register("password")}
+						shown={showPassword}
+						onToggle={() => setShowPassword((shown) => !shown)}
+						className="col-start-1 col-end-2 row-start-2 row-end-3"
 					/>
-					<p id="setup-password-help" className="text-sm text-muted-foreground">
-						12–256 characters. Leading and trailing spaces are kept.
-					</p>
-					<FieldError
-						id="setup-password-error"
-						message={errors.password?.message}
-					/>
-				</div>
-				<div className="grid gap-2">
-					<PasswordField
+					<PasswordVisibilityButton
 						id="setup-confirm"
 						label="Confirm password"
-						autoComplete="new-password"
-						aria-describedby={
-							errors.confirm ? "setup-confirm-error" : undefined
-						}
-						{...form.register("confirm")}
-					/>
-					<FieldError
-						id="setup-confirm-error"
-						message={errors.confirm?.message}
+						shown={showConfirm}
+						onToggle={() => setShowConfirm((shown) => !shown)}
+						className="col-start-1 col-end-2 row-start-5 row-end-6"
 					/>
 				</div>
 				{blocked ? null : (

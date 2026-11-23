@@ -60,19 +60,21 @@ export function useBackupSummary() {
 	});
 }
 
-export function useDestination(id: string) {
+export function useDestination(id: string, projectId: string) {
 	return useQuery({
-		queryKey: qk.destinations.one(id),
-		queryFn: () => api.get<Destination>(`/destinations/${id}`),
+		queryKey: qk.destinations.one(id, projectId),
+		queryFn: () =>
+			api.get<Destination>(`/destinations/${id}`, { project_id: projectId }),
 	});
 }
 
 /** Spec §11: the destination detail page lists its test deliveries. */
-export function useDestinationTests(id: string) {
+export function useDestinationTests(id: string, projectId: string) {
 	return useInfiniteQuery({
-		queryKey: qk.destinations.tests(id),
+		queryKey: qk.destinations.tests(id, projectId),
 		queryFn: ({ pageParam }) =>
 			api.get<Page<TestDelivery>>(`/destinations/${id}/tests`, {
+				project_id: projectId,
 				limit: 20,
 				cursor: pageParam,
 			}),
@@ -81,9 +83,9 @@ export function useDestinationTests(id: string) {
 	});
 }
 
-export function useSource(id: string) {
+export function useSource(id: string, projectId: string) {
 	return useQuery({
-		queryKey: qk.sources.one(id),
-		queryFn: () => api.get<Source>(`/sources/${id}`),
+		queryKey: qk.sources.one(id, projectId),
+		queryFn: () => api.get<Source>(`/sources/${id}`, { project_id: projectId }),
 	});
 }

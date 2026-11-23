@@ -1,14 +1,66 @@
-import { useState, type ComponentProps } from "react";
 import { cn } from "cn";
+import { type ComponentProps, type ReactNode, useState } from "react";
+import { FormField } from "@/components/FormField";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 
-export type PasswordFieldProps = Omit<ComponentProps<"input">, "type" | "id"> & {
+type PasswordInputProps = Omit<ComponentProps<"input">, "type"> & {
+	shown: boolean;
+};
+
+export type PasswordFieldProps = Omit<PasswordInputProps, "shown" | "id"> & {
 	/** Visible label text; also the accessible name for the show/hide toggle. */
 	label: string;
 	id: string;
+	children?: ReactNode;
 };
+
+export function PasswordInput({
+	shown,
+	className,
+	...props
+}: PasswordInputProps) {
+	return (
+		<Input
+			type={shown ? "text" : "password"}
+			className={cn("pr-16", className)}
+			{...props}
+		/>
+	);
+}
+
+export function PasswordVisibilityButton({
+	id,
+	label,
+	shown,
+	onToggle,
+	className,
+}: {
+	id: string;
+	label: string;
+	shown: boolean;
+	onToggle: () => void;
+	className?: string;
+}) {
+	return (
+		<Button
+			type="button"
+			variant="ghost"
+			aria-controls={id}
+			aria-label={shown ? `Hide ${label}` : `Show ${label}`}
+			aria-pressed={shown}
+			onClick={onToggle}
+			className={cn(
+				"group absolute top-1/2 right-1 h-11 w-14 -translate-y-1/2 px-0 hover:bg-transparent focus-visible:outline-none",
+				className,
+			)}
+		>
+			<span className="grid h-8 w-full place-items-center rounded-md transition-colors group-hover:bg-accent group-focus-visible:outline-2 group-focus-visible:outline-ring">
+				{shown ? "Hide" : "Show"}
+			</span>
+		</Button>
+	);
+}
 
 /**
  * A password input with a deliberate show/hide toggle (spec §8.1–8.2).
@@ -21,34 +73,22 @@ export type PasswordFieldProps = Omit<ComponentProps<"input">, "type" | "id"> & 
 export function PasswordField({
 	label,
 	id,
-	className,
-	autoComplete,
+	children,
 	...props
 }: PasswordFieldProps) {
 	const [shown, setShown] = useState(false);
 	return (
-		<>
-			<Label htmlFor={id}>{label}</Label>
+		<FormField htmlFor={id} label={label}>
 			<div className="relative">
-				<Input
+				<PasswordInput id={id} shown={shown} {...props} />
+				<PasswordVisibilityButton
 					id={id}
-					type={shown ? "text" : "password"}
-					autoComplete={autoComplete}
-					className={cn("pr-16", className)}
-					{...props}
+					label={label}
+					shown={shown}
+					onToggle={() => setShown((s) => !s)}
 				/>
-				<Button
-					type="button"
-					variant="ghost"
-					size="sm"
-					aria-label={shown ? `Hide ${label}` : `Show ${label}`}
-					aria-pressed={shown}
-					onClick={() => setShown((s) => !s)}
-					className="absolute top-1/2 right-1 min-h-11 min-w-11 -translate-y-1/2"
-				>
-					{shown ? "Hide" : "Show"}
-				</Button>
 			</div>
-		</>
+			{children}
+		</FormField>
 	);
 }

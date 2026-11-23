@@ -157,6 +157,10 @@ function fakeAdmin(seed = {}) {
 		const path = url.pathname.replace("/api/admin/v1", "");
 		const [, kind, id, action] = path.split("/");
 		if (method === "GET") {
+			if (id !== undefined) {
+				const row = store[kind].find((item) => item.id === id);
+				return row ? json(row) : json({ error: "not_found" }, 404);
+			}
 			const limit = Number(url.searchParams.get("limit") ?? "50");
 			if (limit > 100) {
 				return json({ error: "invalid_request" }, 400);
@@ -205,10 +209,13 @@ describe("httpSmokeApi", () => {
 		const { createHmac } = await import("node:crypto");
 		const admin = fakeAdmin();
 		const api = httpSmokeApi(smokeTestEnv, admin.fetchFn);
-		await api.ensureProject("smoke");
+		const project = await api.ensureProject("smoke");
 		await api.ensureDestination("https://sink.example.com/r/run/hook");
 		const source = await api.ensureSource();
 		const created = admin.mutations.find((m) => m.path === "/sources");
+		assert.deepEqual(admin.mutations[0].body, { name: "smoke" });
+		assert.equal(admin.mutations[1].body.project_id, project.id);
+		assert.equal(created.body.project_id, project.id);
 		assert.equal(source.id, admin.store.sources[0].id);
 		assert.equal(created.body.auth_type, "hmac");
 		assert.deepEqual(created.body.auth_config, hmacConfig);
@@ -226,20 +233,67 @@ describe("httpSmokeApi", () => {
 	it("finds the smoke project on a later page with limit <= 100", async () => {
 		const projects = Array.from({ length: 150 }, (_, i) => ({
 			id: `prj_${i}`,
-			slug: `p-${i}`,
 			name: `p-${i}`,
 		}));
-		projects.push({ id: "prj_smoke", slug: "smoke", name: "smoke" });
+		projects.push({ id: "prj_smoke", name: "smoke" });
 		const admin = fakeAdmin({ projects });
 		const api = httpSmokeApi(smokeTestEnv, admin.fetchFn);
 		assert.deepEqual(await api.ensureProject("smoke"), { id: "prj_smoke" });
 		assert.deepEqual(admin.mutations, []);
 	});
 
+	it("rejects ambiguous smoke project names across pages before mutations", async () => {
+		const admin = fakeAdmin({
+			projects: [
+				{ id: "prj_first", name: "smoke" },
+				...Array.from({ length: 100 }, (_, i) => ({
+					id: `prj_${i}`,
+					name: `p-${i}`,
+				})),
+				{ id: "prj_second", name: "smoke" },
+			],
+		});
+		const api = httpSmokeApi(smokeTestEnv, admin.fetchFn);
+		await assert.rejects(api.ensureProject("smoke"), /multiple projects/);
+		assert.deepEqual(admin.mutations, []);
+	});
+
+	it("uses the configured project ID even if the smoke project was renamed", async () => {
+		const admin = fakeAdmin({
+			projects: [
+				{ id: "prj_other", name: "smoke" },
+				{ id: "prj_pinned", name: "Renamed smoke" },
+			],
+		});
+		const env = smokeEnv(
+			{
+				HOOKFLARE_STAGING_URL: smokeTestEnv.url,
+				HOOKFLARE_API_TOKEN: smokeTestEnv.token,
+				SINK_URL: smokeTestEnv.sinkUrl,
+				HOOKFLARE_STAGING_SMOKE_PROJECT_ID: "prj_pinned",
+				HOOKFLARE_SMOKE_PROJECT_ID: "prj_other",
+			},
+			{ urlVar: "HOOKFLARE_STAGING_URL" },
+		);
+		const api = httpSmokeApi(env, admin.fetchFn);
+		assert.deepEqual(await api.ensureProject("smoke"), { id: "prj_pinned" });
+		assert.deepEqual(admin.mutations, []);
+	});
+
+	it("does not fall back to a name when the configured project ID is missing", async () => {
+		const admin = fakeAdmin({ projects: [{ id: "prj_other", name: "smoke" }] });
+		const api = httpSmokeApi(
+			{ ...smokeTestEnv, projectId: "prj_missing" },
+			admin.fetchFn,
+		);
+		await assert.rejects(api.ensureProject("smoke"), /get project prj_missing/);
+		assert.deepEqual(admin.mutations, []);
+	});
+
 	it("reuses the smoke destination and source, updating what changed", async () => {
 		const { createHmac } = await import("node:crypto");
 		const admin = fakeAdmin({
-			projects: [{ id: "prj_smoke", slug: "smoke", name: "smoke" }],
+			projects: [{ id: "prj_smoke", name: "smoke" }],
 			destinations: [
 				{
 					id: "dst_old",
@@ -291,7 +345,7 @@ describe("httpSmokeApi", () => {
 
 	it("rejects a reused smoke source that is not hmac", async () => {
 		const admin = fakeAdmin({
-			projects: [{ id: "prj_smoke", slug: "smoke", name: "smoke" }],
+			projects: [{ id: "prj_smoke", name: "smoke" }],
 			destinations: [
 				{
 					id: "dst_old",

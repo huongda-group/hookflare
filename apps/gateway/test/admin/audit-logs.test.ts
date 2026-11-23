@@ -11,7 +11,6 @@ describe("GET /audit-logs", () => {
 		for (const name of ["one", "two", "three"]) {
 			const res = await api.request("POST", "/projects", {
 				name,
-				slug: `${name}-${crypto.randomUUID().slice(0, 6)}`,
 			});
 			created.push((await res.json<{ id: string }>()).id);
 		}

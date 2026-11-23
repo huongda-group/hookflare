@@ -5,6 +5,28 @@ import { faultyDeps } from "../helpers/faults";
 import { seedDelivery, seedPipeline } from "../helpers/seed";
 
 describe("GET /events/:id/payload", () => {
+	it("does not return event detail, deliveries, or payload outside the requested project", async () => {
+		const deps = testDeps();
+		const a = await seedPipeline(deps);
+		const b = await seedPipeline(deps);
+		const { eventId } = await seedDelivery(deps, b, {
+			body: new Uint8Array(),
+			event: { r2Key: "payloads/missing" },
+		});
+		const api = await adminApp(faultyDeps(deps, { r2: [{ match: /^get / }] }), {
+			role: "operator",
+		});
+		for (const suffix of ["", "/deliveries", "/payload"]) {
+			const res = await api.request(
+				"GET",
+				`/events/${eventId}${suffix}?project_id=${a.project.id}`,
+			);
+			expect.soft(res.status).toBe(404);
+			expect.soft(await res.json()).toEqual({ error: "not_found" });
+		}
+		expect(await auditRows(deps, eventId)).toEqual([]);
+	});
+
 	it("returns the raw bytes with safe headers and audits the view", async () => {
 		const deps = testDeps();
 		const p = await seedPipeline(deps);

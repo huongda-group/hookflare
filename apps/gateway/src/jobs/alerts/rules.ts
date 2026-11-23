@@ -285,7 +285,7 @@ export async function backupStale(
 			sql`SELECT 1 AS one FROM backups LIMIT 1`,
 		);
 		if (rows.length === 0) {
-			// The grace runs from when backups became possible: the `0000_init`
+			// The grace runs from when backups became possible: the baseline
 			// migration that creates the backups table. Without that row (a
 			// hand-built or restored ledger), the newest migration.
 			const [since] = await deps.db.all<{ since: number | null }>(sql`

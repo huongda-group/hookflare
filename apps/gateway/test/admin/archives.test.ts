@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { archiveParts, auditLogs } from "../../src/core/db/schema";
 import { ARCHIVE_LAST_RUN_KEY, upsertSetting } from "../../src/core/settings";
-import { adminApp, auditRows } from "../helpers/admin";
+import { adminApp, auditRows, seedAdminProject } from "../helpers/admin";
 import { isolateArchive, seedBatch } from "../helpers/archive";
 import { fakeArchive, testDeps } from "../helpers/deps";
 
@@ -10,6 +10,7 @@ describe("archives API (spec §7.6)", () => {
 	const archive = fakeArchive();
 	const deps = testDeps({ archive });
 	beforeEach(async () => {
+		await seedAdminProject();
 		await isolateArchive(deps);
 	});
 

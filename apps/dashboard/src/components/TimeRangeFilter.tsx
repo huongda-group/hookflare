@@ -1,6 +1,6 @@
+import { FormField } from "@/components/FormField";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { fromLocalInput, toLocalInput } from "@/lib/time";
 
 const PRESETS = [
@@ -21,8 +21,7 @@ export function TimeRangeFilter({
 	return (
 		<fieldset className="flex flex-wrap items-end gap-2">
 			<legend className="sr-only">Time range</legend>
-			<div>
-				<Label htmlFor="range-from">From</Label>
+			<FormField htmlFor="range-from" label="From">
 				<Input
 					// Remount on URL changes (presets, clear) so the uncontrolled input follows.
 					key={`from-${from ?? ""}`}
@@ -31,9 +30,8 @@ export function TimeRangeFilter({
 					defaultValue={from ? toLocalInput(from) : ""}
 					onBlur={(e) => onChange({ from: fromLocalInput(e.target.value), to })}
 				/>
-			</div>
-			<div>
-				<Label htmlFor="range-to">To</Label>
+			</FormField>
+			<FormField htmlFor="range-to" label="To">
 				<Input
 					key={`to-${to ?? ""}`}
 					id="range-to"
@@ -41,7 +39,7 @@ export function TimeRangeFilter({
 					defaultValue={to ? toLocalInput(to) : ""}
 					onBlur={(e) => onChange({ from, to: fromLocalInput(e.target.value) })}
 				/>
-			</div>
+			</FormField>
 			{PRESETS.map((p) => (
 				<Button
 					key={p.label}

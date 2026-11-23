@@ -45,6 +45,7 @@ type Props<T> = {
 	 * pointer clicks but is never the only path (spec §7).
 	 */
 	getRowHref?: (row: T) => string;
+	rowProjectId?: string;
 	/** Optional next authorized step shown with the empty message. */
 	emptyAction?: ReactNode;
 };
@@ -59,6 +60,7 @@ export function CursorTable<T>({
 	selection,
 	ariaLabel = "Results",
 	getRowHref,
+	rowProjectId,
 	emptyAction,
 }: Props<T>) {
 	const rows = query.data?.pages.flatMap((p) => p.data) ?? [];
@@ -88,8 +90,7 @@ export function CursorTable<T>({
 		selection.onChange(next);
 	};
 
-	const colCount =
-		columns.length + (selection ? 1 : 0) + (getRowHref ? 1 : 0);
+	const colCount = columns.length + (selection ? 1 : 0) + (getRowHref ? 1 : 0);
 
 	return (
 		<DataState
@@ -160,7 +161,10 @@ export function CursorTable<T>({
 												// link, not the row handler, so it never double-fires.
 												onClick={(e) => e.stopPropagation()}
 											>
-												<ResourceLink href={getRowHref(row)}>
+												<ResourceLink
+													href={getRowHref(row)}
+													projectId={rowProjectId}
+												>
 													{id}
 												</ResourceLink>
 											</TableCell>
@@ -221,9 +225,11 @@ export function CursorTable<T>({
 /** A row's resource link: Router `Link` for in-app paths, a plain anchor otherwise. */
 function ResourceLink({
 	href,
+	projectId,
 	children,
 }: {
 	href: string;
+	projectId?: string;
 	children: ReactNode;
 }) {
 	const className = cn(
@@ -231,7 +237,11 @@ function ResourceLink({
 	);
 	if (href.startsWith("/")) {
 		return (
-			<Link to={href} className={className}>
+			<Link
+				to={href}
+				search={projectId ? { project_id: projectId } : undefined}
+				className={className}
+			>
 				{children}
 			</Link>
 		);

@@ -6,7 +6,7 @@
 
 The public state endpoint reports `setup_required: true` only while no user row has a password hash. The first valid setup request creates the initial admin or promotes an existing password-less account with the same username. It returns `201` and starts a browser session. Concurrent valid requests cannot create two admins: the losing request returns `409 setup_closed` without a session or onboarding audit entry. Disabling an account does not reopen setup.
 
-Login uses username/password. Invalid credentials, disabled users, and password-less users all return `401 invalid_credentials`. New usernames are normalized to lowercase and follow `^[a-z0-9][a-z0-9._@+-]{2,63}$`; login accepts legacy username formats. New passwords are 12–256 characters and cannot equal the username.
+Login uses username/password. Invalid credentials, disabled users, and password-less users all return `401 invalid_credentials`. New usernames are normalized to lowercase and follow `^[a-z0-9][a-z0-9._@+-]{2,63}$`; login accepts legacy username formats. New passwords are 6–256 characters and cannot equal the username.
 
 Sessions store a SHA-256 token hash in D1. The cookie is `hookflare_session`, HttpOnly, SameSite=Strict, scoped to `/api/admin`, and Secure outside local development. Idle lifetime is 12 hours and absolute lifetime is seven days. The current user is checked on each authenticated request.
 
@@ -14,7 +14,11 @@ Sessions store a SHA-256 token hash in D1. The cookie is `hookflare_session`, Ht
 
 Public API prefix: `/api/admin/v1/auth`. Routes: `GET /state`, `POST /setup`, `POST /login`, `POST /logout`. The UI uses `/setup` and `/login`, safe local `next` navigation, explicit loading/configuration/errors, and inline invalid-credential feedback.
 
-On desktop, both screens show a shared introduction and an illustrative event → delivery → attempt path. The path does not indicate live system status. Narrow screens show only the auth card, and setup keeps labels, inputs, and help text grouped by field.
+After setup or sign-in, if the deployment has no project, the dashboard opens `/projects` instead of the usual destination (including a login `next` URL). See [first project onboarding](projects.md#design-and-interaction).
+
+Selecting **Log out** in the dashboard account menu opens a confirmation dialog. **Cancel** or **Esc** leaves the current page and session unchanged. Confirming sends the logout request and returns to `/login`.
+
+On desktop, both screens show a shared introduction and an illustrative event → delivery → attempt path. The three steps are spaced across the card, with each icon centered over its label. The path does not indicate live system status. Narrow screens show only the auth card. Setup keeps labels, inputs, and help text grouped by field; Tab moves through Username, Password, and Confirm password before the two visibility controls. The password controls remain keyboard-operable and keep their hover highlight inside the input border.
 
 Setup accepts `username`, `password`, and `turnstile_token` when required. There is no setup-token field or secret; legacy clients that still send `setup_token` fail strict validation with `400 invalid_request` once the request passes the Origin, rate-limit, and Turnstile checks.
 
@@ -26,7 +30,7 @@ Passwords use PBKDF2-HMAC-SHA256 with 100,000 iterations, a random salt, and con
 
 ## Ideas, boundaries, and open work
 
-Hookflare does not authenticate users from Cloudflare Access JWTs. SSO, OAuth, MFA, passkeys, public self-registration, and email password recovery are not implemented. See [upgrade compatibility](runbook.md#upgrading-from-1x) when replacing an Access-backed deployment.
+Hookflare does not authenticate users from Cloudflare Access JWTs. SSO, OAuth, MFA, passkeys, public self-registration, and email password recovery are not implemented.
 
 ## Source and verification entry points
 

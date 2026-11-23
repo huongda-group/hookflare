@@ -3,6 +3,7 @@ import {
 	bulkReplayRequest,
 	type Failure,
 	failuresQuery,
+	projectScopeQuery,
 } from "@hookflare/shared";
 import { Hono } from "hono";
 import type { AppBindings } from "../../app";
@@ -67,11 +68,19 @@ export function failureRoutes() {
 	routes.post("/replay", requirePermission("deliveries.replay"), async (c) => {
 		const body = await readJson(c, bulkReplayRequest);
 		if (!body.ok) return body.response;
+		const q = readQuery(c, projectScopeQuery);
+		if (!q.ok) return q.response;
 		const deps = c.var.deps;
 		const ids = body.value.delivery_ids;
+		const project = q.value.project_id;
 		const found = new Map(
 			(await getDeliveriesByIds(deps.db, ids)).map((d) => [d.id, d]),
 		);
+		if (
+			project !== undefined &&
+			[...found.values()].some((d) => d.projectId !== project)
+		)
+			return c.json({ error: "not_found" }, 404);
 		const skipped: Skip[] = [];
 		const targets: ReplayTarget[] = [];
 		for (const id of ids) {

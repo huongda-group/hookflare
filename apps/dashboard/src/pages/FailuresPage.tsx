@@ -6,7 +6,6 @@ import { z } from "zod";
 import { CursorTable } from "@/components/CursorTable";
 import { DestinationSelect } from "@/components/DestinationSelect";
 import { IdText } from "@/components/IdText";
-import { ProjectSelect } from "@/components/ProjectSelect";
 import { ReplayDialog } from "@/components/ReplayDialog";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TimeRangeFilter } from "@/components/TimeRangeFilter";
@@ -32,9 +31,11 @@ export type FailuresSearch = z.infer<typeof failuresSearch>;
 const MAX_BULK = 100;
 
 export function FailuresPage({
+	projectId,
 	search,
 	setSearch,
 }: {
+	projectId: string;
 	search: FailuresSearch;
 	setSearch: (s: Partial<FailuresSearch>) => void;
 }) {
@@ -42,7 +43,7 @@ export function FailuresPage({
 	const [selected, setSelected] = useState<Set<string>>(new Set());
 	const [replaying, setReplaying] = useState(false);
 	const { tab, ...filters } = search;
-	const q = { ...filters, status: [tab] };
+	const q = { ...filters, project_id: projectId, status: [tab] };
 	const query = useInfiniteQuery({
 		queryKey: qk.failures.list(q),
 		queryFn: ({ pageParam }) =>
@@ -87,15 +88,8 @@ export function FailuresPage({
 				</TabsList>
 			</Tabs>
 			<div className="flex flex-wrap items-center gap-4">
-				<ProjectSelect
-					value={search.project_id}
-					onChange={(project_id) =>
-						// A destination belongs to one project; keep the pair consistent.
-						set({ project_id, destination_id: undefined })
-					}
-				/>
 				<DestinationSelect
-					projectId={search.project_id}
+					projectId={projectId}
 					value={search.destination_id}
 					onChange={(destination_id) => set({ destination_id })}
 				/>
@@ -111,7 +105,10 @@ export function FailuresPage({
 							Unresolved only (no successful replay)
 						</Label>
 					</div>
-					<p id="unresolved-hint" className="mt-1 text-xs text-muted-foreground">
+					<p
+						id="unresolved-hint"
+						className="mt-1 text-xs text-muted-foreground"
+					>
 						Shows only failures with no successful replay.
 					</p>
 				</div>
@@ -166,6 +163,7 @@ export function FailuresPage({
 							<Link
 								to="/events/$eventId"
 								params={{ eventId: f.event_id }}
+								search={{ project_id: projectId }}
 								className="font-mono text-xs underline"
 							>
 								{f.event_id}
@@ -203,6 +201,7 @@ export function FailuresPage({
 				]}
 			/>
 			<ReplayDialog
+				projectId={projectId}
 				open={replaying}
 				onOpenChange={setReplaying}
 				target={{

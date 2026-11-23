@@ -17,19 +17,21 @@ export const qk = {
 	destinations: {
 		all: ["destinations"] as const,
 		list: (q: object) => ["destinations", "list", q] as const,
-		one: (id: string) => ["destinations", id] as const,
+		one: (id: string, projectId: string) =>
+			["destinations", id, projectId] as const,
 		stats: (q: object) => ["destinations", "stats", q] as const,
-		tests: (id: string) => ["destinations", id, "tests"] as const,
+		tests: (id: string, projectId: string) =>
+			["destinations", id, projectId, "tests"] as const,
 	},
 	sources: {
 		all: ["sources"] as const,
 		list: (q: object) => ["sources", "list", q] as const,
-		one: (id: string) => ["sources", id] as const,
+		one: (id: string, projectId: string) => ["sources", id, projectId] as const,
 	},
 	events: {
 		all: ["events"] as const,
 		list: (q: object) => ["events", "list", q] as const,
-		one: (id: string) => ["events", id] as const,
+		one: (id: string, projectId: string) => ["events", id, projectId] as const,
 	},
 	failures: {
 		all: ["failures"] as const,
@@ -38,7 +40,7 @@ export const qk = {
 	alerts: {
 		all: ["alerts"] as const,
 		list: (q: object) => ["alerts", "list", q] as const,
-		one: (id: string) => ["alerts", id] as const,
+		one: (id: string, scope: object | null) => ["alerts", id, scope] as const,
 	},
 	archives: { list: (q: object) => ["archives", "list", q] as const },
 	backups: { summary: ["backups", "summary"] as const },

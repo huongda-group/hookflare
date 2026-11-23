@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, configure } from "@testing-library/react";
+import { toast } from "sonner";
 import { afterAll, afterEach, beforeAll } from "vitest";
 import { server } from "./server";
 
@@ -9,6 +10,8 @@ configure({ asyncUtilTimeout: 5_000 });
 beforeAll(() => server.listen({ onUnhandledFrame: "error" }));
 afterEach(() => {
 	cleanup();
+	// Sonner replays active notifications when a new toaster mounts.
+	toast.dismiss();
 	server.resetHandlers();
 });
 afterAll(() => server.close());

@@ -35,7 +35,6 @@ export async function seedPipeline(
 	const project: ProjectRow = {
 		id: projectId,
 		name: "Test project",
-		slug: `p-${projectId.slice(-12).toLowerCase()}`,
 		status: "active",
 		createdAt: now,
 		updatedAt: now,

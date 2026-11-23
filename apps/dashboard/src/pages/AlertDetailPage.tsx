@@ -1,4 +1,4 @@
-import { Link } from "@tanstack/react-router";
+import { Link, Navigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { JsonViewer } from "@/components/JsonViewer";
 import { LoadError } from "@/components/LoadError";
@@ -15,11 +15,17 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { ApiError } from "@/lib/api";
-import { useAlert } from "@/lib/queries/alerts";
-import { resourceLabel, RuleBadge } from "./AlertsPage";
+import { type AlertScope, useAlert } from "@/lib/queries/alerts";
+import { RuleBadge, resourceLabel } from "./AlertsPage";
 
-export function AlertDetailPage({ alertId }: { alertId: string }) {
-	const q = useAlert(alertId);
+export function AlertDetailPage({
+	alertId,
+	scope,
+}: {
+	alertId: string;
+	scope?: AlertScope;
+}) {
+	const q = useAlert(alertId, scope);
 	const [showDetails, setShowDetails] = useState(false);
 	if (q.error instanceof ApiError && q.error.status === 404)
 		return <p>Alert {alertId} was not found.</p>;
@@ -49,6 +55,19 @@ export function AlertDetailPage({ alertId }: { alertId: string }) {
 			</div>
 		);
 	const a = q.data;
+	if (!scope)
+		return (
+			<Navigate
+				to="/alerts/$alertId"
+				params={{ alertId }}
+				search={
+					a.project_id === null
+						? { scope: "deployment" }
+						: { project_id: a.project_id }
+				}
+				replace
+			/>
+		);
 	const deadIds = Array.isArray(a.details.delivery_ids)
 		? (a.details.delivery_ids as string[])
 		: [];
@@ -69,6 +88,7 @@ export function AlertDetailPage({ alertId }: { alertId: string }) {
 						<Link
 							to="/endpoints/destinations/$destinationId"
 							params={{ destinationId: a.resource_id }}
+							search={{ project_id: a.project_id ?? undefined }}
 							className="underline"
 						>
 							{resourceLabel(a)}
@@ -78,7 +98,7 @@ export function AlertDetailPage({ alertId }: { alertId: string }) {
 					)}
 				</dd>
 				<dt>Scope</dt>
-				<dd>{a.project_id ?? "System-wide"}</dd>
+				<dd>{a.project_id ?? "Deployment-wide"}</dd>
 				<dt>Opened</dt>
 				<dd>
 					<TimeText ms={a.opened_at} />
@@ -97,7 +117,10 @@ export function AlertDetailPage({ alertId }: { alertId: string }) {
 							<li key={id}>
 								<Link
 									to="/failures"
-									search={{ tab: "dead" }}
+									search={{
+										tab: "dead",
+										project_id: a.project_id ?? undefined,
+									}}
 									className="underline"
 								>
 									{id}

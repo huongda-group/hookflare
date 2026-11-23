@@ -12,7 +12,17 @@ The Reliability Console gives operators two entry points: [Overview](overview.md
 
 Use semantic color tokens from `index.css`, an understated canvas, clear foreground hierarchy, consistent panel/control radii, strong active navigation, and textual status labels alongside color. Desktop sidebar starts at 1024px; narrower layouts use a navigation drawer. Tables scroll inside their region, not the whole page.
 
+The sidebar and drawer highlight the current section by URL path, regardless of filters or tabs in the query string. Overview is active only at `/`; detail pages highlight their parent section.
+
+The **Active project** selector sits immediately before the breadcrumb on desktop and mobile. Its compact trigger shows a folder icon and the current project name. Long names may be shortened in the trigger; the open menu shows the full labels and marks the current project with a check. Overview, Endpoints, Events, Failures, and project incidents use the selected project; there is no cross-project option in those views. A valid `project_id` in the URL takes precedence over the last selection in this browser. If neither supplies a project, the dashboard selects the first available one. Disabled projects remain selectable. An unavailable explicit project prompts for a new selection instead of falling back to unfiltered data. Switching projects resets resource filters, pagination, and selected rows; a switch on a detail page returns to its collection.
+
+[Projects](projects.md) is a shared catalog. Account, users, API tokens, settings, backups, archives, and audit are deployment-wide. Selecting a project on those pages changes the selection for the next project view, not the data on the current page. [Alerts](alerts.md) lists deployment incidents separately.
+
 Every data view distinguishes loading, empty, failure, and loaded states. Forms need labels, pending state, inline validation, focus restoration, and safe handling of unsaved work. Protected actions require server permission checks. Reveal payloads explicitly and secrets only once.
+
+Use [`FormField`](../apps/dashboard/src/components/FormField.tsx) for a label stacked above a control. It provides an 8px gap and keeps field-specific help and validation in the same group. Use a plain label for checkbox and switch rows that place the label beside the control.
+
+The dashboard API client shows one outcome toast per `POST`, `PUT`, `DELETE`, or `PATCH` request. Toasts name the action (for example, `Login session`, `Project updated`, or `Could not save alert rules`). Replay, backup, and archive toasts acknowledge the request rather than declaring background work complete. Test delivery and alert-channel toasts announce that the test finished; the result is shown inline. Network and permission messages remain shared, read requests do not show outcome toasts, and forms still show validation and error details inline.
 
 IDs and long URLs must wrap safely; use names where available and IDs for disambiguation. Dialogs close with Escape and restore focus. Provide a skip link and landmarks. Do not claim accessibility certification from calculated token contrast or fixture screenshots.
 
@@ -46,6 +56,8 @@ Dark/system themes and extra mobile-specific product scope are not implemented c
 ## Branding
 
 The dashboard sidebar and the shared sign-in and setup layout use the same SVG mark as the browser favicon, alongside the lowercase `hookflare` wordmark. Browser fallback and install icons use the same artwork and are served from `apps/dashboard/public/`.
+
+Each dashboard route sets the browser's HTML title to `Page name · Hookflare`. Detail routes use their page type so the title is available during loading and error states. The initial HTML and unmatched routes use `Hookflare`.
 
 ## Source and verification entry points
 

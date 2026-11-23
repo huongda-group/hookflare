@@ -4,7 +4,6 @@ import { z } from "zod";
 import { CursorTable } from "@/components/CursorTable";
 import { EventFilters } from "@/components/EventFilters";
 import { IdText } from "@/components/IdText";
-import { ProjectSelect } from "@/components/ProjectSelect";
 import { ResourceLabel } from "@/components/ResourceLabel";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TimeText } from "@/components/TimeText";
@@ -42,31 +41,25 @@ const CLEARED: Partial<EventsSearch> = {
 };
 
 export function EventsPage({
+	projectId,
 	search,
 	setSearch,
 }: {
+	projectId: string;
 	search: EventsSearch;
 	setSearch: (s: Partial<EventsSearch>) => void;
 }) {
 	const navigate = useNavigate();
-	const query = useEventsPage(search);
+	const filters = { ...search, project_id: projectId };
+	const query = useEventsPage(filters);
 	return (
 		<div className="space-y-4">
-			<div className="flex items-center justify-between">
-				<h1 className="text-xl font-semibold">Events</h1>
-				<ProjectSelect
-					value={search.project_id}
-					onChange={(project_id) =>
-						// A source/destination belongs to one project; keep the pair consistent.
-						setSearch({ project_id, source_id: undefined, destination_id: undefined })
-					}
-				/>
-			</div>
-			<EventFilters value={search} onApply={(patch) => setSearch(patch)} />
+			<h1 className="text-xl font-semibold">Events</h1>
+			<EventFilters value={filters} onApply={(patch) => setSearch(patch)} />
 			<p className="text-xs text-muted-foreground">
-				Status and delivery columns describe the latest delivery for each
-				event. A status filter matches delivery history, which can differ
-				from the latest summary.
+				Status and delivery columns describe the latest delivery for each event.
+				A status filter matches delivery history, which can differ from the
+				latest summary.
 			</p>
 			<CursorTable<EventSummary>
 				query={query}
@@ -83,8 +76,13 @@ export function EventsPage({
 					</Button>
 				}
 				getRowHref={(e) => `/events/${e.id}`}
+				rowProjectId={projectId}
 				onRowClick={(e) =>
-					void navigate({ to: "/events/$eventId", params: { eventId: e.id } })
+					void navigate({
+						to: "/events/$eventId",
+						params: { eventId: e.id },
+						search: { project_id: projectId },
+					})
 				}
 				columns={[
 					{ header: "Received", cell: (e) => <TimeText ms={e.received_at} /> },

@@ -82,12 +82,20 @@ export type EventDetail = {
 export async function getEventDetail(
 	db: Db,
 	id: string,
+	projectId?: string,
 ): Promise<EventDetail | null> {
 	const { bodyInline: _body, ...columns } = getTableColumns(webhookEvents);
 	const event = await db
 		.select(columns)
 		.from(webhookEvents)
-		.where(eq(webhookEvents.id, id))
+		.where(
+			and(
+				eq(webhookEvents.id, id),
+				projectId === undefined
+					? undefined
+					: eq(webhookEvents.projectId, projectId),
+			),
+		)
 		.get();
 	if (!event) {
 		return null;
@@ -213,7 +221,11 @@ export async function latestDeliveries(
 }
 
 /** The only reader of event bodies on the admin side (spec §8.3). */
-export async function getEventPayloadRef(db: Db, id: string) {
+export async function getEventPayloadRef(
+	db: Db,
+	id: string,
+	projectId?: string,
+) {
 	return db
 		.select({
 			id: webhookEvents.id,
@@ -222,7 +234,14 @@ export async function getEventPayloadRef(db: Db, id: string) {
 			bodyInline: webhookEvents.bodyInline,
 		})
 		.from(webhookEvents)
-		.where(eq(webhookEvents.id, id))
+		.where(
+			and(
+				eq(webhookEvents.id, id),
+				projectId === undefined
+					? undefined
+					: eq(webhookEvents.projectId, projectId),
+			),
+		)
 		.get();
 }
 

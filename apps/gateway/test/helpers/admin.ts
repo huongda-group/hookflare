@@ -5,12 +5,14 @@ import { createApp } from "../../src/app";
 import {
 	apiTokens,
 	auditLogs,
+	projects,
 	type Role,
 	users,
 } from "../../src/core/db/schema";
 import { insertSessionStmt } from "../../src/core/db/sessions";
 import { newId } from "../../src/core/ids";
 import type { Deps } from "../../src/deps";
+import { testDeps } from "./deps";
 
 /**
  * Only "IS NOT NULL" matters to the auth queries; the value is never parsed
@@ -23,6 +25,22 @@ const ADMIN_API = `${ORIGIN}/api/admin/v1`;
 
 /** The default identity used when `adminApp` is called with no role. */
 export const DEFAULT_ADMIN = "admin@example.com";
+
+/** Only for suites that exercise routes after project onboarding. */
+export async function seedAdminProject() {
+	const { db, now } = testDeps();
+	const at = now();
+	await db
+		.insert(projects)
+		.values({
+			id: "prj_admin_test_project",
+			name: "Admin test project",
+			status: "active",
+			createdAt: at,
+			updatedAt: at,
+		})
+		.onConflictDoNothing({ target: projects.id });
+}
 
 export function uniqueUsername(prefix = "user"): string {
 	return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;

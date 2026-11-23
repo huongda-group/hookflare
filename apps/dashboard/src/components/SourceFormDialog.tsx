@@ -8,6 +8,10 @@ import {
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { Controller, useForm } from "react-hook-form";
+import { DirtyFormGuard } from "@/components/DirtyFormGuard";
+import { FormField } from "@/components/FormField";
+import { FormSection } from "@/components/FormSection";
+import { ResourcePicker } from "@/components/ResourcePicker";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -16,11 +20,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
-import { DirtyFormGuard } from "@/components/DirtyFormGuard";
-import { FormSection } from "@/components/FormSection";
-import { ResourcePicker } from "@/components/ResourcePicker";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
 	Select,
 	SelectContent,
@@ -28,9 +28,9 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import { api } from "@/lib/api";
+import { api, projectScopedPath } from "@/lib/api";
 import { applyServerIssues, nullableNumber, optionalNumber } from "@/lib/forms";
-import { qk } from "@/lib/queries/keys";
+import { invalidateEndpointViews } from "@/lib/queries/invalidate-endpoint-views";
 import { FieldError } from "./ProjectFormDialog";
 
 const AUTH_LABEL: Record<(typeof AUTH_TYPES)[number], string> = {
@@ -95,11 +95,13 @@ function SimpleSelect({
 export function SourceFormDialog({
 	open,
 	onOpenChange,
+	projectId,
 	source,
 	onCreated,
 }: {
 	open: boolean;
 	onOpenChange: (o: boolean) => void;
+	projectId: string;
 	source?: Source;
 	onCreated?: (secret: string | null) => void;
 }) {
@@ -107,6 +109,7 @@ export function SourceFormDialog({
 	if (!open) return null;
 	return (
 		<SourceForm
+			projectId={projectId}
 			source={source}
 			onDone={() => onOpenChange(false)}
 			onCreated={onCreated}
@@ -115,10 +118,12 @@ export function SourceFormDialog({
 }
 
 function SourceForm({
+	projectId,
 	source,
 	onDone,
 	onCreated,
 }: {
+	projectId: string;
 	source?: Source;
 	onDone: () => void;
 	onCreated?: (secret: string | null) => void;
@@ -138,12 +143,17 @@ function SourceForm({
 					event_id_selector: source.event_id_selector,
 					max_body_bytes: source.max_body_bytes,
 				}
-			: { name: "", auth_type: "none", auth_config: {}, event_id_from: "none" },
+			: {
+					project_id: projectId,
+					name: "",
+					auth_type: "none",
+					auth_config: {},
+					event_id_from: "none",
+				},
 	});
 	const watchedAuthType = form.watch("auth_type");
 	const authType = editing ? source.auth_type : watchedAuthType;
 	const eventFrom = form.watch("event_id_from");
-	const projectId = editing ? source.project_id : form.watch("project_id");
 
 	const setAuthType = (t: Values["auth_type"]) => {
 		form.setValue("auth_type", t);
@@ -171,12 +181,18 @@ function SourceForm({
 		try {
 			if (editing) {
 				const { secret: _s, project_id: _p, ...patch } = body;
-				await api.patch(`/sources/${source.id}`, patch);
+				await api.patch(
+					projectScopedPath(`/sources/${source.id}`, projectId),
+					patch,
+				);
 			} else {
-				const res = await api.post<{ secret?: string }>("/sources", body);
+				const res = await api.post<{ secret?: string }>(
+					projectScopedPath("/sources", projectId),
+					body,
+				);
 				onCreated?.(res.secret ?? null);
 			}
-			await qc.invalidateQueries({ queryKey: qk.sources.all });
+			await invalidateEndpointViews(qc, "source", projectId);
 			onDone();
 		} catch (err) {
 			applyServerIssues(form, err);
@@ -192,61 +208,40 @@ function SourceForm({
 				<Dialog open onOpenChange={(o) => !o && requestClose(onDone)}>
 					<DialogContent className="max-w-xl">
 						<DialogHeader>
-							<DialogTitle>{editing ? "Edit source" : "New source"}</DialogTitle>
+							<DialogTitle>
+								{editing ? "Edit source" : "New source"}
+							</DialogTitle>
 						</DialogHeader>
 						<form onSubmit={submit} className="space-y-3">
 							<FormSection
 								title="Target"
 								description="Changes take up to 30 seconds to reach ingress."
 							>
-								{!editing && (
-									<div>
-										<Label>Project</Label>
-										<Controller
-											control={form.control}
-											name="project_id"
-											render={({ field }) => (
-											<ResourcePicker
-												kind="project"
-												label="Project"
-												value={field.value}
-												onChange={(v) => {
-													field.onChange(v);
-													form.setValue("destination_id", undefined);
-												}}
-											/>
-										)}
-										/>
-										<FieldError message={e.project_id?.message} />
-									</div>
-								)}
-								<div>
-									<Label>Destination</Label>
+								<FormField htmlFor="src-destination" label="Destination">
 									<Controller
 										control={form.control}
 										name="destination_id"
 										render={({ field }) => (
-										<ResourcePicker
-											kind="destination"
-											projectId={projectId}
-											label="Destination"
-											value={field.value}
-											onChange={field.onChange}
-										/>
-									)}
+											<ResourcePicker
+												id="src-destination"
+												kind="destination"
+												projectId={projectId}
+												label="Destination"
+												value={field.value}
+												onChange={field.onChange}
+											/>
+										)}
 									/>
 									<FieldError message={e.destination_id?.message} />
-								</div>
-								<div>
-									<Label htmlFor="src-name">Name</Label>
+								</FormField>
+								<FormField htmlFor="src-name" label="Name">
 									<Input id="src-name" {...form.register("name")} />
 									<FieldError message={e.name?.message} />
-								</div>
+								</FormField>
 							</FormSection>
 							<FormSection title="Authentication">
 								{!editing && (
-									<div>
-										<Label htmlFor="src-auth">Auth type</Label>
+									<FormField htmlFor="src-auth" label="Auth type">
 										<SimpleSelect
 											id="src-auth"
 											label="Auth type"
@@ -254,20 +249,24 @@ function SourceForm({
 											onChange={(v) => setAuthType(v as Values["auth_type"])}
 											options={AUTH_TYPES.map((t) => [t, AUTH_LABEL[t]])}
 										/>
-									</div>
+									</FormField>
 								)}
 								{authType === "hmac" && (
 									<div className="grid grid-cols-2 gap-3">
-										<div>
-											<Label htmlFor="src-hmac-header">Signature header</Label>
+										<FormField
+											htmlFor="src-hmac-header"
+											label="Signature header"
+										>
 											<Input
 												id="src-hmac-header"
 												{...form.register("auth_config.header")}
 											/>
 											<FieldError message={e.auth_config?.header?.message} />
-										</div>
-										<div>
-											<Label htmlFor="src-hmac-prefix">Prefix (optional)</Label>
+										</FormField>
+										<FormField
+											htmlFor="src-hmac-prefix"
+											label="Prefix (optional)"
+										>
 											<Input
 												id="src-hmac-prefix"
 												placeholder="sha256="
@@ -275,9 +274,8 @@ function SourceForm({
 													setValueAs: (v) => (v === "" ? undefined : v),
 												})}
 											/>
-										</div>
-										<div>
-											<Label htmlFor="src-hmac-alg">Algorithm</Label>
+										</FormField>
+										<FormField htmlFor="src-hmac-alg" label="Algorithm">
 											<Controller
 												control={form.control}
 												name="auth_config.algorithm"
@@ -295,9 +293,8 @@ function SourceForm({
 													/>
 												)}
 											/>
-										</div>
-										<div>
-											<Label htmlFor="src-hmac-enc">Encoding</Label>
+										</FormField>
+										<FormField htmlFor="src-hmac-enc" label="Encoding">
 											<Controller
 												control={form.control}
 												name="auth_config.encoding"
@@ -314,13 +311,12 @@ function SourceForm({
 													/>
 												)}
 											/>
-										</div>
+										</FormField>
 									</div>
 								)}
 								{authType === "token" && (
 									<div className="grid grid-cols-2 gap-3">
-										<div>
-											<Label htmlFor="src-token-in">Token in</Label>
+										<FormField htmlFor="src-token-in" label="Token in">
 											<Controller
 												control={form.control}
 												name="auth_config.in"
@@ -337,22 +333,21 @@ function SourceForm({
 													/>
 												)}
 											/>
-										</div>
-										<div>
-											<Label htmlFor="src-token-name">Name</Label>
+										</FormField>
+										<FormField htmlFor="src-token-name" label="Name">
 											<Input
 												id="src-token-name"
 												{...form.register("auth_config.name")}
 											/>
 											<FieldError message={e.auth_config?.name?.message} />
-										</div>
+										</FormField>
 									</div>
 								)}
 								{!editing && authType !== "none" && (
-									<div>
-										<Label htmlFor="src-secret">
-											Secret (optional; leave empty to generate)
-										</Label>
+									<FormField
+										htmlFor="src-secret"
+										label="Secret (optional; leave empty to generate)"
+									>
 										<Input
 											id="src-secret"
 											autoComplete="off"
@@ -361,38 +356,41 @@ function SourceForm({
 											})}
 										/>
 										<FieldError message={e.secret?.message} />
-									</div>
+									</FormField>
 								)}
 							</FormSection>
 							<FormSection title="Event ID">
 								<div className="grid grid-cols-2 gap-3">
-									<div>
-										<Label htmlFor="src-eid">Event ID from</Label>
+									<FormField htmlFor="src-eid" label="Event ID from">
 										<Controller
 											control={form.control}
 											name="event_id_from"
 											render={({ field }) => (
-											<SimpleSelect
-												id="src-eid"
-												label="Event ID from"
-												value={field.value}
-												onChange={field.onChange}
-												options={EVENT_ID_FROM.map((v) => [
-													v,
-													EVENT_ID_LABEL[v],
-												])}
-											/>
-										)}
+												<SimpleSelect
+													id="src-eid"
+													label="Event ID from"
+													value={field.value}
+													onChange={field.onChange}
+													options={EVENT_ID_FROM.map((v) => [
+														v,
+														EVENT_ID_LABEL[v],
+													])}
+												/>
+											)}
 										/>
-									</div>
+									</FormField>
 									{eventFrom !== "none" && (
-										<div>
-											<Label htmlFor="src-eid-sel">
-												{eventFrom === "header" ? "Header name" : "JSON path"}
-											</Label>
+										<FormField
+											htmlFor="src-eid-sel"
+											label={
+												eventFrom === "header" ? "Header name" : "JSON path"
+											}
+										>
 											<Input
 												id="src-eid-sel"
-												placeholder={eventFrom === "header" ? "X-Event-Id" : "$.id"}
+												placeholder={
+													eventFrom === "header" ? "X-Event-Id" : "$.id"
+												}
 												{...form.register("event_id_selector")}
 											/>
 											<FieldError
@@ -401,13 +399,15 @@ function SourceForm({
 													`selector: ${e.event_id_selector.message}`
 												}
 											/>
-										</div>
+										</FormField>
 									)}
 								</div>
 							</FormSection>
 							<FormSection title="Limits">
-								<div>
-									<Label htmlFor="src-max">Max body bytes (empty = default)</Label>
+								<FormField
+									htmlFor="src-max"
+									label="Max body bytes (empty = default)"
+								>
 									<Input
 										id="src-max"
 										type="number"
@@ -417,7 +417,7 @@ function SourceForm({
 										)}
 									/>
 									<FieldError message={e.max_body_bytes?.message} />
-								</div>
+								</FormField>
 							</FormSection>
 							<FieldError message={e.root?.message} />
 							<DialogFooter>

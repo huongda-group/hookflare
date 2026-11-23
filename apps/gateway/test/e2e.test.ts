@@ -35,7 +35,6 @@ async function setup(deps: Deps) {
 	const project = await (
 		await api.request("POST", "/projects", {
 			name: "E2E",
-			slug: `e2e-${crypto.randomUUID().slice(0, 8)}`,
 		})
 	).json<{ id: string }>();
 	const destination = await (

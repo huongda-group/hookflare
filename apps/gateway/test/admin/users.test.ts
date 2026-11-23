@@ -1,14 +1,21 @@
 import type { Page, User } from "@hookflare/shared";
 import { and, eq, ne } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { verifyPassword } from "../../src/admin/auth/password";
 import { createApp } from "../../src/app";
 import { sessions, users } from "../../src/core/db/schema";
 import { getUser } from "../../src/core/db/users";
-import { adminApp, auditRows, uniqueUsername } from "../helpers/admin";
+import {
+	adminApp,
+	auditRows,
+	seedAdminProject,
+	uniqueUsername,
+} from "../helpers/admin";
 import { testDeps } from "../helpers/deps";
 
-/** A valid initial password (>= 12 chars); POST /users requires one. */
+beforeEach(seedAdminProject);
+
+/** A valid initial password; POST /users requires one. */
 const PASSWORD = "correct-horse-battery";
 const NEW_PASSWORD = "rotated-horse-battery";
 const ORIGIN = "https://hookflare.example.com";

@@ -2,7 +2,7 @@ import type { AlertChannel } from "@hookflare/shared";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { alertChannels } from "../../src/core/db/schema";
-import { adminApp, auditRows } from "../helpers/admin";
+import { adminApp, auditRows, seedAdminProject } from "../helpers/admin";
 import { resetAlerts } from "../helpers/alerts";
 import { testDeps } from "../helpers/deps";
 
@@ -16,6 +16,7 @@ describe("alert channels API (spec §6.5)", () => {
 		) as unknown as typeof fetch,
 	});
 	beforeEach(async () => {
+		await seedAdminProject();
 		await resetAlerts(deps);
 	});
 

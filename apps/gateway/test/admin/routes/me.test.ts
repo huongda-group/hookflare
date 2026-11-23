@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { hashPassword, verifyPassword } from "../../../src/admin/auth/password";
 import { randomToken, sha256Hex } from "../../../src/admin/auth/secrets";
 import { SESSION_COOKIE } from "../../../src/admin/auth/session";
@@ -8,7 +8,11 @@ import { auditLogs, users } from "../../../src/core/db/schema";
 import { insertSessionStmt } from "../../../src/core/db/sessions";
 import { getUser } from "../../../src/core/db/users";
 import type { Deps } from "../../../src/deps";
-import { adminApp, uniqueUsername } from "../../helpers/admin";
+import {
+	adminApp,
+	seedAdminProject,
+	uniqueUsername,
+} from "../../helpers/admin";
 import { testDeps } from "../../helpers/deps";
 
 const ORIGIN = "https://hookflare.example.com";
@@ -54,6 +58,7 @@ describe("GET /me", () => {
 });
 
 describe("POST /me/password", () => {
+	beforeEach(seedAdminProject);
 	it("rejects a wrong current password with 401 and writes nothing", async () => {
 		const deps = testDeps();
 		const api = await adminApp(deps, { role: "admin" });

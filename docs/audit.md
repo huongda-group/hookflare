@@ -12,6 +12,8 @@ Ordinary database mutations and their audit rows are batched together. External 
 
 UI `/audit`; API GET `/api/admin/v1/audit-logs` requires `audit.read` (admin). Use filters/cursors, recognizable resources, reason, time, and redacted changes. Viewers/operators must not fetch protected audit data merely because a hidden component mounted.
 
+The audit trail is deployment-wide and does not follow the dashboard's active project.
+
 Passwords, tokens, secret configuration, and hashes never belong in diffs. Login success/failure uses Worker logs rather than unauthenticated audit writes. Audit retention and archive rules apply separately from event retention.
 
 ## Ideas, boundaries, and open work

@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { FormField } from "@/components/FormField";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { errorText } from "@/lib/forms";
@@ -22,6 +23,7 @@ const PLACEHOLDER: Record<ResourceKind, string> = {
 };
 
 export type ResourcePickerProps = {
+	id?: string;
 	kind: ResourceKind;
 	projectId?: string;
 	value?: string;
@@ -38,6 +40,7 @@ export type ResourcePickerProps = {
  * page per option and never fetches every page eagerly.
  */
 export function ResourcePicker({
+	id,
 	kind,
 	projectId,
 	value,
@@ -177,6 +180,7 @@ export function ResourcePicker({
 		<div ref={containerRef} className="relative inline-block">
 			<button
 				ref={triggerRef}
+				id={id}
 				type="button"
 				role="combobox"
 				aria-label={label}
@@ -202,19 +206,18 @@ export function ResourcePicker({
 
 			{open && (
 				<div className="absolute left-0 top-full z-50 mt-1 w-80 rounded-md border bg-popover p-2 text-popover-foreground shadow-md">
-					<label
+					<FormField
 						htmlFor={searchId}
-						className="block text-xs text-muted-foreground"
+						label="Search loaded options"
+						labelClassName="text-xs text-muted-foreground"
 					>
-						Search loaded options
-					</label>
-					<Input
-						id={searchId}
-						ref={searchRef}
-						value={search}
-						onChange={(event) => setSearch(event.target.value)}
-						className="mt-1"
-					/>
+						<Input
+							id={searchId}
+							ref={searchRef}
+							value={search}
+							onChange={(event) => setSearch(event.target.value)}
+						/>
+					</FormField>
 
 					{query.isPending ? (
 						<p role="status" className="p-2 text-sm text-muted-foreground">
@@ -292,14 +295,13 @@ export function ResourcePicker({
 						</>
 					)}
 
-					<div className="mt-2 border-t pt-2">
-						<label
-							htmlFor={exactId}
-							className="block text-xs text-muted-foreground"
-						>
-							Exact {label.toLowerCase()} ID
-						</label>
-						<div className="mt-1 flex gap-2">
+					<FormField
+						className="mt-2 border-t pt-2"
+						htmlFor={exactId}
+						label={`Exact ${label.toLowerCase()} ID`}
+						labelClassName="text-xs text-muted-foreground"
+					>
+						<div className="flex gap-2">
 							<Input
 								id={exactId}
 								value={exact}
@@ -315,7 +317,7 @@ export function ResourcePicker({
 								Use ID
 							</Button>
 						</div>
-					</div>
+					</FormField>
 				</div>
 			)}
 		</div>

@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppBindings } from "../../app";
 import { auditInsertIfChanged } from "../../core/audit";
+import { hasProject } from "../../core/db/projects";
 import { users } from "../../core/db/schema";
 import { deleteUserSessionsStmt } from "../../core/db/sessions";
 import { getUser } from "../../core/db/users";
@@ -13,13 +14,14 @@ import { readJson } from "../http";
 /** Any active user; the dashboard uses it to show or hide actions (spec §12). */
 export function meRoutes() {
 	const routes = new Hono<AppBindings>();
-	routes.get("/", (c) => {
+	routes.get("/", async (c) => {
 		const actor = c.var.actor;
 		if (!actor) return c.json({ error: "forbidden" }, 403);
 		return c.json({
 			username: actor.username,
 			role: actor.role,
 			permissions: permissionsOf(actor.role),
+			project_required: !(await hasProject(c.var.deps.db)),
 		} satisfies Me);
 	});
 

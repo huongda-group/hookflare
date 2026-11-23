@@ -1,6 +1,7 @@
 import type { Me, Permission, Role, Settings } from "@hookflare/shared";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
+import { project } from "./fixtures";
 
 export const ORIGIN = "http://localhost:3000";
 export const apiUrl = (path: string) => `${ORIGIN}/api/admin/v1${path}`;
@@ -26,7 +27,12 @@ const BY_ROLE: Record<Role, Permission[]> = {
 };
 
 export function meFor(role: Role): Me {
-	return { username: `${role}@example.com`, role, permissions: BY_ROLE[role] };
+	return {
+		username: `${role}@example.com`,
+		role,
+		permissions: BY_ROLE[role],
+		project_required: false,
+	};
 }
 
 export const DEFAULT_AUTH_STATE = {
@@ -85,8 +91,14 @@ export const server = setupServer(
 		() => new HttpResponse(null, { status: 204 }),
 	),
 	http.get(apiUrl("/settings"), () => HttpResponse.json(DEFAULT_SETTINGS)),
+	http.get(apiUrl("/projects"), ({ request }) =>
+		HttpResponse.json(
+			new URL(request.url).searchParams.get("limit") === "200"
+				? { data: [project()], next_cursor: null }
+				: empty,
+		),
+	),
 	...[
-		"/projects",
 		"/sources",
 		"/destinations",
 		"/events",

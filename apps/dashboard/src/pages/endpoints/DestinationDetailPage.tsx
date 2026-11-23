@@ -34,10 +34,12 @@ const POLICY: { key: keyof RetryDefaults; label: string; unit: string }[] = [
 
 export function DestinationDetailPage({
 	destinationId,
+	projectId,
 }: {
 	destinationId: string;
+	projectId: string;
 }) {
-	const destination = useDestination(destinationId);
+	const destination = useDestination(destinationId, projectId);
 	if (destination.error instanceof ApiError && destination.error.status === 404)
 		return <p>Destination {destinationId} was not found.</p>;
 	if (destination.error)
@@ -92,7 +94,7 @@ export function DestinationDetailPage({
 				/>
 			</Section>
 			<StatsSection destination={d} />
-			<TestsSection destinationId={d.id} />
+			<TestsSection destinationId={d.id} projectId={projectId} />
 		</div>
 	);
 }
@@ -152,8 +154,14 @@ function StatsSection({ destination: d }: { destination: Destination }) {
 	);
 }
 
-function TestsSection({ destinationId }: { destinationId: string }) {
-	const query = useDestinationTests(destinationId);
+function TestsSection({
+	destinationId,
+	projectId,
+}: {
+	destinationId: string;
+	projectId: string;
+}) {
+	const query = useDestinationTests(destinationId, projectId);
 	return (
 		<Section title="Test deliveries">
 			<CursorTable<TestDelivery>

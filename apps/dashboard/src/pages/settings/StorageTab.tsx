@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import type { z } from "zod";
 import { DirtyFormGuard } from "@/components/DirtyFormGuard";
+import { FormField } from "@/components/FormField";
 import { FormSection } from "@/components/FormSection";
 import { FieldError } from "@/components/ProjectFormDialog";
 import { TimeText } from "@/components/TimeText";
@@ -110,27 +111,26 @@ function StorageForm({ initial }: { initial: StorageSettings }) {
 	return (
 		<DirtyFormGuard dirty={form.formState.isDirty}>
 			{() => (
-				<form onSubmit={submit} className="max-w-xl space-y-4">
+				<form onSubmit={submit} className="space-y-4">
 					<FormSection
 						title="Retention"
 						description="How long hot, failed, and audit data stay queryable."
 					>
 						<div className="grid grid-cols-2 gap-3">
 							{DAYS.map(([key, label]) => (
-								<div key={key}>
-									<Label htmlFor={`st-${key}`}>{label}</Label>
+								<FormField key={key} htmlFor={`st-${key}`} label={label}>
 									<Input
 										id={`st-${key}`}
 										type="number"
 										{...form.register(key, { valueAsNumber: true })}
 									/>
 									<FieldError message={e[key]?.message} />
-								</div>
+								</FormField>
 							))}
-							<div>
-								<Label htmlFor="st-archive_retention_days">
-									Archive retention (days, empty = forever)
-								</Label>
+							<FormField
+								htmlFor="st-archive_retention_days"
+								label="Archive retention (days, empty = forever)"
+							>
 								<Input
 									id="st-archive_retention_days"
 									type="number"
@@ -139,7 +139,7 @@ function StorageForm({ initial }: { initial: StorageSettings }) {
 									})}
 								/>
 								<FieldError message={e.archive_retention_days?.message} />
-							</div>
+							</FormField>
 						</div>
 					</FormSection>
 					<FormSection
@@ -178,17 +178,18 @@ function StorageForm({ initial }: { initial: StorageSettings }) {
 								this database.
 							</p>
 						)}
-						<div className="max-w-xs">
-							<Label htmlFor="st-backup_retention_days">
-								Backup retention (days)
-							</Label>
+						<FormField
+							className="max-w-xs"
+							htmlFor="st-backup_retention_days"
+							label="Backup retention (days)"
+						>
 							<Input
 								id="st-backup_retention_days"
 								type="number"
 								{...form.register("backup_retention_days", { valueAsNumber: true })}
 							/>
 							<FieldError message={e.backup_retention_days?.message} />
-						</div>
+						</FormField>
 					</FormSection>
 					<FieldError message={e.root?.message} />
 					{confirm ? (

@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { ApiError, apiRaw } from "@/lib/api";
+import { ApiError, apiRaw, projectScopedPath } from "@/lib/api";
 import { errorText } from "@/lib/forms";
 import { formatBytes } from "@/lib/time";
 import { downloadBlob, JsonViewer } from "./JsonViewer";
@@ -14,11 +14,13 @@ import { downloadBlob, JsonViewer } from "./JsonViewer";
  */
 export function PayloadPanel({
 	eventId,
+	projectId,
 	contentType,
 	size,
 	onMissing,
 }: {
 	eventId: string;
+	projectId: string;
 	contentType: string | null;
 	size: number;
 	/** Called once when the backend confirms the payload is gone. */
@@ -27,7 +29,7 @@ export function PayloadPanel({
 	const [open, setOpen] = useState(false);
 	const missingNotified = useRef(false);
 	const payload = useQuery({
-		queryKey: ["payload", eventId],
+		queryKey: ["payload", eventId, projectId],
 		enabled: open,
 		staleTime: Number.POSITIVE_INFINITY,
 		gcTime: 0,
@@ -35,7 +37,9 @@ export function PayloadPanel({
 		refetchOnMount: false,
 		refetchOnWindowFocus: false,
 		queryFn: async () => {
-			const res = await apiRaw(`/events/${eventId}/payload`);
+			const res = await apiRaw(
+				projectScopedPath(`/events/${eventId}/payload`, projectId),
+			);
 			// Bytes, not text(): text() replaces invalid UTF-8, which would also
 			// corrupt Download for binary bodies.
 			const bytes = await res.arrayBuffer();

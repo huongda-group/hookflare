@@ -12,6 +12,8 @@ Metadata is readable with `events.read`. Raw payload requires `payload.read`; se
 
 UI routes: `/events` and `/events/:eventId`. API: GET `/api/admin/v1/events`, `/:id`, `/:id/deliveries`, and `/:id/payload`. Filters and cursor pagination must remain consistent when navigating back or changing the query.
 
+The dashboard's list, source and destination filters, and event detail (including payload) use the active project. Switching projects clears resource filters and retains independent time and status filters. A detail ID outside its explicit project scope is not found.
+
 Event detail shows the actual source, selected delivery destination/outcome, newest-first independent delivery histories, and a response inspector. An attempt is selected by delivery ID and attempt ID, so replay attempts numbered alike do not collide; polling keeps valid selection and event navigation resets it. Zero deliveries/attempts have explicit states. The inspector identifies the selected delivery and attempt; Response renders only the stored **snippet** as text, including HTML-like content, and does not invent a full body or response headers. Request headers are the accepted event's redacted headers, not reconstructed outbound headers.
 
 Show payload is an explicit `payload.read`-gated request; large bodies remain bounded. Viewer accounts cannot replay or retrieve payload. A confirmed missing payload disables replay. Permission-aware Replay uses the existing dialog and validates a reason; creating a new delivery is not successful backend delivery, and the original history remains intact. Status summaries distinguish dead, failed-final, retrying, paused, pending, queued, in-flight, and delivered without asserting an unknown historical retry policy.

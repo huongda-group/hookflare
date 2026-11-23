@@ -2,6 +2,13 @@ import { desc, eq, lt } from "drizzle-orm";
 import type { Db } from "../../deps";
 import { type ProjectRow, projects } from "./schema";
 
+export async function hasProject(db: Db): Promise<boolean> {
+	return (
+		(await db.select({ id: projects.id }).from(projects).limit(1).get()) !==
+		undefined
+	);
+}
+
 export async function getProject(
 	db: Db,
 	id: string,

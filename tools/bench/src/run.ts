@@ -171,7 +171,7 @@ async function provision(
 		await fetchFn(`${base}/api/admin/v1/projects`, {
 			method: "POST",
 			headers,
-			body: JSON.stringify({ name: `bench-${run}`, slug: `bench-${run}` }),
+			body: JSON.stringify({ name: `bench-${run}` }),
 		}),
 	)) as { id: string };
 	const destination = (await readJson(

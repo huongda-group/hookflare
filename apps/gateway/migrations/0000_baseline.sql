@@ -49,6 +49,20 @@ CREATE TABLE `alerts` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `alerts_open_key_uq` ON `alerts` (`rule`,`resource_type`,`resource_id`) WHERE status = 'open';--> statement-breakpoint
 CREATE INDEX `alerts_status_opened_idx` ON `alerts` (`status`,`opened_at`);--> statement-breakpoint
+CREATE TABLE `api_tokens` (
+	`id` text PRIMARY KEY NOT NULL,
+	`token_hash` text NOT NULL,
+	`username` text NOT NULL,
+	`name` text NOT NULL,
+	`created_at` integer NOT NULL,
+	`expires_at` integer,
+	`last_used_at` integer,
+	`revoked_at` integer,
+	FOREIGN KEY (`username`) REFERENCES `users`(`username`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `api_tokens_token_hash_unique` ON `api_tokens` (`token_hash`);--> statement-breakpoint
+CREATE INDEX `api_tokens_username_idx` ON `api_tokens` (`username`);--> statement-breakpoint
 CREATE TABLE `archive_batches` (
 	`id` text PRIMARY KEY NOT NULL,
 	`kind` text NOT NULL,
@@ -84,7 +98,7 @@ CREATE TABLE `archive_parts` (
 --> statement-breakpoint
 CREATE TABLE `audit_logs` (
 	`id` text PRIMARY KEY NOT NULL,
-	`actor_email` text NOT NULL,
+	`actor` text NOT NULL,
 	`action` text NOT NULL,
 	`resource_type` text NOT NULL,
 	`resource_id` text,
@@ -95,7 +109,7 @@ CREATE TABLE `audit_logs` (
 --> statement-breakpoint
 CREATE INDEX `audit_logs_at_idx` ON `audit_logs` (`at`);--> statement-breakpoint
 CREATE INDEX `audit_logs_resource_idx` ON `audit_logs` (`resource_type`,`resource_id`,`at`);--> statement-breakpoint
-CREATE INDEX `audit_logs_actor_idx` ON `audit_logs` (`actor_email`,`at`);--> statement-breakpoint
+CREATE INDEX `audit_logs_actor_idx` ON `audit_logs` (`actor`,`at`);--> statement-breakpoint
 CREATE TABLE `backups` (
 	`id` text PRIMARY KEY NOT NULL,
 	`day` text NOT NULL,
@@ -184,14 +198,23 @@ CREATE INDEX `destinations_consecutive_failures_idx` ON `destinations` (`consecu
 CREATE TABLE `projects` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
-	`slug` text NOT NULL,
 	`status` text DEFAULT 'active' NOT NULL,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
 	CONSTRAINT "projects_status_check" CHECK("status" IN ('active', 'disabled'))
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `projects_slug_unique` ON `projects` (`slug`);--> statement-breakpoint
+CREATE TABLE `sessions` (
+	`id_hash` text PRIMARY KEY NOT NULL,
+	`username` text NOT NULL,
+	`created_at` integer NOT NULL,
+	`last_seen_at` integer NOT NULL,
+	`expires_at` integer NOT NULL,
+	FOREIGN KEY (`username`) REFERENCES `users`(`username`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE INDEX `sessions_username_idx` ON `sessions` (`username`);--> statement-breakpoint
+CREATE INDEX `sessions_expires_idx` ON `sessions` (`expires_at`);--> statement-breakpoint
 CREATE TABLE `settings` (
 	`key` text PRIMARY KEY NOT NULL,
 	`value_json` text NOT NULL,
@@ -241,7 +264,7 @@ CREATE TABLE `test_deliveries` (
 	`id` text PRIMARY KEY NOT NULL,
 	`destination_id` text NOT NULL,
 	`project_id` text NOT NULL,
-	`actor_email` text NOT NULL,
+	`actor` text NOT NULL,
 	`started_at` integer NOT NULL,
 	`duration_ms` integer NOT NULL,
 	`http_status` integer,
@@ -254,8 +277,10 @@ CREATE TABLE `test_deliveries` (
 --> statement-breakpoint
 CREATE INDEX `test_deliveries_destination_started_idx` ON `test_deliveries` (`destination_id`,`started_at`);--> statement-breakpoint
 CREATE TABLE `users` (
-	`email` text PRIMARY KEY NOT NULL,
+	`username` text PRIMARY KEY NOT NULL,
 	`role` text NOT NULL,
+	`password_hash` text,
+	`password_changed_at` integer,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
 	`disabled_at` integer,

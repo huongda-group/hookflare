@@ -482,7 +482,7 @@ describe("ResourceLabel", () => {
 });
 
 describe("delegation from the existing selects", () => {
-	it("keeps ProjectSelect and DestinationSelect project-scoped through the route tree", async () => {
+	it("uses the active project to scope destination options through the route tree", async () => {
 		const destinationCalls: URLSearchParams[] = [];
 		server.use(
 			http.get(apiUrl("/projects"), () =>
@@ -505,10 +505,12 @@ describe("delegation from the existing selects", () => {
 		);
 		renderApp("/failures?project_id=prj_1&destination_id=dst_2");
 
+		expect(
+			await screen.findByRole("combobox", { name: "Active project" }),
+		).toHaveTextContent("Payments");
 		await waitFor(() =>
-			expect(screen.getByLabelText("Project")).toHaveTextContent("Payments"),
+			expect(screen.getByLabelText("Destination")).toHaveTextContent("Ledger"),
 		);
-		expect(screen.getByLabelText("Destination")).toHaveTextContent("Ledger");
 		// The page's project scope must reach the destination options request.
 		await waitFor(() =>
 			expect(destinationCalls.at(-1)?.get("project_id")).toBe("prj_1"),

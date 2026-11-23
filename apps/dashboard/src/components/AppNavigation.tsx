@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import type { ComponentType, JSX, SVGProps } from "react";
 import { useCan } from "@/lib/permissions";
+import { isProjectCollection, useActiveProject } from "@/lib/project-selection";
 
 /** Every destination the shell links to; literal so `Link` stays type-checked. */
 type NavPath =
@@ -139,21 +140,27 @@ function NavItem({
 	onNavigate?: () => void;
 }): JSX.Element | null {
 	const allowed = useCan(item.permission ?? fallbackPermission);
+	const { projectId } = useActiveProject();
 	if (!allowed) return null;
 	const { to, label, Icon } = item;
 	return (
 		<li>
 			<Link
 				to={to}
+				search={
+					isProjectCollection(to) && projectId
+						? { project_id: projectId }
+						: undefined
+				}
 				onClick={onNavigate}
-				// Spec §6: active shows background plus text weight, not color
-				// alone. `exact` only for `/`, so detail routes light up parents.
+				// Active shows background plus text weight, not color alone.
 				className="flex min-h-10 items-center gap-2.5 rounded-[7px] px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:min-h-11"
 				activeProps={{
 					className: "bg-selected font-medium text-selected-foreground",
 					"aria-current": "page",
 				}}
-				activeOptions={{ exact: to === "/" }}
+				// Ignore filters and tabs; detail routes still highlight their parent.
+				activeOptions={{ exact: to === "/", includeSearch: false }}
 			>
 				<Icon className="size-4 shrink-0" aria-hidden="true" />
 				<span className="truncate">{label}</span>

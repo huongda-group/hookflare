@@ -12,6 +12,8 @@ Bulk replay is bounded at 100 selected deliveries. A bulk response can contain d
 
 UI: `/failures` and the replay dialog on event detail. API: GET `/api/admin/v1/failures`, POST `/failures/replay`, and POST `/events/:id/replay`. Use `deliveries.replay` for recovery. Refresh affected event/failure/overview data after mutation.
 
+Failures and replay in the dashboard use the active project. Switching projects clears selected deliveries; a submitted replay keeps its original scope. If an API request includes `project_id`, any found delivery belonging to a different project rejects the entire bulk request without creating or queueing a replay.
+
 Explain whether selection covers the current page and reset invalid selections when filters change. Show success, skipped/conflict, and enqueue-pending results honestly. Test delivery is a separate synchronous destination operation with recorded test history, not a fabricated incoming event.
 
 ## Ideas, boundaries, and open work

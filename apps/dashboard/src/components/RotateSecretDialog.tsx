@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { FormField } from "@/components/FormField";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -10,17 +11,17 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { api } from "@/lib/api";
+import { api, projectScopedPath } from "@/lib/api";
 import { errorText } from "@/lib/forms";
-import { qk } from "@/lib/queries/keys";
+import { invalidateEndpointViews } from "@/lib/queries/invalidate-endpoint-views";
 
 type Props = {
 	open: boolean;
 	onOpenChange: (o: boolean) => void;
 	resource: "source" | "destination";
 	id: string;
+	projectId: string;
 	/** Shown in the title so rotation confirms what it revokes. */
 	name?: string;
 	/** The generated secret, or null when the caller supplied one (sources). */
@@ -42,6 +43,7 @@ function RotateSecretForm({
 	onOpenChange,
 	resource,
 	id,
+	projectId,
 	name,
 	onRotated,
 }: Omit<Props, "open">) {
@@ -58,7 +60,7 @@ function RotateSecretForm({
 	const m = useMutation({
 		mutationFn: () =>
 			api.post<{ signing_secret?: string; secret?: string }>(
-				`/${resource}s/${id}/rotate-secret`,
+				projectScopedPath(`/${resource}s/${id}/rotate-secret`, projectId),
 				{
 					grace_hours: graceHours,
 					...(supplied ? { secret: supplied } : {}),
@@ -66,7 +68,7 @@ function RotateSecretForm({
 				},
 			),
 		onSuccess: (res) => {
-			void qc.invalidateQueries({ queryKey: qk[`${resource}s`].all });
+			void invalidateEndpointViews(qc, resource, projectId);
 			onOpenChange(false);
 			onRotated(res.signing_secret ?? res.secret ?? null);
 		},
@@ -74,37 +76,36 @@ function RotateSecretForm({
 	return (
 		<>
 			<DialogHeader>
-				<DialogTitle>
-					Rotate secret{name ? ` for ${name}` : ""}
-				</DialogTitle>
+				<DialogTitle>Rotate secret{name ? ` for ${name}` : ""}</DialogTitle>
 				<DialogDescription>
 					The previous secret keeps working for the grace period.
 				</DialogDescription>
 			</DialogHeader>
-			<Label htmlFor="grace">Grace period (hours)</Label>
-			<Input
-				id="grace"
-				type="number"
-				min={0}
-				max={168}
-				value={grace}
-				onChange={(e) => setGrace(e.target.value)}
-			/>
-			{grace === "0" && (
-				<p className="text-sm font-medium text-failure">
-					Grace 0 revokes the current secret immediately.
-				</p>
-			)}
-			{!validGrace && (
-				<p className="text-sm text-failure">
-					Enter a whole number from 0 to 168.
-				</p>
-			)}
+			<FormField htmlFor="grace" label="Grace period (hours)">
+				<Input
+					id="grace"
+					type="number"
+					min={0}
+					max={168}
+					value={grace}
+					onChange={(e) => setGrace(e.target.value)}
+				/>
+				{grace === "0" && (
+					<p className="text-sm font-medium text-failure">
+						Grace 0 revokes the current secret immediately.
+					</p>
+				)}
+				{!validGrace && (
+					<p className="text-sm text-failure">
+						Enter a whole number from 0 to 168.
+					</p>
+				)}
+			</FormField>
 			{resource === "source" && (
-				<>
-					<Label htmlFor="supplied">
-						New secret (optional, 16–512 characters; leave empty to generate)
-					</Label>
+				<FormField
+					htmlFor="supplied"
+					label="New secret (optional, 16–512 characters; leave empty to generate)"
+				>
 					<Input
 						id="supplied"
 						type="password"
@@ -112,15 +113,16 @@ function RotateSecretForm({
 						onChange={(e) => setSupplied(e.target.value)}
 						autoComplete="off"
 					/>
-				</>
+				</FormField>
 			)}
-			<Label htmlFor="rotate-reason">Reason (optional)</Label>
-			<Textarea
-				id="rotate-reason"
-				maxLength={500}
-				value={reason}
-				onChange={(e) => setReason(e.target.value)}
-			/>
+			<FormField htmlFor="rotate-reason" label="Reason (optional)">
+				<Textarea
+					id="rotate-reason"
+					maxLength={500}
+					value={reason}
+					onChange={(e) => setReason(e.target.value)}
+				/>
+			</FormField>
 			{m.error && <p className="text-sm text-failure">{errorText(m.error)}</p>}
 			<DialogFooter>
 				<Button variant="outline" onClick={() => onOpenChange(false)}>

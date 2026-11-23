@@ -1,7 +1,7 @@
 import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query";
 import { createRouter, type RouterHistory } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { ApiError } from "./lib/api";
+import { ApiError, PERMISSION_DENIED_MESSAGE } from "./lib/api";
 import { routeTree } from "./routeTree.gen";
 
 export function createQueryClient() {
@@ -10,7 +10,8 @@ export function createQueryClient() {
 			onError: (err, query) => onApiError(client, err, query?.queryKey),
 		}),
 		mutationCache: new MutationCache({
-			onError: (err) => onApiError(client, err),
+			// The API client already announces the outcome of writes.
+			onError: (err) => onApiError(client, err, undefined),
 		}),
 		defaultOptions: { queries: { retry: false, refetchOnWindowFocus: true } },
 	});
@@ -21,13 +22,13 @@ export function createQueryClient() {
 function onApiError(
 	client: QueryClient,
 	err: unknown,
-	queryKey?: readonly unknown[],
+	queryKey: readonly unknown[] | undefined,
 ) {
 	if (!(err instanceof ApiError) || err.status !== 403) return;
 	// A 403 from /me itself would mean the session lost its user; invalidating
 	// ["me"] here would refetch it in a tight loop.
 	if (queryKey?.[0] === "me") return;
-	toast.error("You do not have permission for that action.");
+	if (queryKey) toast.error(PERMISSION_DENIED_MESSAGE);
 	void client.invalidateQueries({ queryKey: ["me"] });
 }
 

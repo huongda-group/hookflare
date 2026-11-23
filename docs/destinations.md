@@ -12,6 +12,8 @@ Paused destinations hold work without consuming attempts. Disabled destinations 
 
 Endpoints → Destinations provides list/detail, policy editing, reason-confirmed pause/resume, test delivery, and secret rotation. API prefix `/api/admin/v1/destinations` includes list/create/detail/update, `/stats`, `/:id/pause`, `/:id/resume`, `/:id/test`, `/:id/tests`, and `/:id/rotate-secret`.
 
+The Destinations tab lists and creates destinations in the active project. Its detail, actions, stats, and test history keep that project scope.
+
 A destination policy field overrides the corresponding global default; unset fields inherit. Explain inherited values rather than displaying a blank as zero. During outbound secret rotation, both signatures can be sent in the grace window. A test result is synchronous and separate from an event replay.
 
 ## Ideas, boundaries, and open work

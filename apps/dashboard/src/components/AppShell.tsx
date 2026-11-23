@@ -1,10 +1,16 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
-import { ChevronRight, Menu, Webhook } from "lucide-react";
+import {
+	Link,
+	Navigate,
+	Outlet,
+	useLocation,
+	useMatches,
+	useNavigate,
+} from "@tanstack/react-router";
+import { ChevronRight, Folder, Menu } from "lucide-react";
 import { type JSX, useEffect, useState } from "react";
 import { AccountMenu } from "@/components/AccountMenu";
 import { AppNavigation } from "@/components/AppNavigation";
-import { ChangePasswordDialog } from "@/components/ChangePasswordDialog";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -13,9 +19,21 @@ import {
 	DialogTitle,
 	DialogTrigger,
 } from "@/components/ui/dialog";
-import { Toaster } from "@/components/ui/sonner";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { subscribeUnauthorized } from "@/lib/api";
+import {
+	ActiveProjectContext,
+	isProjectCollection,
+	useActiveProject,
+	useProjectSelection,
+} from "@/lib/project-selection";
 import { logout } from "@/lib/queries/auth";
 import { useMeQuery } from "@/lib/queries/me";
 import { LoadError } from "./LoadError";
@@ -49,6 +67,7 @@ type Crumb = { key: string; label: string; to?: KnownRoute };
  * a trailing detail id is shown as text (spec §6). No new route or context.
  */
 function Breadcrumbs({ pathname }: { pathname: string }): JSX.Element {
+	const { projectId } = useActiveProject();
 	const segments = pathname.split("/").filter(Boolean);
 	const crumbs: Crumb[] = segments.map((segment, index) => {
 		const key = `/${segments.slice(0, index + 1).join("/")}`;
@@ -76,6 +95,11 @@ function Breadcrumbs({ pathname }: { pathname: string }): JSX.Element {
 						{crumb.to ? (
 							<Link
 								to={crumb.to}
+								search={
+									isProjectCollection(crumb.to) && projectId
+										? { project_id: projectId }
+										: undefined
+								}
 								className="truncate rounded-sm text-muted-foreground hover:text-foreground"
 							>
 								{crumb.label}
@@ -97,8 +121,13 @@ export function AppShell() {
 	const qc = useQueryClient();
 	const navigate = useNavigate();
 	const location = useLocation();
-	const [pwOpen, setPwOpen] = useState(false);
+	const onProjectsIndex = useMatches({
+		select: (matches) => matches.at(-1)?.routeId === "/projects/",
+	});
 	const [navOpen, setNavOpen] = useState(false);
+	const selection = useProjectSelection(
+		Boolean(me.data && !me.data.project_required),
+	);
 	// Spec §6.7: any 401 from the API sends the user to `/login?next=<here>`.
 	useEffect(
 		() =>
@@ -120,6 +149,15 @@ export function AppShell() {
 	if (!me.data) {
 		return <p className="p-6 text-muted-foreground">Loading…</p>;
 	}
+	const projectRequired = me.data.project_required;
+	if (
+		projectRequired &&
+		!["/projects", "/projects/"].includes(location.pathname)
+	) {
+		return <Navigate to="/projects" replace />;
+	}
+	// The location may update before the previous route stops rendering.
+	if (projectRequired && !onProjectsIndex) return null;
 	// Logout is idempotent: even if the session is already gone, or the request
 	// itself fails, the user meant to leave, so clear every cached query and
 	// land on /login either way.
@@ -133,16 +171,20 @@ export function AppShell() {
 			await navigate({ to: "/login" });
 		}
 	};
-	const account = (
-		<AccountMenu
-			username={me.data.username}
-			role={me.data.role}
-			onChangePassword={() => setPwOpen(true)}
-			onLogout={() => void doLogout()}
-		/>
-	);
+	const {
+		catalog,
+		projectId,
+		projects,
+		projectScoped,
+		selectProject,
+		missingScope,
+	} = selection;
+	const nameCounts = new Map<string, number>();
+	for (const p of projects ?? [])
+		nameCounts.set(p.name, (nameCounts.get(p.name) ?? 0) + 1);
+
 	return (
-		<>
+		<ActiveProjectContext.Provider value={selection}>
 			<a
 				href="#main-content"
 				className="rounded-md border border-border bg-surface text-sm font-medium text-action sr-only focus:not-sr-only focus:m-2 focus:inline-block focus:px-4 focus:py-2"
@@ -155,7 +197,12 @@ export function AppShell() {
 				    when closed (loaded while open by `Open navigation`). */}
 				<aside className="hidden w-[222px] shrink-0 flex-col border-r border-border bg-sidebar px-3.5 pt-6 pb-4 lg:flex">
 					<Link
-						to="/"
+						to={projectRequired ? "/projects" : "/"}
+						search={
+							!projectRequired && projectId
+								? { project_id: projectId }
+								: undefined
+						}
 						aria-label="Hookflare home"
 						className="mb-7 flex items-center gap-2.5 rounded-md px-3 text-xl font-semibold tracking-tight text-foreground"
 					>
@@ -166,50 +213,72 @@ export function AppShell() {
 						/>
 						hookflare
 					</Link>
-					<div className="mb-7 flex items-center gap-2.5 rounded-lg border border-border bg-surface px-2.5 py-2.5">
-						<span className="grid size-7 shrink-0 place-items-center rounded-md bg-sidebar text-muted-foreground">
-							<Webhook className="size-4" aria-hidden="true" />
-						</span>
-						<div className="min-w-0">
-							<p className="truncate text-xs font-semibold">
-								Hookflare instance
-							</p>
-							<p className="text-[11px] text-muted-foreground">
-								Current deployment
-							</p>
-						</div>
-					</div>
-					<AppNavigation />
-					<div className="mt-auto pt-6">{account}</div>
+					{!projectRequired && <AppNavigation />}
 				</aside>
 				<div className="flex min-w-0 flex-1 flex-col">
-					<header className="flex h-[54px] shrink-0 items-center gap-3 border-b border-border bg-surface px-4 lg:h-[61px] lg:px-9">
-						<Dialog open={navOpen} onOpenChange={setNavOpen}>
-							<DialogTrigger asChild>
-								<Button
-									variant="outline"
-									size="icon"
-									className="lg:hidden"
-									aria-label="Open navigation"
-								>
-									<Menu aria-hidden="true" />
-								</Button>
-							</DialogTrigger>
-							<DialogContent className="top-0 left-0 flex h-dvh max-h-dvh w-72 max-w-[85vw] translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-y-0 border-l-0 bg-sidebar p-4 sm:max-w-72">
-								<DialogTitle>Navigation</DialogTitle>
-								<DialogDescription className="sr-only">
-									Primary navigation and account actions
-								</DialogDescription>
-								<div className="flex min-h-0 flex-1 flex-col overflow-y-auto pt-5">
-									<div className="mb-6 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-semibold">
-										Hookflare instance
+					<header className="flex h-[54px] shrink-0 items-center gap-2 border-b border-border bg-surface px-4 sm:gap-3 lg:h-[61px] lg:px-9">
+						{!projectRequired && (
+							<Dialog open={navOpen} onOpenChange={setNavOpen}>
+								<DialogTrigger asChild>
+									<Button
+										variant="outline"
+										size="icon"
+										className="lg:hidden"
+										aria-label="Open navigation"
+									>
+										<Menu aria-hidden="true" />
+									</Button>
+								</DialogTrigger>
+								<DialogContent className="top-0 left-0 flex h-dvh max-h-dvh w-72 max-w-[85vw] translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-y-0 border-l-0 bg-sidebar p-4 sm:max-w-72">
+									<DialogTitle>Navigation</DialogTitle>
+									<DialogDescription className="sr-only">
+										Primary navigation
+									</DialogDescription>
+									<div className="flex min-h-0 flex-1 flex-col overflow-y-auto pt-5">
+										<AppNavigation onNavigate={() => setNavOpen(false)} />
 									</div>
-									<AppNavigation onNavigate={() => setNavOpen(false)} />
-									<div className="mt-auto pt-6">{account}</div>
-								</div>
-							</DialogContent>
-						</Dialog>
+								</DialogContent>
+							</Dialog>
+						)}
+						{!projectRequired && !!projects?.length && (
+							<Select value={projectId ?? ""} onValueChange={selectProject}>
+								<SelectTrigger
+									aria-label="Active project"
+									size="sm"
+									className="min-w-0 max-w-[34vw] shrink-0 gap-1.5 px-2 font-medium hover:bg-accent data-[size=sm]:h-8 lg:max-w-64"
+								>
+									<Folder className="size-3.5" aria-hidden="true" />
+									<span className="min-w-0 truncate">
+										<SelectValue placeholder="Choose a project" />
+									</span>
+								</SelectTrigger>
+								<SelectContent
+									position="popper"
+									align="start"
+									collisionPadding={8}
+									className="max-w-[min(20rem,var(--radix-select-content-available-width))]"
+								>
+									{projects.map((p) => (
+										<SelectItem
+											key={p.id}
+											value={p.id}
+											className="wrap-anywhere"
+										>
+											{(nameCounts.get(p.name) ?? 0) > 1
+												? `${p.name} (${p.id})`
+												: p.name}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						)}
 						<Breadcrumbs pathname={location.pathname} />
+						<AccountMenu
+							username={me.data.username}
+							role={me.data.role}
+							canChangePassword={!projectRequired}
+							onLogout={doLogout}
+						/>
 					</header>
 					<main
 						id="main-content"
@@ -217,13 +286,42 @@ export function AppShell() {
 						className="mx-auto w-full min-w-0 max-w-[1510px] flex-1 px-[17px] py-6 focus:outline-none lg:px-9 lg:py-8"
 					>
 						<TooltipProvider>
-							<Outlet />
+							{projectRequired && (
+								<p className="mb-4 rounded-md border border-border bg-surface p-3 text-sm">
+									{me.data.permissions.includes("config.write")
+										? "Create your first project to unlock the rest of Hookflare."
+										: "Ask an admin to create the first project before you can use Hookflare."}
+								</p>
+							)}
+							{!projectRequired && !projects && catalog.isError && (
+								<LoadError
+									what="projects"
+									error={catalog.error}
+									retrying={catalog.isFetching}
+									onRetry={() => void catalog.refetch()}
+								/>
+							)}
+							{!projectScoped || projectRequired ? (
+								<Outlet />
+							) : projectId && !missingScope ? (
+								<Outlet key={projectId} />
+							) : projects ? (
+								<p role="alert" className="text-sm text-muted-foreground">
+									{projects.length > 0
+										? projectId
+											? "Loading project…"
+											: "Choose an available project to continue."
+										: "No projects available."}
+								</p>
+							) : !catalog.isError ? (
+								<p className="text-sm text-muted-foreground">
+									Loading projects…
+								</p>
+							) : null}
 						</TooltipProvider>
 					</main>
 				</div>
 			</div>
-			<ChangePasswordDialog open={pwOpen} onOpenChange={setPwOpen} />
-			<Toaster />
-		</>
+		</ActiveProjectContext.Provider>
 	);
 }

@@ -1,8 +1,8 @@
 {
 	"name": "@huongda-group/hookflare",
 	"version": "1.0.0",
-	"private": true,
-	"packageManager": "pnpm@12.14.0",
+	"private": false,
+	"packageManager": "pnpm@12.22.0",
 	"scripts": {
 		"dev": "node scripts/ensure-dashboard-dist.mjs && wrangler dev --config apps/gateway/wrangler.jsonc",
 		"dev:dashboard": "pnpm --filter dashboard dev",
@@ -22,9 +22,9 @@
 		"smoke:staging": "node scripts/smoke.mjs --config apps/gateway/wrangler.staging.jsonc"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "2.5.15",
+		"@biomejs/biome": "2.6.8",
 		"typescript": "7.0.2",
-		"wrangler": "4.151.1"
+		"wrangler": "4.166.0"
 	},
 	"workspaces": [
 		"apps/*",

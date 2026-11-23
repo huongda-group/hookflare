@@ -3,7 +3,6 @@ import { Link } from "@tanstack/react-router";
 import { z } from "zod";
 import { type Column, CursorTable } from "@/components/CursorTable";
 import { PageHeader } from "@/components/PageHeader";
-import { ProjectSelect } from "@/components/ProjectSelect";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TimeText } from "@/components/TimeText";
 import { Badge } from "@/components/ui/badge";
@@ -16,7 +15,7 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useAlertsPage } from "@/lib/queries/alerts";
+import { type AlertScope, useAlertsPage } from "@/lib/queries/alerts";
 import { formatDuration } from "@/lib/time";
 
 export const alertsSearch = z.object({
@@ -41,9 +40,7 @@ const KNOWN_RULES: readonly string[] = ALERT_RULES;
  */
 export function RuleBadge({ rule, open }: { rule: string; open: boolean }) {
 	if ((KNOWN_RULES as readonly string[]).includes(rule)) {
-		return (
-			<Badge variant={open ? "destructive" : "secondary"}>{rule}</Badge>
-		);
+		return <Badge variant={open ? "destructive" : "secondary"}>{rule}</Badge>;
 	}
 	return (
 		<span className="inline-flex flex-wrap items-center gap-2">
@@ -55,7 +52,7 @@ export function RuleBadge({ rule, open }: { rule: string; open: boolean }) {
 	);
 }
 
-const columns: Column<Alert>[] = [
+const columns = (scope: AlertScope): Column<Alert>[] => [
 	{
 		header: "Rule",
 		cell: (a) => <RuleBadge rule={a.rule} open={a.status === "open"} />,
@@ -66,6 +63,7 @@ const columns: Column<Alert>[] = [
 			<Link
 				to="/alerts/$alertId"
 				params={{ alertId: a.id }}
+				search={scope}
 				className="underline"
 			>
 				{resourceLabel(a)}
@@ -82,17 +80,20 @@ const columns: Column<Alert>[] = [
 const RULE_ALL = "__all_rules";
 
 export function AlertsPage({
+	projectId,
 	search,
 	setSearch,
 }: {
+	projectId: string;
 	search: AlertsSearch;
 	setSearch: (s: Partial<AlertsSearch>) => void;
 }) {
-	const { status, ...rest } = search;
-	const query = useAlertsPage({
-		...rest,
-		...(status === "all" ? {} : { status }),
-	});
+	const { status, rule } = search;
+	const filters = { rule, status: status === "all" ? undefined : status };
+	const projectScope = { project_id: projectId };
+	const deploymentScope = { scope: "deployment" } as const;
+	const projectQuery = useAlertsPage({ ...filters, ...projectScope });
+	const deploymentQuery = useAlertsPage({ ...filters, ...deploymentScope });
 	return (
 		<div className="space-y-4">
 			<PageHeader
@@ -132,28 +133,45 @@ export function AlertsPage({
 							))}
 						</SelectContent>
 					</Select>
-					<ProjectSelect
-						value={search.project_id}
-						onChange={(project_id) => setSearch({ project_id })}
-					/>
 				</div>
 			</PageHeader>
-			<CursorTable
-				query={query}
-				columns={columns}
-				rowKey={(a) => a.id}
-				empty="No alerts match these filters."
-				emptyAction={
-					<Button
-						type="button"
-						variant="outline"
-						size="sm"
-						onClick={() => setSearch({ rule: undefined, project_id: undefined })}
-					>
-						Clear filters
-					</Button>
-				}
-			/>
+			<section aria-labelledby="project-incidents" className="space-y-2">
+				<h2 id="project-incidents" className="font-semibold">
+					Project incidents
+				</h2>
+				<CursorTable
+					query={projectQuery}
+					columns={columns(projectScope)}
+					rowKey={(a) => a.id}
+					empty="No project alerts match these filters."
+					emptyAction={
+						rule && (
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								onClick={() => setSearch({ rule: undefined })}
+							>
+								Clear filter
+							</Button>
+						)
+					}
+				/>
+			</section>
+			<section aria-labelledby="deployment-incidents" className="space-y-2">
+				<h2 id="deployment-incidents" className="font-semibold">
+					Deployment incidents
+				</h2>
+				<p className="text-sm text-muted-foreground">
+					These incidents are shared across all projects.
+				</p>
+				<CursorTable
+					query={deploymentQuery}
+					columns={columns(deploymentScope)}
+					rowKey={(a) => a.id}
+					empty="No deployment alerts match these filters."
+				/>
+			</section>
 		</div>
 	);
 }

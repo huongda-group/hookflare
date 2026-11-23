@@ -2,8 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { adminApp, auditRows } from "../helpers/admin";
 import { testDeps } from "../helpers/deps";
 
-const slug = () => `p-${crypto.randomUUID().slice(0, 8)}`;
-
 describe("admin projects", () => {
 	beforeEach(() => {
 		for (const m of ["log", "warn", "error"] as const)
@@ -14,15 +12,20 @@ describe("admin projects", () => {
 		const api = await adminApp(testDeps());
 		const created = await api.request("POST", "/projects", {
 			name: "Shop",
-			slug: slug(),
 		});
 		expect(created.status).toBe(201);
 		const project = await created.json<{ id: string; status: string }>();
 		expect(project).toMatchObject({ name: "Shop", status: "active" });
 		expect(project.id).toMatch(/^prj_/);
+		expect(project).not.toHaveProperty("slug");
 
 		const got = await api.request("GET", `/projects/${project.id}`);
 		expect(await got.json()).toEqual(project);
+		const list = await api.request("GET", "/projects");
+		const { data } = await list.json<{
+			data: { id: string }[];
+		}>();
+		expect(data.find((row) => row.id === project.id)).toEqual(project);
 
 		const patched = await api.request("PATCH", `/projects/${project.id}`, {
 			status: "disabled",
@@ -34,15 +37,17 @@ describe("admin projects", () => {
 		});
 	});
 
-	it("returns 409 for a duplicate slug", async () => {
+	it("assigns distinct IDs to projects with the same name", async () => {
 		const api = await adminApp(testDeps());
-		const s = slug();
-		expect(
-			(await api.request("POST", "/projects", { name: "A", slug: s })).status,
-		).toBe(201);
-		const dup = await api.request("POST", "/projects", { name: "B", slug: s });
-		expect(dup.status).toBe(409);
-		expect(await dup.json()).toEqual({ error: "conflict" });
+		const first = await api.request("POST", "/projects", { name: "Shop" });
+		const second = await api.request("POST", "/projects", { name: "Shop" });
+		expect(first.status).toBe(201);
+		expect(second.status).toBe(201);
+		const { id } = await first.json<{ id: string }>();
+		expect(id).toMatch(/^prj_/);
+		const duplicate = await second.json<{ id: string }>();
+		expect(duplicate.id).toMatch(/^prj_/);
+		expect(duplicate.id).not.toBe(id);
 	});
 
 	it("returns 400 for malformed JSON and unknown fields", async () => {
@@ -52,7 +57,6 @@ describe("admin projects", () => {
 		expect(await malformed.json()).toMatchObject({ error: "invalid_request" });
 		const unknown = await api.request("POST", "/projects", {
 			name: "A",
-			slug: slug(),
 			owner: "x",
 		});
 		expect(unknown.status).toBe(400);
@@ -60,18 +64,21 @@ describe("admin projects", () => {
 			error: "invalid_request",
 			issues: expect.any(Array),
 		});
-		const badSlug = await api.request("POST", "/projects", {
-			name: "A",
-			slug: "Bad Slug",
+		const invalidName = await api.request("POST", "/projects", {
+			name: "",
 		});
-		expect(badSlug.status).toBe(400);
+		expect(invalidName.status).toBe(400);
+		const legacy = await api.request("POST", "/projects", {
+			name: "Shop",
+			slug: "shop",
+		});
+		expect(legacy.status).toBe(400);
 	});
 
 	it("returns 413 for a body above 64 KiB", async () => {
 		const api = await adminApp(testDeps());
 		const res = await api.request("POST", "/projects", {
 			name: "x".repeat(65_536),
-			slug: slug(),
 		});
 		expect(res.status).toBe(413);
 		expect(await res.json()).toEqual({ error: "payload_too_large" });
@@ -101,7 +108,6 @@ describe("admin projects", () => {
 					await (
 						await api.request("POST", "/projects", {
 							name: `P${i}`,
-							slug: slug(),
 						})
 					).json<{ id: string }>()
 				).id,
@@ -126,7 +132,6 @@ describe("admin projects", () => {
 		const api = await adminApp(deps);
 		const res = await api.request("POST", "/projects", {
 			name: "Audited",
-			slug: slug(),
 			reason: "  new team  ",
 		});
 		const { id } = await res.json<{ id: string }>();
@@ -146,7 +151,6 @@ describe("admin projects", () => {
 		const api = await adminApp(deps, { role: "viewer" });
 		const res = await api.request("POST", "/projects", {
 			name: "Nope",
-			slug: slug(),
 		});
 		expect(res.status).toBe(403);
 		expect(await res.json()).toEqual({

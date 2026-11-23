@@ -13,11 +13,11 @@ import { z } from "zod";
 import { TrendChart } from "@/components/charts/TrendChart";
 import { DataState } from "@/components/DataState";
 import { OverviewAttention } from "@/components/OverviewAttention";
-import { ProjectSelect } from "@/components/ProjectSelect";
 import { RecentEventsTable } from "@/components/RecentEventsTable";
 import { TimeText } from "@/components/TimeText";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
+import { useActiveProject } from "@/lib/project-selection";
 import { qk } from "@/lib/queries/keys";
 import { useOverview } from "@/lib/queries/overview";
 
@@ -68,7 +68,7 @@ export function OverviewContent({
 	range,
 	onRangeChange,
 }: {
-	projectId?: string;
+	projectId: string;
 	range: StatsRange;
 	onRangeChange: (r: StatsRange) => void;
 }) {
@@ -267,7 +267,7 @@ export function OverviewContent({
 				<p className="mt-2 text-sm">
 					<Link
 						to="/events"
-						search={projectId ? { project_id: projectId } : {}}
+						search={{ project_id: projectId }}
 						className="underline"
 					>
 						View all events
@@ -285,17 +285,13 @@ export function OverviewPage({
 	search: z.infer<typeof overviewSearch>;
 	setSearch: (s: Partial<z.infer<typeof overviewSearch>>) => void;
 }) {
+	const { projectId } = useActiveProject();
+	if (!projectId) return null;
 	return (
 		<div className="space-y-4">
-			<div className="flex flex-wrap items-center justify-between gap-2">
-				<h1 className="text-xl font-semibold">Overview</h1>
-				<ProjectSelect
-					value={search.project_id}
-					onChange={(project_id) => setSearch({ project_id })}
-				/>
-			</div>
+			<h1 className="text-xl font-semibold">Overview</h1>
 			<OverviewContent
-				projectId={search.project_id}
+				projectId={projectId}
 				range={search.range}
 				onRangeChange={(range) => setSearch({ range })}
 			/>

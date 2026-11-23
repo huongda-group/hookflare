@@ -229,6 +229,13 @@ describe("GET /overview", () => {
 			count: 2,
 			by_rule: { new_dead: 1, d1_storage: 1 },
 		});
+		expect(await get("&project_id=prj_a&alert_scope=project")).toEqual({
+			count: 1,
+			by_rule: { new_dead: 1 },
+		});
+		expect(
+			(await api.request("GET", "/overview?alert_scope=project")).status,
+		).toBe(400);
 		expect(await get("")).toEqual({
 			count: 3,
 			by_rule: { new_dead: 2, d1_storage: 1 },

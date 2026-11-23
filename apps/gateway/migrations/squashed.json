@@ -1,4 +1,5 @@
 [
+	"0000_init.sql",
 	"0001_settings.sql",
 	"0002_core_pipeline.sql",
 	"0003_collapse_duplicate_event_ids.sql",
@@ -8,5 +9,8 @@
 	"0007_limiter.sql",
 	"0008_alerts.sql",
 	"0009_archive.sql",
-	"0010_backups.sql"
+	"0010_backups.sql",
+	"0001_square_outlaw_kid.sql",
+	"0002_disable_service_identities.sql",
+	"0003_needy_black_panther.sql"
 ]

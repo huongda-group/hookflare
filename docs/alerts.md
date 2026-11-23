@@ -12,6 +12,10 @@ Admins configure rules and Discord, Slack, or Telegram channels. Channel configu
 
 UI `/alerts` and `/alerts/:alertId` show incident metadata and notification history. Reading incidents via `/api/admin/v1/alerts` requires `events.read`. Settings → Alerts edits rules and channels; `/api/admin/v1/alert-channels` requires `settings.manage` for list, create, update, delete, and test.
 
+Alerts shows the active project's incidents and a separate **Deployment incidents** section. Deployment incidents remain visible when switching projects and do not count toward the dashboard's project Overview. The API's incident list and detail accept `project_id` for one project or `scope=deployment` for incidents without a project. The two parameters are mutually exclusive; omitting both retains unscoped behavior. Rules and channels are still managed at deployment level.
+
+Notification links without a scope resolve the incident's project or deployment scope after sign-in. An explicitly scoped detail link is never silently redirected to another project.
+
 A channel test result must not imply the incident rules or external monitoring are all healthy. Display notification errors and retry/recovery affordances distinctly from webhook delivery failures.
 
 ## Ideas, boundaries, and open work

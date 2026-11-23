@@ -56,6 +56,7 @@ export function RecentEventsTable({ events }: { events: EventSummary[] }) {
 								<td className="min-w-0 md:px-4 md:py-3">
 									<Link
 										to="/events/$eventId"
+										search={{ project_id: event.project_id }}
 										params={{ eventId: event.id }}
 										className="break-all font-mono font-medium text-action underline-offset-2 hover:underline"
 									>

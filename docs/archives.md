@@ -14,6 +14,8 @@ Defaults: hot retention 30 days, failed retention 90 days, audit retention 365 d
 
 UI `/archives` lists batches/parts; Settings → Storage previews consequences and can trigger a run. API: GET `/api/admin/v1/archives`, GET `/archives/preview`, POST `/archives/run`, GET `/archives/:batchId/parts/:n`. Metadata requires `events.read`, download requires `payload.read`, preview/run requires `settings.manage`.
 
+Archive batches and downloads are deployment-wide, regardless of the dashboard's active project.
+
 Use actual batch statuses (`building`, `verified`, `purged`, `failed`, `expired`) and `with_files`. Download is available only for eligible verified/purged parts with files. A run-start 202 means workflow accepted, not archive complete.
 
 ## Ideas, boundaries, and open work

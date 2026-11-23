@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { SettingsPage, settingsSearch } from "@/pages/SettingsPage";
 
 export const Route = createFileRoute("/settings")({
+	staticData: { pageTitle: "Settings" },
 	validateSearch: settingsSearch,
 	component: function SettingsRoute() {
 		const search = Route.useSearch();

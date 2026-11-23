@@ -20,6 +20,25 @@ function setup() {
 }
 
 describe("invalidateDeliveryViews", () => {
+	it("invalidates the submitted project even when its queries are inactive", async () => {
+		const { qc } = setup();
+		const keys = (projectId: string) => [
+			qk.events.one("evt_1", projectId),
+			qk.events.list({ project_id: projectId }),
+			qk.failures.list({ project_id: projectId }),
+			qk.overview({ project_id: projectId }),
+			qk.destinations.stats({ project_id: projectId }),
+		];
+		const a = keys("prj_a");
+		const b = keys("prj_b");
+		for (const key of [...a, ...b]) qc.setQueryData(key, { data: [] });
+		await invalidateDeliveryViews(qc, "prj_a");
+		for (const key of a)
+			expect(qc.getQueryState(key)?.isInvalidated).toBe(true);
+		for (const key of b)
+			expect(qc.getQueryState(key)?.isInvalidated).toBe(false);
+	});
+
 	it("refetches the events, failures, overview, and destination-stats prefixes", async () => {
 		const { qc, wrapper } = setup();
 		const fetches = { events: 0, failures: 0, overview: 0, stats: 0 };
@@ -69,13 +88,23 @@ describe("invalidateDeliveryViews", () => {
 			{ wrapper },
 		);
 		await waitFor(() =>
-			expect(fetches).toEqual({ events: 1, failures: 1, overview: 1, stats: 1 }),
+			expect(fetches).toEqual({
+				events: 1,
+				failures: 1,
+				overview: 1,
+				stats: 1,
+			}),
 		);
 
 		await invalidateDeliveryViews(qc);
 
 		await waitFor(() =>
-			expect(fetches).toEqual({ events: 2, failures: 2, overview: 2, stats: 2 }),
+			expect(fetches).toEqual({
+				events: 2,
+				failures: 2,
+				overview: 2,
+				stats: 2,
+			}),
 		);
 	});
 });

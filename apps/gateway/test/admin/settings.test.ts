@@ -15,7 +15,12 @@ import {
 	STORAGE_SETTING,
 	upsertRetryDefaults,
 } from "../../src/core/settings";
-import { adminApp, auditRows, beforeNextBatch } from "../helpers/admin";
+import {
+	adminApp,
+	auditRows,
+	beforeNextBatch,
+	seedAdminProject,
+} from "../helpers/admin";
 import { fakeArchive, testDeps, withFailingBatch } from "../helpers/deps";
 
 const next = {
@@ -26,6 +31,7 @@ const next = {
 };
 
 beforeEach(async () => {
+	await seedAdminProject();
 	clearSettingsCache();
 	const deps = testDeps();
 	await deps.db.delete(settings).where(eq(settings.key, RETRY_DEFAULTS_KEY));

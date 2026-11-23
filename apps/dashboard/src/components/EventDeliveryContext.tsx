@@ -2,8 +2,14 @@ import type { Delivery, WebhookEvent } from "@hookflare/shared";
 import { useDestination, useSource } from "@/lib/queries/endpoints";
 import { StatusBadge } from "./StatusBadge";
 
-export function SourceName({ id }: { id: string }) {
-	const { data } = useSource(id);
+export function SourceName({
+	id,
+	projectId,
+}: {
+	id: string;
+	projectId: string;
+}) {
+	const { data } = useSource(id, projectId);
 	return (
 		<span title={id} className="break-all">
 			{data?.name ?? id}
@@ -11,8 +17,8 @@ export function SourceName({ id }: { id: string }) {
 	);
 }
 
-function DestinationName({ id }: { id: string }) {
-	const { data } = useDestination(id);
+function DestinationName({ id, projectId }: { id: string; projectId: string }) {
+	const { data } = useDestination(id, projectId);
 	return (
 		<span title={id} className="break-all">
 			{data?.name ?? id}
@@ -35,7 +41,7 @@ export function EventDeliveryContext({
 			<div>
 				<span className="block text-xs text-muted-foreground">Source</span>
 				{event.source_id ? (
-					<SourceName id={event.source_id} />
+					<SourceName id={event.source_id} projectId={event.project_id} />
 				) : (
 					"Unknown source"
 				)}
@@ -51,7 +57,10 @@ export function EventDeliveryContext({
 					Selected destination
 				</span>
 				{delivery?.destination_id ? (
-					<DestinationName id={delivery.destination_id} />
+					<DestinationName
+						id={delivery.destination_id}
+						projectId={event.project_id}
+					/>
 				) : (
 					"No delivery destination"
 				)}

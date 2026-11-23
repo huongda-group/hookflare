@@ -7,6 +7,8 @@ export function useMeQuery() {
 	return useQuery({
 		queryKey: qk.me,
 		queryFn: () => api.get<Me>("/me"),
-		staleTime: Number.POSITIVE_INFINITY,
+		// Another admin can finish onboarding while this tab is open.
+		staleTime: (query) =>
+			query.state.data?.project_required ? 0 : Number.POSITIVE_INFINITY,
 	});
 }

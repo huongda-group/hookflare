@@ -1,8 +1,20 @@
 import { screen, waitFor, within } from "@testing-library/react";
+import type { UserEvent } from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it, vi } from "vitest";
 import { renderApp } from "@/test/render";
 import { apiUrl, meFor, server } from "@/test/server";
+
+async function selectAccountAction(user: UserEvent, name: string) {
+	await user.click(await screen.findByRole("button", { name: /^Account:/ }));
+	await user.click(await screen.findByRole("menuitem", { name }));
+}
+
+async function confirmLogout(user: UserEvent) {
+	await selectAccountAction(user, "Log out");
+	const dialog = await screen.findByRole("dialog", { name: "Log out?" });
+	await user.click(within(dialog).getByRole("button", { name: "Log out" }));
+}
 
 describe("AppShell", () => {
 	it("shows the signed-in user and every nav item to an admin", async () => {
@@ -21,10 +33,25 @@ describe("AppShell", () => {
 		}
 	});
 
-	it("keeps instance identity linked to Overview without adding a fake workspace switcher", async () => {
+	it("places the project picker before the breadcrumb without deployment cards", async () => {
 		const { user, router } = renderApp("/events");
-		await screen.findByText("admin@example.com");
-		expect(screen.getByText("Hookflare instance")).toBeInTheDocument();
+		const picker = await screen.findByRole("combobox", {
+			name: "Active project",
+		});
+		const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+		expect(
+			picker.compareDocumentPosition(breadcrumb) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		expect(screen.queryByText("Hookflare instance")).not.toBeInTheDocument();
+		expect(screen.queryByText("Current deployment")).not.toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Open navigation" }));
+		expect(
+			within(await screen.findByRole("dialog")).queryByText(
+				"Hookflare instance",
+			),
+		).not.toBeInTheDocument();
+		await user.keyboard("{Escape}");
 		await user.click(screen.getByRole("link", { name: "Hookflare home" }));
 		await waitFor(() => expect(router.state.location.pathname).toBe("/"));
 	});
@@ -89,17 +116,71 @@ describe("AppShell", () => {
 		expect(await screen.findByText("admin@example.com")).toBeInTheDocument();
 	});
 
-	it("shows a user menu with the username, role, and account actions", async () => {
-		renderApp("/");
-		await screen.findByText("admin@example.com");
-		expect(screen.getByText("admin")).toBeInTheDocument();
+	it("keeps account actions in a keyboard-accessible header menu", async () => {
+		const { user } = renderApp("/");
+		const header = await screen.findByRole("banner");
+		const trigger = within(header).getByRole("button", {
+			name: "Account: admin@example.com, admin",
+		});
+		expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+		trigger.focus();
+		await user.keyboard("{Enter}");
+		const menu = await screen.findByRole("menu");
 		expect(
-			screen.getByRole("button", { name: "Change password" }),
+			within(menu).getByRole("menuitem", { name: "Change password" }),
 		).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "Log out" })).toBeInTheDocument();
+		expect(
+			within(menu).getByRole("menuitem", { name: "Log out" }),
+		).toBeInTheDocument();
+		await user.keyboard("{Escape}");
+		await waitFor(() =>
+			expect(screen.queryByRole("menu")).not.toBeInTheDocument(),
+		);
+		expect(trigger).toHaveFocus();
 	});
 
-	it("logs out via POST /auth/logout and navigates to /login", async () => {
+	it("returns focus to the account trigger after closing the password dialog", async () => {
+		const { user } = renderApp("/");
+		await selectAccountAction(user, "Change password");
+		expect(
+			await screen.findByRole("dialog", { name: "Change password" }),
+		).toBeInTheDocument();
+		expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+		await user.keyboard("{Escape}");
+		const trigger = await screen.findByRole("button", { name: /^Account:/ });
+		await waitFor(() => expect(trigger).toHaveFocus());
+	});
+
+	it.each(["Cancel", "Escape"])(
+		"stays signed in when the logout dialog is dismissed with %s",
+		async (dismissal) => {
+			const loggedOut = vi.fn();
+			server.use(
+				http.post(apiUrl("/auth/logout"), () => {
+					loggedOut();
+					return new HttpResponse(null, { status: 204 });
+				}),
+			);
+			const { user, router } = renderApp("/events");
+			const trigger = await screen.findByRole("button", { name: /^Account:/ });
+			await selectAccountAction(user, "Log out");
+			const dialog = await screen.findByRole("dialog", { name: "Log out?" });
+			const cancel = within(dialog).getByRole("button", { name: "Cancel" });
+			expect(cancel).toHaveFocus();
+			expect(within(dialog).queryByRole("textbox")).not.toBeInTheDocument();
+			if (dismissal === "Cancel") {
+				await user.click(cancel);
+			} else {
+				await user.keyboard("{Escape}");
+			}
+			await waitFor(() => expect(dialog).not.toBeInTheDocument());
+			await waitFor(() => expect(trigger).toHaveFocus());
+			expect(loggedOut).not.toHaveBeenCalled();
+			expect(router.state.location.pathname).toBe("/events");
+		},
+	);
+
+	it("logs out via POST /auth/logout only after confirmation and navigates to /login", async () => {
 		const loggedOut = vi.fn();
 		server.use(
 			http.post(apiUrl("/auth/logout"), () => {
@@ -109,8 +190,11 @@ describe("AppShell", () => {
 		);
 		const { user, router } = renderApp("/");
 		await screen.findByText("admin@example.com");
-		await user.click(screen.getByRole("button", { name: "Log out" }));
-		await waitFor(() => expect(loggedOut).toHaveBeenCalled());
+		await selectAccountAction(user, "Log out");
+		const dialog = await screen.findByRole("dialog", { name: "Log out?" });
+		expect(loggedOut).not.toHaveBeenCalled();
+		await user.click(within(dialog).getByRole("button", { name: "Log out" }));
+		await waitFor(() => expect(loggedOut).toHaveBeenCalledTimes(1));
 		await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
 	});
 
@@ -124,7 +208,7 @@ describe("AppShell", () => {
 		);
 		const { user } = renderApp("/");
 		await screen.findByText("admin@example.com");
-		await user.click(screen.getByRole("button", { name: "Change password" }));
+		await selectAccountAction(user, "Change password");
 		await user.type(
 			await screen.findByLabelText("Current password"),
 			"old-password-is-long",
@@ -163,7 +247,7 @@ describe("AppShell", () => {
 		);
 		const { user } = renderApp("/");
 		await screen.findByText("admin@example.com");
-		await user.click(screen.getByRole("button", { name: "Change password" }));
+		await selectAccountAction(user, "Change password");
 		await user.type(
 			await screen.findByLabelText("Current password"),
 			"old-password-is-long",
@@ -215,6 +299,19 @@ describe("AppShell", () => {
 		}
 	});
 
+	it.each(["/", "/?range=7d"])("marks Overview active at %s", async (path) => {
+		server.use(
+			http.get(apiUrl("/overview"), () =>
+				HttpResponse.json({ error: "internal" }, { status: 500 }),
+			),
+		);
+		renderApp(path);
+		const nav = await screen.findByRole("navigation", { name: "Main" });
+		const overview = within(nav).getByRole("link", { name: "Overview" });
+		expect(overview).toHaveAttribute("aria-current", "page");
+		expect(overview).toHaveClass("bg-selected", "font-medium");
+	});
+
 	it("marks a detail route's parent nav item active with background and weight", async () => {
 		server.use(
 			http.get(apiUrl("/events/evt_1"), () =>
@@ -233,6 +330,9 @@ describe("AppShell", () => {
 		expect(failures).not.toHaveClass("bg-selected");
 		expect(failures).not.toHaveClass("font-medium");
 		expect(failures).not.toHaveAttribute("aria-current");
+		expect(
+			within(nav).getByRole("link", { name: "Overview" }),
+		).not.toHaveAttribute("aria-current");
 	});
 
 	it("opens the navigation drawer, closes it with Escape, and restores focus", async () => {
@@ -292,7 +392,7 @@ describe("AppShell", () => {
 		await screen.findByText("admin@example.com");
 		queryClient.setQueryData(seeded, { data: [], next_cursor: null });
 		expect(queryClient.getQueryData(seeded)).toBeDefined();
-		await user.click(screen.getByRole("button", { name: "Log out" }));
+		await confirmLogout(user);
 		await waitFor(() => expect(attempts).toBeGreaterThanOrEqual(1));
 		await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
 		expect(queryClient.getQueryData(seeded)).toBeUndefined();
@@ -344,7 +444,7 @@ describe("AppShell", () => {
 		expect(JSON.stringify(queryClient.getQueryCache().getAll())).toContain(
 			secret,
 		);
-		await user.click(screen.getByRole("button", { name: "Log out" }));
+		await confirmLogout(user);
 		await waitFor(() => expect(attempts).toBeGreaterThanOrEqual(1));
 		await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
 		for (const q of queryClient.getQueryCache().getAll()) {
@@ -353,10 +453,14 @@ describe("AppShell", () => {
 	});
 
 	it("offers password change to viewers", async () => {
-		renderApp("/", { role: "viewer" });
-		await screen.findByText("viewer@example.com");
+		const { user } = renderApp("/", { role: "viewer" });
+		await user.click(
+			await screen.findByRole("button", {
+				name: "Account: viewer@example.com, viewer",
+			}),
+		);
 		expect(
-			screen.getByRole("button", { name: "Change password" }),
+			await screen.findByRole("menuitem", { name: "Change password" }),
 		).toBeInTheDocument();
 	});
 });

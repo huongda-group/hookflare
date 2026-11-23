@@ -69,10 +69,12 @@ import { decodeCursor, encodeCursor } from "../cursor";
 import {
 	auditStmt,
 	badCursor,
+	checkCreateProject,
 	guardUrl,
 	paginate,
 	readJson,
 	readOptionalJson,
+	readProjectResource,
 	readQuery,
 } from "../http";
 import { successRate } from "./overview";
@@ -177,6 +179,8 @@ export function destinationRoutes() {
 		const body = await readJson(c, createDestinationRequest);
 		if (!body.ok) return body.response;
 		const { reason, ...fields } = body.value;
+		const mismatch = checkCreateProject(c, fields.project_id);
+		if (mismatch) return mismatch;
 		const { db, now, env } = c.var.deps;
 		if (!(await getProject(db, fields.project_id))) {
 			return c.json({ error: "invalid_reference", field: "project_id" }, 422);
@@ -276,10 +280,14 @@ export function destinationRoutes() {
 	});
 
 	routes.get("/:id", requirePermission("events.read"), async (c) => {
-		const row = await getDestination(c.var.deps.db, c.req.param("id"));
-		return row
-			? c.json(await toDestination(c.var.deps.env, row, c.var.deps.now()))
-			: c.json({ error: "not_found" }, 404);
+		const found = await readProjectResource(c, () =>
+			getDestination(c.var.deps.db, c.req.param("id")),
+		);
+		return found.ok
+			? c.json(
+					await toDestination(c.var.deps.env, found.value, c.var.deps.now()),
+				)
+			: found.response;
 	});
 
 	routes.patch("/:id", requirePermission("config.write"), async (c) => {
@@ -287,8 +295,9 @@ export function destinationRoutes() {
 		if (!body.ok) return body.response;
 		const { db, now, env } = c.var.deps;
 		const id = c.req.param("id");
-		const existing = await getDestination(db, id);
-		if (!existing) return c.json({ error: "not_found" }, 404);
+		const found = await readProjectResource(c, () => getDestination(db, id));
+		if (!found.ok) return found.response;
+		const existing = found.value;
 		if (body.value.url !== undefined) {
 			const unsafe = await guardUrl(c, body.value.url);
 			if (unsafe) return unsafe;
@@ -366,8 +375,9 @@ export function destinationRoutes() {
 			if (!body.ok) return body.response;
 			const { db, now, env } = c.var.deps;
 			const id = c.req.param("id");
-			const existing = await getDestination(db, id);
-			if (!existing) return c.json({ error: "not_found" }, 404);
+			const found = await readProjectResource(c, () => getDestination(db, id));
+			if (!found.ok) return found.response;
+			const existing = found.value;
 			const ts = now();
 			const secret = generateSigningSecret();
 			const cols = await rotationColumns({
@@ -428,8 +438,9 @@ export function destinationRoutes() {
 			if (!body.ok) return body.response;
 			const { db, now, env } = c.var.deps;
 			const id = c.req.param("id");
-			const existing = await getDestination(db, id);
-			if (!existing) return c.json({ error: "not_found" }, 404);
+			const found = await readProjectResource(c, () => getDestination(db, id));
+			if (!found.ok) return found.response;
+			const existing = found.value;
 			// Only an actual transition is audited; a repeat Pause is a no-op.
 			if (existing.status === "active") {
 				const ts = now();
@@ -460,8 +471,11 @@ export function destinationRoutes() {
 			if (!body.ok) return body.response;
 			const deps = c.var.deps;
 			const id = c.req.param("id");
-			const existing = await getDestination(deps.db, id);
-			if (!existing) return c.json({ error: "not_found" }, 404);
+			const found = await readProjectResource(c, () =>
+				getDestination(deps.db, id),
+			);
+			if (!found.ok) return found.response;
+			const existing = found.value;
 			// Only an actual transition is audited; a repeat Resume is a no-op.
 			let row: DestinationRow | undefined;
 			if (existing.status === "paused") {
@@ -512,8 +526,11 @@ export function destinationRoutes() {
 			if (!body.ok) return body.response;
 			const deps = c.var.deps;
 			const id = c.req.param("id");
-			const destination = await getDestination(deps.db, id);
-			if (!destination) return c.json({ error: "not_found" }, 404);
+			const found = await readProjectResource(c, () =>
+				getDestination(deps.db, id),
+			);
+			if (!found.ok) return found.response;
+			const destination = found.value;
 			if (destination.status === "disabled") {
 				return c.json({ error: "destination_disabled" }, 409);
 			}
@@ -645,8 +662,8 @@ export function destinationRoutes() {
 		if (after === "invalid") return badCursor(c);
 		const { db } = c.var.deps;
 		const id = c.req.param("id");
-		if (!(await getDestination(db, id)))
-			return c.json({ error: "not_found" }, 404);
+		const found = await readProjectResource(c, () => getDestination(db, id));
+		if (!found.ok) return found.response;
 		const rows = await listTestDeliveries(db, id, {
 			after: after ?? undefined,
 			limit: q.value.limit,

@@ -19,6 +19,68 @@ import {
 
 const WIDTHS = [1440, 1280, 768, 390, 320] as const;
 
+for (const width of [390, 1440]) {
+	test(`stacked form controls have an 8px label gap at ${width}px`, async ({
+		page,
+	}) => {
+		await installApp(page, { role: "admin" });
+		await page.setViewportSize({ width, height: 900 });
+		for (const [url, names] of [
+			["/events", ["Search", "HTTP status", "From", "To"]],
+			[
+				"/settings?tab=retry",
+				["Timeout (ms)", "Max attempts", "Reason (optional)"],
+			],
+		] as const) {
+			await page.goto(url);
+			for (const name of names) {
+				const input = page.getByLabel(name, { exact: true });
+				await expect(input).toBeVisible();
+				const gap = await input.evaluate(
+					(control: HTMLInputElement | HTMLTextAreaElement) => {
+						const label = control.labels?.[0];
+						if (!label) throw new Error(`No label for ${control.id}`);
+						return (
+							control.getBoundingClientRect().top -
+							label.getBoundingClientRect().bottom
+						);
+					},
+				);
+				expect.soft(gap, `${url}: ${name}`).toBeCloseTo(8);
+			}
+		}
+	});
+}
+
+test("add-user controls wrap without overlap on mobile", async ({ page }) => {
+	await installApp(page, { role: "admin" });
+	await page.setViewportSize({ width: 390, height: 900 });
+	await page.goto("/settings?tab=users");
+
+	const controls = [
+		page.getByLabel("Username", { exact: true }),
+		page.getByLabel("Password", { exact: true }),
+		page.getByRole("combobox", { name: "Role", exact: true }),
+		page.getByRole("button", { name: "Add user", exact: true }),
+	];
+	const boxes: { x: number; y: number; width: number; height: number }[] = [];
+	for (const control of controls) {
+		await expect(control).toBeVisible();
+		const box = await control.boundingBox();
+		if (!box) throw new Error("Missing add-user control");
+		expect(box.x + box.width).toBeLessThanOrEqual(390);
+		for (const previous of boxes) {
+			const overlap =
+				box.x < previous.x + previous.width &&
+				box.x + box.width > previous.x &&
+				box.y < previous.y + previous.height &&
+				box.y + box.height > previous.y;
+			expect(overlap).toBe(false);
+		}
+		boxes.push(box);
+	}
+});
+
 test("navigation has no page-level overflow from 1440px down to 320px", async ({
 	page,
 }) => {
@@ -68,6 +130,14 @@ test("the delivery path stays readable on desktop and out of the way on mobile",
 	});
 	const intro = page.getByRole("region", { name: "About Hookflare" });
 	const path = intro.getByRole("list", { name: "Delivery path" });
+	const stepSpread = () =>
+		path.evaluate((list) => {
+			const first = list.firstElementChild?.getBoundingClientRect();
+			const last = list.lastElementChild?.getBoundingClientRect();
+			if (!first || !last) throw new Error("Missing delivery steps");
+			const span = last.x + last.width / 2 - (first.x + first.width / 2);
+			return span / list.getBoundingClientRect().width;
+		});
 	await page.setViewportSize({ width: 1024, height: 900 });
 	await page.goto("/setup");
 	await expect(
@@ -78,6 +148,27 @@ test("the delivery path stays readable on desktop and out of the way on mobile",
 		/Delivery\s+tracked/i,
 		/Attempt\s+recorded/i,
 	]);
+	const offsets = await path.getByRole("listitem").evaluateAll((steps) =>
+		steps.map((step) => {
+			const { x, width } = step.getBoundingClientRect();
+			const icon = step.querySelector("svg")?.getBoundingClientRect();
+			const label = step.querySelector("p")?.firstChild;
+			if (!icon || !label) throw new Error("Missing delivery step content");
+			const range = document.createRange();
+			range.selectNodeContents(label);
+			const text = range.getBoundingClientRect();
+			const center = x + width / 2;
+			return [
+				icon.x + icon.width / 2 - center,
+				text.x + text.width / 2 - center,
+			];
+		}),
+	);
+	for (const [icon, label] of offsets) {
+		expect(Math.abs(icon)).toBeLessThan(1);
+		expect(Math.abs(label)).toBeLessThan(1);
+	}
+	expect.soft(await stepSpread(), "setup step spread").toBeGreaterThan(0.64);
 	expect(await pageOverflow(page)).toBe(0);
 
 	app.update({
@@ -86,6 +177,7 @@ test("the delivery path stays readable on desktop and out of the way on mobile",
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await page.goto("/login");
 	await expect(path).toBeVisible();
+	expect.soft(await stepSpread(), "login step spread").toBeGreaterThan(0.64);
 	await page.setViewportSize({ width: 390, height: 900 });
 	await expect(intro).toBeHidden();
 	await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
@@ -152,18 +244,31 @@ test("setup and login render explicit states and stay keyboard operable", async 
 	await expect(
 		page.getByText("Bot protection is off.", { exact: true }),
 	).toBeVisible();
-	await page.getByLabel("Username", { exact: true }).fill("e2e-admin");
+	const username = page.getByLabel("Username", { exact: true });
 	const password = page.getByLabel("Password", { exact: true });
+	const confirm = page.getByLabel("Confirm password", { exact: true });
+	await username.fill("e2e-admin");
+	await page.keyboard.press("Tab");
+	await expect(password).toBeFocused();
 	await password.fill("e2e-password-1234");
-	// Show/hide keeps the value and the ref (react-hook-form compatible).
-	const toggle = page.getByRole("button", {
-		name: /show password|hide password/i,
-	});
-	if (await toggle.isVisible()) {
-		await toggle.focus();
-		await page.keyboard.press("Enter");
-		await expect(password).toHaveValue("e2e-password-1234");
-	}
+	await page.keyboard.press("Tab");
+	await expect(confirm).toBeFocused({ timeout: 1500 });
+	await page.keyboard.press("Shift+Tab");
+	await expect(password).toBeFocused();
+	await page.keyboard.press("Tab");
+	await page.keyboard.press("Tab");
+	await expect(
+		page.getByRole("button", { name: "Show Password", exact: true }),
+	).toBeFocused();
+	await page.keyboard.press("Enter");
+	await expect(password).toHaveAttribute("type", "text");
+	await expect(password).toHaveValue("e2e-password-1234");
+	await page.keyboard.press("Tab");
+	await expect(
+		page.getByRole("button", { name: "Show Confirm password", exact: true }),
+	).toBeFocused();
+	await page.keyboard.press("Enter");
+	await expect(confirm).toHaveAttribute("type", "text");
 	expect(await pageOverflow(page)).toBe(0);
 
 	// Login: wrong credentials stay inline, never a session-expiry redirect.
@@ -181,6 +286,35 @@ test("setup and login render explicit states and stay keyboard operable", async 
 	await expect(page.getByText("Invalid username or password")).toBeVisible();
 	await expect(page).toHaveURL(/\/login/);
 	expect(await pageOverflow(page)).toBe(0);
+});
+
+test("setup password toggle hover stays inside the input border", async ({
+	page,
+}) => {
+	await installApp(page, {
+		authState: { setup_required: true, turnstile_site_key: null },
+	});
+	await page.goto("/setup");
+	for (const name of ["Password", "Confirm password"]) {
+		const input = page.getByLabel(name, { exact: true });
+		const toggle = page.getByRole("button", {
+			name: `Show ${name}`,
+			exact: true,
+		});
+		const face = toggle.getByText("Show", { exact: true });
+		await toggle.hover();
+		const fieldBox = await input.boundingBox();
+		const faceBox = await face.boundingBox();
+		const hitBox = await toggle.boundingBox();
+		if (!fieldBox || !faceBox || !hitBox)
+			throw new Error("Missing password control");
+		expect(hitBox.height).toBeGreaterThanOrEqual(44);
+		expect(faceBox.y).toBeGreaterThan(fieldBox.y);
+		expect(faceBox.y + faceBox.height).toBeLessThan(
+			fieldBox.y + fieldBox.height,
+		);
+		expect(faceBox.x + faceBox.width).toBeLessThan(fieldBox.x + fieldBox.width);
+	}
 });
 
 test("failures recovery is keyboard operable and never claims Delivered from a 201", async ({
@@ -242,7 +376,9 @@ test("destination pause confirms with a reason via keyboard", async ({
 	await page.getByRole("button", { name: "Pause", exact: true }).click();
 	await expect(
 		requests.some(
-			(r) => r.method === "POST" && r.path === "/destinations/dst_1/pause",
+			(r) =>
+				r.method === "POST" &&
+				r.path === "/destinations/dst_1/pause?project_id=prj_1",
 		),
 	).toBe(true);
 });
@@ -273,6 +409,41 @@ test("role matrix hides admin UI and viewer direct links fetch nothing protected
 	await expect(page.getByRole("tab", { name: "Storage" })).not.toBeVisible();
 	await expect(page.getByRole("tab", { name: "Alerts" })).not.toBeVisible();
 	expect(await pageOverflow(page)).toBe(0);
+});
+
+test("all Settings tabs align with the Projects content edges", async ({
+	page,
+}) => {
+	await installApp(page, { role: "admin" });
+	await page.setViewportSize({ width: 1440, height: 900 });
+	await page.goto("/projects");
+	const projects = page.getByRole("region", { name: "Results" });
+	await expect(projects).toBeVisible();
+	const projectsBox = await projects.boundingBox();
+	if (!projectsBox) throw new Error("Missing Projects content bounds");
+
+	await page.goto("/settings");
+	for (const [tab, section] of [
+		["Retry defaults", "Retry defaults"],
+		["Storage", "Retention"],
+		["Alerts", "Rules"],
+		["Users", null],
+	] as const) {
+		await page.getByRole("tab", { name: tab, exact: true }).click();
+		const panel = page.getByRole("tabpanel", { name: tab });
+		const content = section
+			? panel.locator("section").filter({
+					has: page.getByRole("heading", { name: section, exact: true }),
+				})
+			: panel.getByRole("region", { name: "Results" });
+		await expect(content).toBeVisible();
+		const box = await content.boundingBox();
+		if (!box) throw new Error(`Missing ${tab} content bounds`);
+		expect.soft(box.x, `${tab} left edge`).toBeCloseTo(projectsBox.x, 0);
+		expect
+			.soft(box.x + box.width, `${tab} right edge`)
+			.toBeCloseTo(projectsBox.x + projectsBox.width, 0);
+	}
 });
 
 test("blocked role mutation shows feedback and a downgrade removes admin UI", async ({
@@ -424,6 +595,10 @@ test("long ids, long urls, and duplicate names never break the viewport", async 
 	const stress = stressDataset();
 	await installApp(page, {
 		role: "admin",
+		projects: {
+			kind: "data",
+			items: [rows.project(), rows.project({ id: "prj_duplicate" })],
+		},
 		events: { kind: "data", items: stress.events },
 		eventDetail: stress.eventDetail as unknown as Record<string, unknown>,
 		failures: { kind: "data", items: stress.failures },
@@ -452,11 +627,12 @@ test("long ids, long urls, and duplicate names never break the viewport", async 
 	// Duplicate display names stay disambiguated by id in the picker.
 	await page.setViewportSize({ width: 1280, height: 900 });
 	await page.goto("/events");
-	await page.getByRole("combobox", { name: "Project" }).click();
-	await page
-		.getByRole("option", { name: /Payments/ })
-		.first()
-		.click();
+	const picker = page.getByRole("combobox", { name: "Active project" });
+	await picker.click();
+	await expect(
+		page.getByRole("listbox").getByRole("option", { name: /Payments/ }),
+	).toHaveCount(2);
+	await page.keyboard.press("Escape");
 	expect(await pageOverflow(page)).toBe(0);
 });
 
@@ -494,8 +670,6 @@ test("empty, error, and one-time-secret states behave and recover", async ({
 	await installApp(page, { role: "admin" });
 	await page.goto("/endpoints?tab=destinations");
 	await page.getByRole("button", { name: "New destination" }).click();
-	await page.getByRole("combobox", { name: "Project", exact: true }).click();
-	await page.getByRole("option", { name: "Payments" }).click();
 	await page.getByLabel("Name").fill("Secret lifecycle");
 	await page.getByLabel("URL").fill("https://example.com/secret-hooks");
 	await page.getByRole("button", { name: "Create" }).click();
@@ -732,23 +906,26 @@ test("production-shaped long IDs stay contained on overview and detail at 390, 1
 			await expect(trigger).toBeVisible();
 			await trigger.click();
 			const drawer = page.getByRole("dialog", { name: "Navigation" });
-			await expect(drawer.getByTitle(stress.longAccountName)).toBeVisible();
-			await expect(
-				drawer.getByRole("button", { name: "Change password" }),
-			).toBeVisible();
-			await expect(
-				drawer.getByRole("button", { name: "Log out" }),
-			).toBeVisible();
+			await expect(drawer.getByTitle(stress.longAccountName)).toHaveCount(0);
 			await page.keyboard.press("Escape");
 		} else {
 			const nav = page.getByRole("navigation", { name: "Main" });
 			await expect(nav).toBeVisible();
-			await expect(page.getByTitle(stress.longAccountName)).toBeVisible();
-			await expect(
-				page.getByRole("button", { name: "Change password" }),
-			).toBeVisible();
-			await expect(page.getByRole("button", { name: "Log out" })).toBeVisible();
 		}
+		const account = page
+			.getByRole("banner")
+			.getByRole("button", { name: /^Account:/ });
+		await expect(account).toHaveAccessibleName(
+			`Account: ${stress.longAccountName}, admin`,
+		);
+		await expect(page.getByRole("menu")).toBeHidden();
+		await account.click();
+		await expect(
+			page.getByRole("menuitem", { name: "Change password" }),
+		).toBeVisible();
+		await expect(page.getByRole("menuitem", { name: "Log out" })).toBeVisible();
+		await page.keyboard.press("Escape");
+		await expect(account).toBeFocused();
 		expect(await pageOverflow(page), `detail ${width}px`).toBe(0);
 		await testInfo.attach(`reliability-detail-${width}`, {
 			body: await page.screenshot({
@@ -761,5 +938,121 @@ test("production-shaped long IDs stay contained on overview and detail at 390, 1
 			await expect(
 				page.getByRole("navigation", { name: "Main" }),
 			).toBeVisible();
+	}
+});
+test("opens the project picker by keyboard with a long name at 320px", async ({
+	page,
+}) => {
+	const name =
+		"International Payments and Settlement Reconciliation for Europe";
+	await page.setViewportSize({ width: 320, height: 840 });
+	await installApp(page, {
+		projects: { kind: "data", items: [rows.project({ name })] },
+	});
+	await page.goto("/settings");
+	const picker = page.getByRole("combobox", { name: "Active project" });
+	await expect(picker).toBeVisible();
+	await picker.press("Space");
+	const list = page.getByRole("listbox");
+	await expect(list).toBeVisible({ timeout: 3_000 });
+	await expect(
+		list.getByRole("option", { name, selected: true, exact: true }),
+	).toBeVisible();
+	const listBox = await list.boundingBox();
+	if (!listBox) throw new Error("Project listbox is not visible");
+	expect(listBox.x).toBeGreaterThanOrEqual(0);
+	expect(listBox.x + listBox.width).toBeLessThanOrEqual(320);
+	await page.keyboard.press("Escape");
+	await expect(list).toBeHidden();
+	await expect(picker).toBeFocused();
+	const breadcrumb = page.getByRole("navigation", { name: /breadcrumb/i });
+	await expect(breadcrumb).toBeVisible();
+	const pickerBox = await picker.boundingBox();
+	const breadcrumbBox = await breadcrumb.boundingBox();
+	if (!pickerBox || !breadcrumbBox) throw new Error("Header layout is missing");
+	expect(pickerBox.x + pickerBox.width).toBeLessThanOrEqual(breadcrumbBox.x);
+	expect(await pageOverflow(page)).toBe(0);
+});
+
+test("switches projects without scoping deployment pages", async ({ page }) => {
+	const { requests } = await installApp(page, {
+		projects: {
+			kind: "data",
+			items: [
+				rows.project({ name: "Payments" }),
+				rows.project({ id: "prj_2", name: "Shipping" }),
+			],
+		},
+		sources: {
+			kind: "data",
+			items: [
+				rows.source({ name: "Payments webhook" }),
+				rows.source({
+					id: "src_2",
+					project_id: "prj_2",
+					name: "Shipping webhook",
+				}),
+			],
+		},
+	});
+	const picker = page.getByRole("combobox", { name: "Active project" });
+	await page.goto("/endpoints?tab=sources&project_id=prj_1");
+	await expect(
+		page.getByRole("link", { name: "Payments webhook" }),
+	).toBeVisible();
+	await picker.click();
+	await page.getByRole("option", { name: "Shipping", exact: true }).click();
+	await expect(page).toHaveURL(/project_id=prj_2/);
+	await expect(
+		page.getByRole("link", { name: "Shipping webhook" }),
+	).toBeVisible();
+	await expect(
+		page.getByRole("link", { name: "Payments webhook" }),
+	).toHaveCount(0);
+	await page.reload();
+	await expect(picker).toHaveText("Shipping");
+	await page.goBack();
+	await expect(picker).toHaveText("Payments");
+	await expect(
+		page.getByRole("link", { name: "Payments webhook" }),
+	).toBeVisible();
+
+	await page.goto("/projects");
+	await expect(page.getByRole("link", { name: "Payments" })).toBeVisible();
+	await expect(page.getByRole("link", { name: "Shipping" })).toBeVisible();
+	await picker.click();
+	await page.getByRole("option", { name: "Shipping", exact: true }).click();
+	await expect(page).toHaveURL(/\/projects$/);
+	for (const path of ["/archives", "/audit"]) {
+		await page.goto(path);
+		await expect(picker).toHaveText("Shipping");
+		await expect(page.getByText(/deployment-wide/i)).toBeVisible();
+	}
+	await page.goto("/settings?tab=storage");
+	await expect(
+		page.getByRole("heading", { name: "Archive runs" }),
+	).toBeVisible();
+	for (const { path } of requests.filter((r) =>
+		/^\/(settings|backups|archives|audit-logs)\b/.test(r.path),
+	)) {
+		expect(path).not.toContain("project_id");
+	}
+
+	for (const width of [1440, 390]) {
+		await page.setViewportSize({ width, height: 840 });
+		await page.goto("/");
+		const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" });
+		await expect(breadcrumb).toHaveText("Overview");
+		await expect(picker).toHaveText("Shipping");
+		const a = await picker.boundingBox();
+		const b = await breadcrumb.boundingBox();
+		expect(a && b && a.x + a.width <= b.x).toBe(true);
+		await expect(page.getByText("Current deployment")).toHaveCount(0);
+		if (width === 390) {
+			await page.getByRole("button", { name: "Open navigation" }).click();
+			await expect(
+				page.getByRole("dialog").getByText("Hookflare instance"),
+			).toHaveCount(0);
+		}
 	}
 });

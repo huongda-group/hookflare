@@ -23,6 +23,7 @@ import {
 import { api } from "@/lib/api";
 import { errorText } from "@/lib/forms";
 import { Can } from "@/lib/permissions";
+import { useActiveProject } from "@/lib/project-selection";
 import { qk } from "@/lib/queries/keys";
 import { formatBytes } from "@/lib/time";
 
@@ -34,6 +35,8 @@ export type ArchivesSearch = z.infer<typeof archivesSearch>;
 
 /** Cold storage: list and download only (DEC-12). Batches are grouped by day. */
 export function ArchivesPage({ search }: { search: ArchivesSearch }) {
+	const { projectId } = useActiveProject();
+	const projectSearch = { project_id: projectId };
 	const [open, setOpen] = useState<string | null>(null);
 	const query = useInfiniteQuery({
 		queryKey: qk.archives.list(search),
@@ -62,16 +65,16 @@ export function ArchivesPage({ search }: { search: ArchivesSearch }) {
 		<div className="space-y-4">
 			<PageHeader
 				title="Archives"
-				description="Cold storage: finished batches are kept for long-term retention. Archiving is list and download only."
+				description="Deployment-wide cold storage. Finished batches are kept for long-term retention and are available to list and download."
 			/>
 			<p className="text-xs text-muted-foreground">
 				Archives are read-only — there is no search or replay here. Find live
 				data in{" "}
-				<Link to="/events" className="underline">
+				<Link to="/events" search={projectSearch} className="underline">
 					Events
 				</Link>{" "}
 				or{" "}
-				<Link to="/failures" className="underline">
+				<Link to="/failures" search={projectSearch} className="underline">
 					Failures
 				</Link>
 				.
@@ -88,7 +91,7 @@ export function ArchivesPage({ search }: { search: ArchivesSearch }) {
 						<p>No archive batches yet.</p>
 						<p className="mt-2">
 							Finished batches appear here once retention archiving runs.{" "}
-							<Link to="/events" className="underline">
+							<Link to="/events" search={projectSearch} className="underline">
 								View live events
 							</Link>
 						</p>
@@ -137,7 +140,9 @@ export function ArchivesPage({ search }: { search: ArchivesSearch }) {
 																{b.status}
 															</Badge>
 															{b.error && (
-																<p className="text-xs text-failure">{b.error}</p>
+																<p className="text-xs text-failure">
+																	{b.error}
+																</p>
 															)}
 														</TableCell>
 														<TableCell>
@@ -213,8 +218,8 @@ export function ArchivesPage({ search }: { search: ArchivesSearch }) {
 						className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-warning-surface px-4 py-3 text-sm text-warning"
 					>
 						<p>
-							Could not load more rows ({errorText(query.error)}). Loaded
-							rows are still shown.
+							Could not load more rows ({errorText(query.error)}). Loaded rows
+							are still shown.
 						</p>
 						<Button
 							variant="outline"

@@ -29,6 +29,41 @@ async function fixture() {
 }
 
 describe("GET /failures", () => {
+	it("scopes failure and event pages before selecting the cursor", async () => {
+		const deps = testDeps();
+		const a = await seedPipeline(deps);
+		const b = await seedPipeline(deps);
+		const t = deps.now();
+		const seed = (pipeline: typeof a, offset: number) =>
+			seedDelivery(deps, pipeline, {
+				status: "dead",
+				event: { receivedAt: t + offset },
+				delivery: { completedAt: t + offset },
+			});
+		const older = await seed(a, 1);
+		await seed(b, 2);
+		const newer = await seed(a, 3);
+		const api = await adminApp(deps, { role: "viewer" });
+		for (const [path, firstId, secondId] of [
+			["/events", newer.eventId, older.eventId],
+			["/failures", newer.deliveryId, older.deliveryId],
+		]) {
+			const url = `${path}?project_id=${a.project.id}&limit=1`;
+			const first = await (await api.request("GET", url)).json<Page>();
+			expect(first.data).toMatchObject([
+				{ id: firstId, project_id: a.project.id },
+			]);
+			expect(first.next_cursor).toBeTruthy();
+			const second = await (
+				await api.request("GET", `${url}&cursor=${first.next_cursor}`)
+			).json<Page>();
+			expect(second.data).toMatchObject([
+				{ id: secondId, project_id: a.project.id },
+			]);
+			expect(second.next_cursor).toBeNull();
+		}
+	});
+
 	it("lists failed_final and dead deliveries, newest completion first", async () => {
 		const { p, dead, final, api } = await fixture();
 		const page = await (

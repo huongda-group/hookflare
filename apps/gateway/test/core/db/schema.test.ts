@@ -21,15 +21,14 @@ async function exec(sql: string, ...params: unknown[]) {
 
 async function insertProject(id: string, status = "active") {
 	await exec(
-		"INSERT INTO projects (id, name, slug, status, created_at, updated_at) VALUES (?, ?, ?, ?, 1, 1)",
+		"INSERT INTO projects (id, name, status, created_at, updated_at) VALUES (?, ?, ?, 1, 1)",
 		id,
 		"P",
-		`slug-${id.toLowerCase().replace(/_/g, "-")}`,
 		status,
 	);
 }
 
-describe("0000_init migration", () => {
+describe("baseline migration", () => {
 	it("creates every M1 table", async () => {
 		const { results } = await env.DB.prepare(
 			"SELECT name FROM sqlite_master WHERE type = 'table'",

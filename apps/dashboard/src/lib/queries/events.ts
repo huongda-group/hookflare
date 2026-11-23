@@ -12,7 +12,7 @@ const ACTIVE = new Set([
 ]);
 
 export type EventFilters = {
-	project_id?: string;
+	project_id: string;
 	source_id?: string;
 	destination_id?: string;
 	status?: string[];
@@ -37,10 +37,11 @@ export function useEventsPage(f: EventFilters) {
 }
 
 /** Polls only while something can still change (spec §9.2). */
-export function useEvent(id: string) {
+export function useEvent(id: string, projectId: string) {
 	return useQuery({
-		queryKey: qk.events.one(id),
-		queryFn: () => api.get<WebhookEvent>(`/events/${id}`),
+		queryKey: qk.events.one(id, projectId),
+		queryFn: () =>
+			api.get<WebhookEvent>(`/events/${id}`, { project_id: projectId }),
 		refetchInterval: (q) =>
 			q.state.data?.deliveries.some((d) => ACTIVE.has(d.status))
 				? 15_000

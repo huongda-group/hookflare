@@ -1,14 +1,14 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
 import {
 	createMemoryHistory,
 	createRootRoute,
 	createRouter,
 	RouterProvider,
 } from "@tanstack/react-router";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { describe, expect, it } from "vitest";
 import { createQueryClient } from "@/router";
 import { destination, project, source } from "@/test/fixtures";
@@ -28,7 +28,10 @@ async function wrap(ui: ReactNode) {
 		history: createMemoryHistory({ initialEntries: ["/"] }),
 	});
 	await router.load();
-	return { user: userEvent.setup(), ...render(<RouterProvider router={router} />) };
+	return {
+		user: userEvent.setup(),
+		...render(<RouterProvider router={router} />),
+	};
 }
 
 describe("SourceFormDialog", () => {
@@ -48,9 +51,9 @@ describe("SourceFormDialog", () => {
 				});
 			}),
 		);
-		const { user } = await wrap(<SourceFormDialog open onOpenChange={() => {}} />);
-		await user.click(screen.getByLabelText("Project"));
-		await user.click(await screen.findByRole("option", { name: "Payments" }));
+		const { user } = await wrap(
+			<SourceFormDialog open projectId="prj_1" onOpenChange={() => {}} />,
+		);
 		await user.click(screen.getByLabelText("Destination"));
 		await user.click(
 			await screen.findByRole("option", { name: "Billing API" }),
@@ -83,7 +86,12 @@ describe("SourceFormDialog", () => {
 			}),
 		);
 		const { user } = await wrap(
-			<SourceFormDialog open onOpenChange={() => {}} source={source()} />,
+			<SourceFormDialog
+				open
+				projectId="prj_1"
+				onOpenChange={() => {}}
+				source={source()}
+			/>,
 		);
 		const name = screen.getByLabelText("Name");
 		await user.clear(name);
@@ -103,7 +111,12 @@ describe("SourceFormDialog", () => {
 			}),
 		);
 		const { user } = await wrap(
-			<SourceFormDialog open onOpenChange={() => {}} source={source()} />,
+			<SourceFormDialog
+				open
+				projectId="prj_1"
+				onOpenChange={() => {}}
+				source={source()}
+			/>,
 		);
 		expect(
 			screen.queryByRole("combobox", { name: "Project" }),
@@ -128,7 +141,12 @@ describe("SourceFormDialog", () => {
 			}),
 		);
 		const { user } = await wrap(
-			<SourceFormDialog open onOpenChange={() => {}} source={source()} />,
+			<SourceFormDialog
+				open
+				projectId="prj_1"
+				onOpenChange={() => {}}
+				source={source()}
+			/>,
 		);
 		await user.clear(screen.getByLabelText("Signature header"));
 		await user.type(screen.getByLabelText("Signature header"), "X-Sig");
@@ -148,44 +166,7 @@ describe("SourceFormDialog", () => {
 		expect(body).not.toHaveProperty("auth_type");
 	});
 
-	it("reaches a project beyond the first option page", async () => {
-		const first = Array.from({ length: 50 }, (_, i) =>
-			project({ id: `prj_${i + 2}`, name: `Project ${i + 2}` }),
-		);
-		server.use(
-			http.get(apiUrl("/projects"), ({ request }) => {
-				const url = new URL(request.url);
-				if (url.searchParams.get("cursor") === "c1") {
-					return HttpResponse.json({
-						data: [project({ id: "prj_far", name: "Faraway Project" })],
-						next_cursor: null,
-					});
-				}
-				return HttpResponse.json({ data: first, next_cursor: "c1" });
-			}),
-			http.get(apiUrl("/destinations"), () =>
-				HttpResponse.json({ data: [destination()], next_cursor: null }),
-			),
-			http.post(apiUrl("/sources"), async ({ request }) => {
-				const body = (await request.json()) as Record<string, unknown>;
-				return HttpResponse.json(source(body as object), { status: 201 });
-			}),
-		);
-		const { user } = await wrap(<SourceFormDialog open onOpenChange={() => {}} />);
-		await user.click(screen.getByRole("combobox", { name: "Project" }));
-		expect(
-			screen.queryByRole("option", { name: "Faraway Project" }),
-		).not.toBeInTheDocument();
-		await user.click(screen.getByRole("button", { name: "Load more" }));
-		await user.click(
-			await screen.findByRole("option", { name: "Faraway Project" }),
-		);
-		expect(
-			screen.getByRole("combobox", { name: "Project" }),
-		).toHaveTextContent("Faraway Project");
-	});
-
-	it("clears the destination when the project changes", async () => {
+	it("offers only destinations in the project's scope", async () => {
 		server.use(
 			http.get(apiUrl("/projects"), () =>
 				HttpResponse.json({
@@ -205,21 +186,16 @@ describe("SourceFormDialog", () => {
 				});
 			}),
 		);
-		const { user } = await wrap(<SourceFormDialog open onOpenChange={() => {}} />);
-		await user.click(screen.getByRole("combobox", { name: "Project" }));
-		await user.click(await screen.findByRole("option", { name: "Payments" }));
-		await user.click(screen.getByRole("combobox", { name: "Destination" }));
-		await user.click(
-			await screen.findByRole("option", { name: "Billing API" }),
+		const { user } = await wrap(
+			<SourceFormDialog open projectId="prj_2" onOpenChange={() => {}} />,
 		);
+		await user.click(screen.getByRole("combobox", { name: "Destination" }));
 		expect(
-			screen.getByRole("combobox", { name: "Destination" }),
-		).toHaveTextContent("Billing API");
-		await user.click(screen.getByRole("combobox", { name: "Project" }));
-		await user.click(await screen.findByRole("option", { name: "Other" }));
+			await screen.findByRole("option", { name: "Other API" }),
+		).toBeVisible();
 		expect(
-			screen.getByRole("combobox", { name: "Destination" }),
-		).toHaveTextContent("Select destination");
+			screen.queryByRole("option", { name: "Billing API" }),
+		).not.toBeInTheDocument();
 	});
 
 	it("keeps every HMAC, dedup, and size input in the create body", async () => {
@@ -238,9 +214,9 @@ describe("SourceFormDialog", () => {
 				});
 			}),
 		);
-		const { user } = await wrap(<SourceFormDialog open onOpenChange={() => {}} />);
-		await user.click(screen.getByRole("combobox", { name: "Project" }));
-		await user.click(await screen.findByRole("option", { name: "Payments" }));
+		const { user } = await wrap(
+			<SourceFormDialog open projectId="prj_1" onOpenChange={() => {}} />,
+		);
 		await user.click(screen.getByRole("combobox", { name: "Destination" }));
 		await user.click(
 			await screen.findByRole("option", { name: "Billing API" }),
@@ -254,7 +230,10 @@ describe("SourceFormDialog", () => {
 		await user.type(screen.getByLabelText("Prefix (optional)"), "sha256=");
 		await user.click(screen.getByRole("combobox", { name: "Algorithm" }));
 		await user.click(await screen.findByRole("option", { name: "SHA-512" }));
-		await user.type(screen.getByLabelText(/^Secret/), "a-very-long-shared-secret-value");
+		await user.type(
+			screen.getByLabelText(/^Secret/),
+			"a-very-long-shared-secret-value",
+		);
 		await user.click(screen.getByRole("combobox", { name: "Event ID from" }));
 		await user.click(await screen.findByRole("option", { name: "Header" }));
 		await user.type(screen.getByLabelText("Header name"), "X-Event-Id");
@@ -285,10 +264,10 @@ describe("SourceFormDialog", () => {
 				HttpResponse.json({ data: [destination()], next_cursor: null }),
 			),
 		);
-		await wrap(<SourceFormDialog open onOpenChange={() => {}} />);
-		expect(
-			await screen.findByText(/up to 30 seconds/i),
-		).toBeInTheDocument();
+		await wrap(
+			<SourceFormDialog open projectId="prj_1" onOpenChange={() => {}} />,
+		);
+		expect(await screen.findByText(/up to 30 seconds/i)).toBeInTheDocument();
 	});
 
 	it("blocks an accidental cancel and keeps the edits", async () => {
@@ -300,15 +279,15 @@ describe("SourceFormDialog", () => {
 				HttpResponse.json({ data: [destination()], next_cursor: null }),
 			),
 		);
-		const { user } = await wrap(<SourceFormDialog open onOpenChange={() => {}} />);
+		const { user } = await wrap(
+			<SourceFormDialog open projectId="prj_1" onOpenChange={() => {}} />,
+		);
 		await user.type(await screen.findByLabelText("Name"), "Stripe");
 		await user.click(screen.getByRole("button", { name: "Cancel" }));
 		expect(
 			await screen.findByRole("heading", { name: /discard/i }),
 		).toBeInTheDocument();
-		await user.click(
-			screen.getByRole("button", { name: "Keep editing" }),
-		);
+		await user.click(screen.getByRole("button", { name: "Keep editing" }));
 		expect(screen.getByLabelText("Name")).toHaveValue("Stripe");
 		expect(
 			screen.queryByRole("heading", { name: /discard/i }),

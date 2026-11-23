@@ -11,11 +11,11 @@ import { useForm } from "react-hook-form";
 import { AlertChannelDialog } from "@/components/AlertChannelDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DirtyFormGuard } from "@/components/DirtyFormGuard";
+import { FormField } from "@/components/FormField";
 import { FormSection } from "@/components/FormSection";
 import { FieldError } from "@/components/ProjectFormDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
 	Table,
 	TableBody,
@@ -72,22 +72,21 @@ function RulesForm({ initial }: { initial: AlertRules }) {
 	return (
 		<DirtyFormGuard dirty={form.formState.isDirty}>
 			{() => (
-				<form onSubmit={submit} className="max-w-xl space-y-4">
+				<form onSubmit={submit}>
 					<FormSection
 						title="Rules"
 						description="When delivery, storage, and backup signals raise alerts."
 					>
 						<div className="grid grid-cols-2 gap-3">
 							{RULE_FIELDS.map(([key, label]) => (
-								<div key={key}>
-									<Label htmlFor={`ar-${key}`}>{label}</Label>
+								<FormField key={key} htmlFor={`ar-${key}`} label={label}>
 									<Input
 										id={`ar-${key}`}
 										type="number"
 										{...form.register(key, { valueAsNumber: true })}
 									/>
 									<FieldError message={e[key]?.message} />
-								</div>
+								</FormField>
 							))}
 						</div>
 						<FieldError message={e.root?.message} />

@@ -1,11 +1,21 @@
 import type { Role } from "@hookflare/shared";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { createAppRouter, createQueryClient } from "@/router";
 import { apiUrl, meFor, server } from "./server";
+
+export async function chooseProject(
+	user: ReturnType<typeof userEvent.setup>,
+	name: string,
+) {
+	await user.click(
+		await screen.findByRole("combobox", { name: "Active project" }),
+	);
+	await user.click(await screen.findByRole("option", { name }));
+}
 
 /** Renders the real route tree at `path`, signed in as `role` (default admin). */
 export function renderApp(path: string, opts: { role?: Role } = {}) {

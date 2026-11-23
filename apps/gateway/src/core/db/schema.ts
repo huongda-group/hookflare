@@ -107,7 +107,6 @@ export const projects = sqliteTable(
 	{
 		id: text("id").primaryKey(),
 		name: text("name").notNull(),
-		slug: text("slug").notNull().unique(),
 		status: text("status", { enum: PROJECT_STATUSES })
 			.notNull()
 			.default("active"),

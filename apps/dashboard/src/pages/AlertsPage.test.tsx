@@ -1,16 +1,76 @@
-import { screen, within } from "@testing-library/react";
 import type { Alert } from "@hookflare/shared";
+import { screen, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
-import { alert } from "@/test/fixtures";
-import { renderApp } from "@/test/render";
+import { alert, project } from "@/test/fixtures";
+import { chooseProject, renderApp } from "@/test/render";
 import { apiUrl, server } from "@/test/server";
 
+const isDeployment = (request: Request) =>
+	new URL(request.url).searchParams.get("scope") === "deployment";
+const empty = () => HttpResponse.json({ data: [], next_cursor: null });
+
 describe("Alerts page", () => {
+	it("keeps deployment incidents separate when the selected project changes", async () => {
+		const system = alert({
+			id: "alr_system",
+			project_id: null,
+			resource_type: "system",
+			resource_id: "storage",
+			rule: "d1_storage",
+		});
+		server.use(
+			http.get(apiUrl("/projects"), () =>
+				HttpResponse.json({
+					data: [project(), project({ id: "prj_2", name: "Shipping" })],
+					next_cursor: null,
+				}),
+			),
+			http.get(apiUrl("/alerts"), ({ request }) => {
+				const q = new URL(request.url).searchParams;
+				return HttpResponse.json({
+					data:
+						q.get("scope") === "deployment"
+							? [system]
+							: q.get("project_id") === "prj_1"
+								? [alert()]
+								: [],
+					next_cursor: null,
+				});
+			}),
+			http.get(apiUrl("/alerts/alr_system"), ({ request }) =>
+				new URL(request.url).searchParams.get("scope") === "deployment"
+					? HttpResponse.json({ ...system, notifications: [] })
+					: new HttpResponse(null, { status: 404 }),
+			),
+		);
+		const { user } = renderApp("/alerts?project_id=prj_1");
+		const projectSection = within(
+			await screen.findByRole("region", { name: "Project incidents" }),
+		);
+		const deploymentSection = within(
+			screen.getByRole("region", { name: "Deployment incidents" }),
+		);
+		expect(
+			await projectSection.findByRole("link", { name: "Billing API" }),
+		).toBeVisible();
+		expect(
+			await deploymentSection.findByRole("link", { name: "system / storage" }),
+		).toBeVisible();
+		await chooseProject(user, "Shipping");
+		expect(
+			await screen.findByText("No project alerts match these filters."),
+		).toBeVisible();
+		await user.click(
+			await screen.findByRole("link", { name: "system / storage" }),
+		);
+		expect(await screen.findByText("Deployment-wide")).toBeVisible();
+	});
 	it("lists incidents and filters by status via the URL", async () => {
 		const seen: string[] = [];
 		server.use(
 			http.get(apiUrl("/alerts"), ({ request }) => {
+				if (isDeployment(request)) return empty();
 				seen.push(new URL(request.url).search);
 				return HttpResponse.json({
 					data: [
@@ -65,16 +125,18 @@ describe("Alerts page", () => {
 
 	it("renders an unknown rule as a readable fallback instead of breaking", async () => {
 		server.use(
-			http.get(apiUrl("/alerts"), () =>
-				HttpResponse.json({
-					data: [
-						alert({
-							rule: "future_rule_xyz" as Alert["rule"],
-							resource_name: "Billing API",
+			http.get(apiUrl("/alerts"), ({ request }) =>
+				isDeployment(request)
+					? empty()
+					: HttpResponse.json({
+							data: [
+								alert({
+									rule: "future_rule_xyz" as Alert["rule"],
+									resource_name: "Billing API",
+								}),
+							],
+							next_cursor: null,
 						}),
-					],
-					next_cursor: null,
-				}),
 			),
 		);
 		renderApp("/alerts?status=open");
@@ -83,10 +145,11 @@ describe("Alerts page", () => {
 		expect(screen.getByText(/future_rule_xyz/)).toBeInTheDocument();
 	});
 
-	it("keeps system alerts visible under a project scope", async () => {
+	it("keeps system alerts visible in the deployment section", async () => {
 		const seen: string[] = [];
 		server.use(
 			http.get(apiUrl("/alerts"), ({ request }) => {
+				if (!isDeployment(request)) return empty();
 				seen.push(new URL(request.url).search);
 				return HttpResponse.json({
 					data: [
@@ -94,7 +157,7 @@ describe("Alerts page", () => {
 							resource_type: "system",
 							resource_id: "host-9",
 							resource_name: null,
-							project_id: "prj_1",
+							project_id: null,
 						}),
 					],
 					next_cursor: null,
@@ -103,18 +166,24 @@ describe("Alerts page", () => {
 		);
 		renderApp("/alerts?status=open&project_id=prj_1");
 		expect(await screen.findByText("system / host-9")).toBeInTheDocument();
-		expect(seen.at(-1)).toContain("project_id=prj_1");
+		expect(seen.at(-1)).toContain("scope=deployment");
 	});
 
 	it("distinguishes an empty list from a failed list", async () => {
 		renderApp("/alerts?status=open");
-		expect(await screen.findByText(/no alerts/i)).toBeInTheDocument();
+		expect(
+			await screen.findByText("No project alerts match these filters."),
+		).toBeInTheDocument();
 		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 	});
 
 	it("shows a retryable error when the list fails", async () => {
 		server.use(
-			http.get(apiUrl("/alerts"), () => new HttpResponse(null, { status: 500 })),
+			http.get(apiUrl("/alerts"), ({ request }) =>
+				isDeployment(request)
+					? empty()
+					: new HttpResponse(null, { status: 500 }),
+			),
 		);
 		renderApp("/alerts?status=open");
 		expect(
@@ -126,7 +195,8 @@ describe("Alerts page", () => {
 	it("keeps loaded rows when the next page fails", async () => {
 		let calls = 0;
 		server.use(
-			http.get(apiUrl("/alerts"), () => {
+			http.get(apiUrl("/alerts"), ({ request }) => {
+				if (isDeployment(request)) return empty();
 				calls += 1;
 				if (calls === 1)
 					return HttpResponse.json({ data: [alert()], next_cursor: "c1" });

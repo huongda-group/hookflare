@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { OverviewPage, overviewSearch } from "@/pages/OverviewPage";
 
 export const Route = createFileRoute("/")({
+	staticData: { pageTitle: "Overview" },
 	validateSearch: overviewSearch,
 	component: function OverviewRoute() {
 		const search = Route.useSearch();

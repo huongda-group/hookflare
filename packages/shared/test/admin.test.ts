@@ -3,6 +3,7 @@ import {
 	alertChannelConfigSchema,
 	alertRulesSchema,
 	bulkReplayRequest,
+	changePasswordRequest,
 	createApiTokenRequest,
 	createDestinationRequest,
 	createProjectRequest,
@@ -22,6 +23,7 @@ import {
 	patchSourceRequest,
 	RANGE_HOURS,
 	reasonSchema,
+	resetPasswordRequest,
 	retryDefaultsSchema,
 	rotateDestinationSecretRequest,
 	rotateSourceSecretRequest,
@@ -39,15 +41,12 @@ const hmac = {
 };
 
 describe("createProjectRequest", () => {
-	it("accepts a valid slug and rejects bad ones", () => {
-		expect(
-			createProjectRequest.safeParse({ name: "Shop", slug: "shop-prod" })
-				.success,
-		).toBe(true);
-		for (const slug of ["a", "-shop", "Shop", "shop_prod", "x".repeat(64)]) {
-			expect(
-				createProjectRequest.safeParse({ name: "Shop", slug }).success,
-			).toBe(false);
+	it("accepts a name and rejects invalid names", () => {
+		expect(createProjectRequest.parse({ name: " Shop " })).toEqual({
+			name: "Shop",
+		});
+		for (const name of ["", "   ", "x".repeat(101)]) {
+			expect(createProjectRequest.safeParse({ name }).success).toBe(false);
 		}
 	});
 
@@ -55,7 +54,6 @@ describe("createProjectRequest", () => {
 		expect(
 			createProjectRequest.safeParse({
 				name: "Shop",
-				slug: "shop",
 				status: "active",
 			}).success,
 		).toBe(false);
@@ -312,8 +310,36 @@ describe("built-in auth contracts", () => {
 		expect(password.parse(raw)).toBe(raw);
 	});
 
-	it("rejects a password shorter than 12 characters", () => {
-		expect(password.safeParse("x".repeat(11)).success).toBe(false);
+	it.each([
+		[
+			"setup",
+			(value: string) =>
+				setupRequest.safeParse({ username: "ops.bot", password: value }),
+		],
+		[
+			"user creation",
+			(value: string) =>
+				createUserRequest.safeParse({
+					username: "ops.bot",
+					role: "operator",
+					password: value,
+				}),
+		],
+		[
+			"password reset",
+			(value: string) => resetPasswordRequest.safeParse({ password: value }),
+		],
+		[
+			"password change",
+			(value: string) =>
+				changePasswordRequest.safeParse({
+					current_password: "old",
+					new_password: value,
+				}),
+		],
+	] as const)("%s accepts exactly six password characters", (_flow, parse) => {
+		expect(parse("abc123").success).toBe(true);
+		expect(parse("abc12").success).toBe(false);
 	});
 
 	it("loginRequest accepts a legacy service-token identity", () => {

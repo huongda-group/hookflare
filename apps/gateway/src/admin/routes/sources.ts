@@ -28,9 +28,11 @@ import { aad, clearExpiredPrev, rotationColumns } from "../../core/secrets";
 import { requirePermission } from "../auth/permission";
 import {
 	auditStmt,
+	checkCreateProject,
 	paginate,
 	readJson,
 	readOptionalJson,
+	readProjectResource,
 	readQuery,
 } from "../http";
 
@@ -99,6 +101,8 @@ export function sourceRoutes() {
 		const body = await readJson(c, createSourceRequest);
 		if (!body.ok) return body.response;
 		const req = body.value;
+		const mismatch = checkCreateProject(c, req.project_id);
+		if (mismatch) return mismatch;
 		const { db, now, env } = c.var.deps;
 		if (!(await getProject(db, req.project_id)))
 			return invalidReference(c, "project_id");
@@ -172,10 +176,10 @@ export function sourceRoutes() {
 	});
 
 	routes.get("/:id", requirePermission("events.read"), async (c) => {
-		const row = await getSource(c.var.deps.db, c.req.param("id"));
-		return row
-			? c.json(await toSource(c, row))
-			: c.json({ error: "not_found" }, 404);
+		const found = await readProjectResource(c, () =>
+			getSource(c.var.deps.db, c.req.param("id")),
+		);
+		return found.ok ? c.json(await toSource(c, found.value)) : found.response;
 	});
 
 	routes.patch("/:id", requirePermission("config.write"), async (c) => {
@@ -183,8 +187,11 @@ export function sourceRoutes() {
 		if (!body.ok) return body.response;
 		const { reason, ...patch } = body.value;
 		const { db, now } = c.var.deps;
-		const existing = await getSource(db, c.req.param("id"));
-		if (!existing) return c.json({ error: "not_found" }, 404);
+		const found = await readProjectResource(c, () =>
+			getSource(db, c.req.param("id")),
+		);
+		if (!found.ok) return found.response;
+		const existing = found.value;
 
 		const ts = now();
 		const set: Partial<SourceRow> = { updatedAt: ts };
@@ -264,8 +271,9 @@ export function sourceRoutes() {
 			if (!body.ok) return body.response;
 			const { db, now, env } = c.var.deps;
 			const id = c.req.param("id");
-			const existing = await getSource(db, id);
-			if (!existing) return c.json({ error: "not_found" }, 404);
+			const found = await readProjectResource(c, () => getSource(db, id));
+			if (!found.ok) return found.response;
+			const existing = found.value;
 			if (existing.authType === "none" || !existing.secretEnc)
 				return c.json({ error: "no_secret" }, 409);
 			const ts = now();

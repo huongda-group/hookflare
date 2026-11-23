@@ -62,7 +62,6 @@ describe("fault injection", () => {
 		const api = await adminApp(deps);
 		const res = await api.request("POST", "/projects", {
 			name: "Atomic",
-			slug: `atomic-${crypto.randomUUID().slice(0, 8)}`,
 		});
 		expect(res.status).toBe(500);
 		const rows = await base.db

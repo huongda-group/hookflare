@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { turnstileConfig } from "./admin/auth/turnstile";
-import { adminRoutes } from "./admin/router";
+import { ADMIN_API_PREFIX, adminRoutes } from "./admin/router";
 import { heartbeatStale, readHeartbeat } from "./core/heartbeat";
 import { createLogger, type Logger } from "./core/log";
 import type { Role } from "./core/rbac";
@@ -97,7 +97,7 @@ export function createApp(options: AppOptions = {}) {
 	});
 
 	app.route("/in", ingressRoutes());
-	app.route("/api/admin/v1", adminRoutes());
+	app.route(ADMIN_API_PREFIX, adminRoutes());
 
 	app.notFound((c) => c.json({ error: "not_found" }, 404));
 

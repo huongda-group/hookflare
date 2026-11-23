@@ -4,11 +4,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { DirtyFormGuard } from "@/components/DirtyFormGuard";
+import { FormField } from "@/components/FormField";
 import { FormSection } from "@/components/FormSection";
 import { FieldError } from "@/components/ProjectFormDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { applyServerIssues } from "@/lib/forms";
@@ -60,15 +60,14 @@ function RetryDefaultsForm({ initial }: { initial: RetryDefaults }) {
 	return (
 		<DirtyFormGuard dirty={canEdit && dirty}>
 			{() => (
-				<form onSubmit={submit} className="max-w-xl space-y-4">
+				<form onSubmit={submit}>
 					<FormSection
 						title="Retry defaults"
 						description="Used by every destination that has no override."
 					>
 						<div className="grid grid-cols-2 gap-3">
 							{FIELDS.map(([key, label]) => (
-								<div key={key}>
-									<Label htmlFor={`rd-${key}`}>{label}</Label>
+								<FormField key={key} htmlFor={`rd-${key}`} label={label}>
 									<Input
 										id={`rd-${key}`}
 										type="number"
@@ -76,13 +75,12 @@ function RetryDefaultsForm({ initial }: { initial: RetryDefaults }) {
 										{...form.register(key, { valueAsNumber: true })}
 									/>
 									<FieldError message={e[key]?.message} />
-								</div>
+								</FormField>
 							))}
 						</div>
 						{canEdit ? (
 							<>
-								<div>
-									<Label htmlFor="rd-reason">Reason (optional)</Label>
+								<FormField htmlFor="rd-reason" label="Reason (optional)">
 									<Textarea
 										id="rd-reason"
 										value={reason}
@@ -93,7 +91,7 @@ function RetryDefaultsForm({ initial }: { initial: RetryDefaults }) {
 											Reason must be 500 characters or fewer.
 										</p>
 									)}
-								</div>
+								</FormField>
 								<FieldError message={e.root?.message} />
 								<div className="flex gap-2">
 									<Button type="submit" disabled={form.formState.isSubmitting}>

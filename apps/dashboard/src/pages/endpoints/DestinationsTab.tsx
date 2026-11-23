@@ -15,7 +15,7 @@ import {
 } from "@/lib/queries/endpoints";
 import { DestinationActions } from "./DestinationActions";
 
-export function DestinationsTab({ projectId }: { projectId?: string }) {
+export function DestinationsTab({ projectId }: { projectId: string }) {
 	const query = useDestinationsPage({ project_id: projectId });
 	const stats = useDestinationStats(projectId).data;
 	const navigate = useNavigate();
@@ -41,6 +41,7 @@ export function DestinationsTab({ projectId }: { projectId?: string }) {
 					void navigate({
 						to: "/endpoints/destinations/$destinationId",
 						params: { destinationId: d.id },
+						search: { project_id: projectId },
 					})
 				}
 				columns={[
@@ -49,6 +50,7 @@ export function DestinationsTab({ projectId }: { projectId?: string }) {
 						cell: (d) => (
 							<Link
 								to="/endpoints/destinations/$destinationId"
+								search={{ project_id: projectId }}
 								params={{ destinationId: d.id }}
 								className="font-medium hover:underline"
 								onClick={(e) => e.stopPropagation()}
@@ -100,6 +102,7 @@ export function DestinationsTab({ projectId }: { projectId?: string }) {
 				]}
 			/>
 			<DestinationFormDialog
+				projectId={projectId}
 				open={creating}
 				onOpenChange={setCreating}
 				onCreated={setSecret}

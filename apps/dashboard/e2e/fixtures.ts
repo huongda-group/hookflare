@@ -37,7 +37,12 @@ export function permissionsFor(role: Role): Permission[] {
 }
 
 export function meFor(role: Role, username = `e2e-${role}`) {
-	return { username, role, permissions: permissionsFor(role) };
+	return {
+		username,
+		role,
+		permissions: permissionsFor(role),
+		project_required: false,
+	};
 }
 
 export const DEFAULT_AUTH_STATE = {
@@ -80,7 +85,6 @@ export const rows = {
 	project: (o: Record<string, unknown> = {}) => ({
 		id: "prj_1",
 		name: "Payments",
-		slug: "payments",
 		status: "active",
 		created_at: T,
 		updated_at: T,
@@ -223,11 +227,29 @@ export const rows = {
 	}),
 	archive: (o: Record<string, unknown> = {}) => ({
 		id: "arc_1",
+		kind: "events",
 		day: "2026-10-17",
 		status: "verified",
-		part_count: 2,
-		byte_count: 1024,
+		with_files: true,
+		part_count: 1,
+		item_count: 2,
+		bytes: 1024,
+		workflow_instance_id: "archive-fixture",
+		error: null,
 		created_at: T,
+		verified_at: T,
+		purged_at: null,
+		parts: [
+			{
+				part_no: 0,
+				item_count: 2,
+				bytes: 1024,
+				sha256: null,
+				first_id: "evt_1",
+				last_id: "evt_2",
+				downloadable: true,
+			},
+		],
 		...o,
 	}),
 	audit: (o: Record<string, unknown> = {}) => ({
@@ -437,6 +459,7 @@ export async function installApp(page: Page, opts: AppOptions = {}) {
 		const req = route.request();
 		const url = new URL(req.url());
 		const path = url.pathname.replace("/api/admin/v1", "") || "/";
+		const projectId = url.searchParams.get("project_id");
 		requests.push({ method: req.method(), path: `${path}${url.search}` });
 
 		const json = (body: unknown, status = 200) =>
@@ -551,7 +574,12 @@ export async function installApp(page: Page, opts: AppOptions = {}) {
 			mode: ListMode | undefined,
 		) => {
 			if (mode?.kind === "error") return fail(500, mode.code ?? "internal");
-			const items = mode?.kind === "data" ? mode.items : all;
+			const rows =
+				mode?.kind === "data" ? mode.items : mode?.kind === "empty" ? [] : all;
+			const items =
+				projectId && (path === "/sources" || path === "/destinations")
+					? rows.filter((row) => row.project_id === projectId)
+					: rows;
 			const limit = Number(url.searchParams.get("limit") ?? "50");
 			const cursor = url.searchParams.get("cursor");
 			const start = cursor ? Number(cursor) : 0;
@@ -620,7 +648,15 @@ export async function installApp(page: Page, opts: AppOptions = {}) {
 		if (path === "/alerts" && req.method() === "GET")
 			return (() => {
 				const list = toList(live.alerts, [rows.alert()]);
-				return isErrorBody(list) ? fail(500, "internal") : json(list);
+				if (isErrorBody(list)) return fail(500, "internal");
+				return json({
+					...list,
+					data: list.data.filter((row) =>
+						url.searchParams.get("scope") === "deployment"
+							? row.project_id == null
+							: !projectId || row.project_id === projectId,
+					),
+				});
 			})();
 		const alertOne = path.match(/^\/alerts\/([^/]+)$/);
 		if (alertOne && req.method() === "GET")

@@ -54,6 +54,8 @@ Keep `.deploy/<timestamp>.json`: it records the previous/new Worker versions, D1
 
 Smoke creates/reuses the dedicated `smoke` project, source, and destination, rotates its source secret, sends one signed event, replays it, and verifies both deliveries at the sink. Success is exit 0 with one event ID and two delivery IDs. Use the correct URL variable from the table; the origin must match the selected config. Smoke changes its dedicated resources, so do not use them for business traffic.
 
+To reuse a specific dedicated project, set `HOOKFLARE_SMOKE_PROJECT_ID` for production or `HOOKFLARE_STAGING_SMOKE_PROJECT_ID` for staging. Set this before upgrading if the dedicated project was renamed. Without an ID, smoke looks for a unique project named `smoke` and stops if the name is ambiguous.
+
 ## Migrations
 
 Use **expand → deploy compatible code → contract in a later release**. Generate migrations through `pnpm db:generate`; never edit applied/generated migrations in place. Add destructive migration declarations to `apps/gateway/migrations/contract.json`, with file, release, and reason.
@@ -65,13 +67,7 @@ pnpm exec wrangler d1 migrations list --remote --config <config>
 
 Normally the deploy script applies migrations. A contract migration, Durable Object migration, or incompatible Workflow-class change can make old code unusable: [roll forward](#rollback) instead of assuming Worker rollback is safe.
 
-The baseline `0000_init.sql` only fits databases that did not apply the removed pre-release files. Do not apply it over those tables or squash a database with real data without a separate migration/recovery plan. Current files: [migrations](../apps/gateway/migrations), [migration checker](../scripts/check-migrations.mjs).
-
-### Upgrading from 1.x
-
-Before replacing an Access-backed deployment, record the D1 restore point and keep the Worker private through onboarding. The auth migrations rename `users.email` to `username` and `actor_email` to `actor` in `audit_logs` and `test_deliveries`, preserving existing values. Migrated users have no password until one is set; service identities are disabled. The migrated admin schema is incompatible with a 1.x Worker.
-
-After deploy, [create the first admin](login.md) before making the Worker URL public. Set passwords for other users who should have access, and [issue API tokens](api-tokens.md) for automation. Cloudflare Access can remain as an outer network gate, but its JWT does not sign users in to Hookflare. See [rollback](#rollback) before restoring older code.
+The pre-release migration chain was replaced by `0000_baseline.sql`. Apply it only to an empty D1 database. There is no in-place upgrade from the superseded migrations: use a fresh database for disposable environments and make a separate migration plan for any data you need to keep. Current files: [migrations](../apps/gateway/migrations), [migration checker](../scripts/check-migrations.mjs).
 
 ## Rollback
 
@@ -86,7 +82,7 @@ After deploy, [create the first admin](login.md) before making the Worker URL pu
 pnpm exec wrangler rollback <version> --config <config>
 ```
 
-Use the previous version from the deploy record, then smoke-test the same environment. Worker rollback does **not** undo D1 changes, R2 objects, queue messages, DO migrations, or settings. Returning from the auth contract migration to 1.x requires restoring the pre-migration database as well, losing later writes. Record the decision and outcome; a failed smoke is an unresolved incident.
+Use the previous version from the deploy record, then smoke-test the same environment. Worker rollback does **not** undo D1 changes, R2 objects, queue messages, DO migrations, or settings. Record the decision and outcome; a failed smoke is an unresolved incident.
 
 ## Backup and restore
 
