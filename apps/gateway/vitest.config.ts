@@ -34,7 +34,7 @@ export default defineConfig({
 		}),
 	],
 	test: {
-		setupFiles: ["./test/apply-migrations.ts"],
+		setupFiles: ["./tests/apply-migrations.ts"],
 		// Vitest's persistent FS module cache defaults on, but the Workers
 		// runtime has no host filesystem access (its VFS is rooted at an
 		// empty /bundle), so cache reads fail deterministically with ENOENT.

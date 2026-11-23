@@ -31,4 +31,4 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/gateway/src/admin/routes/alerts.ts](../apps/gateway/src/admin/routes/alerts.ts)
 - [apps/gateway/src/admin/routes/alert-channels.ts](../apps/gateway/src/admin/routes/alert-channels.ts)
 - [apps/dashboard/src/pages/AlertDetailPage.tsx](../apps/dashboard/src/pages/AlertDetailPage.tsx)
-- [apps/gateway/test/jobs/alerts-rules.test.ts](../apps/gateway/test/jobs/alerts-rules.test.ts)
+- [apps/gateway/tests/jobs/alerts-rules.test.ts](../apps/gateway/tests/jobs/alerts-rules.test.ts)

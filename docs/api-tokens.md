@@ -25,4 +25,4 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/gateway/src/admin/routes/api-tokens.ts](../apps/gateway/src/admin/routes/api-tokens.ts)
 - [apps/gateway/src/admin/auth/session.ts](../apps/gateway/src/admin/auth/session.ts)
 - [apps/dashboard/src/components/ApiTokensDialog.tsx](../apps/dashboard/src/components/ApiTokensDialog.tsx)
-- [apps/gateway/test/admin/routes/api-tokens.test.ts](../apps/gateway/test/admin/routes/api-tokens.test.ts)
+- [apps/gateway/tests/admin/routes/api-tokens.test.ts](../apps/gateway/tests/admin/routes/api-tokens.test.ts)

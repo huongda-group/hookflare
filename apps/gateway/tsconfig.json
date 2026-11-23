@@ -7,7 +7,7 @@
 	"include": [
 		"src",
 		"worker-configuration.d.ts",
-		"test",
+		"tests",
 		"vitest.config.ts",
 		"drizzle.config.ts"
 	]

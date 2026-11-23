@@ -29,4 +29,4 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/gateway/src/delivery/backoff.ts](../apps/gateway/src/delivery/backoff.ts)
 - [apps/gateway/src/core/policy.ts](../apps/gateway/src/core/policy.ts)
 - [apps/gateway/src/jobs/reconcile.ts](../apps/gateway/src/jobs/reconcile.ts)
-- [apps/gateway/test/delivery/consumer.test.ts](../apps/gateway/test/delivery/consumer.test.ts)
+- [apps/gateway/tests/delivery/consumer.test.ts](../apps/gateway/tests/delivery/consumer.test.ts)

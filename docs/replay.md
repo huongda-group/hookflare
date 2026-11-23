@@ -29,4 +29,4 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/gateway/src/admin/routes/events.ts](../apps/gateway/src/admin/routes/events.ts)
 - [apps/dashboard/src/components/ReplayDialog.tsx](../apps/dashboard/src/components/ReplayDialog.tsx)
 - [apps/dashboard/src/pages/FailuresPage.tsx](../apps/dashboard/src/pages/FailuresPage.tsx)
-- [apps/gateway/test/admin/replay.test.ts](../apps/gateway/test/admin/replay.test.ts)
+- [apps/gateway/tests/admin/replay.test.ts](../apps/gateway/tests/admin/replay.test.ts)

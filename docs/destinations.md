@@ -29,4 +29,4 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/gateway/src/core/sign.ts](../apps/gateway/src/core/sign.ts)
 - [apps/gateway/src/delivery/limiter.ts](../apps/gateway/src/delivery/limiter.ts)
 - [apps/dashboard/src/pages/endpoints/DestinationDetailPage.tsx](../apps/dashboard/src/pages/endpoints/DestinationDetailPage.tsx)
-- [apps/gateway/test/admin/destinations.test.ts](../apps/gateway/test/admin/destinations.test.ts)
+- [apps/gateway/tests/admin/destinations.test.ts](../apps/gateway/tests/admin/destinations.test.ts)

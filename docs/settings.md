@@ -28,4 +28,4 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/gateway/src/core/settings.ts](../apps/gateway/src/core/settings.ts)
 - [packages/shared/src/admin.ts](../packages/shared/src/admin.ts)
 - [apps/dashboard/src/pages/SettingsPage.tsx](../apps/dashboard/src/pages/SettingsPage.tsx)
-- [apps/gateway/test/admin/settings.test.ts](../apps/gateway/test/admin/settings.test.ts)
+- [apps/gateway/tests/admin/settings.test.ts](../apps/gateway/tests/admin/settings.test.ts)

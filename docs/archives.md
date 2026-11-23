@@ -31,4 +31,4 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/gateway/src/jobs/archive/purge.ts](../apps/gateway/src/jobs/archive/purge.ts)
 - [apps/gateway/src/admin/routes/archives.ts](../apps/gateway/src/admin/routes/archives.ts)
 - [apps/dashboard/src/pages/ArchivesPage.tsx](../apps/dashboard/src/pages/ArchivesPage.tsx)
-- [apps/gateway/test/jobs/archive-verify-purge.test.ts](../apps/gateway/test/jobs/archive-verify-purge.test.ts)
+- [apps/gateway/tests/jobs/archive-verify-purge.test.ts](../apps/gateway/tests/jobs/archive-verify-purge.test.ts)

@@ -28,4 +28,4 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/gateway/src/admin/routes/audit-logs.ts](../apps/gateway/src/admin/routes/audit-logs.ts)
 - [apps/gateway/src/admin/routes/archives.ts](../apps/gateway/src/admin/routes/archives.ts)
 - [apps/dashboard/src/pages/AuditPage.tsx](../apps/dashboard/src/pages/AuditPage.tsx)
-- [apps/gateway/test/admin/audit-logs.test.ts](../apps/gateway/test/admin/audit-logs.test.ts)
+- [apps/gateway/tests/admin/audit-logs.test.ts](../apps/gateway/tests/admin/audit-logs.test.ts)

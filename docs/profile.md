@@ -26,4 +26,4 @@ The files below define behavior and existing checks; listing a test does not mea
 - [packages/shared/src/admin.ts](../packages/shared/src/admin.ts)
 - [apps/dashboard/src/components/AccountMenu.tsx](../apps/dashboard/src/components/AccountMenu.tsx)
 - [apps/dashboard/src/components/ChangePasswordDialog.tsx](../apps/dashboard/src/components/ChangePasswordDialog.tsx)
-- [apps/gateway/test/admin/routes/me.test.ts](../apps/gateway/test/admin/routes/me.test.ts)
+- [apps/gateway/tests/admin/routes/me.test.ts](../apps/gateway/tests/admin/routes/me.test.ts)

@@ -31,5 +31,5 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/gateway/src/core/rbac.ts](../apps/gateway/src/core/rbac.ts)
 - [apps/gateway/src/admin/routes/users.ts](../apps/gateway/src/admin/routes/users.ts)
 - [apps/dashboard/src/pages/settings/UsersTab.tsx](../apps/dashboard/src/pages/settings/UsersTab.tsx)
-- [apps/gateway/test/admin/rbac-matrix.test.ts](../apps/gateway/test/admin/rbac-matrix.test.ts)
-- [apps/gateway/test/admin/users.test.ts](../apps/gateway/test/admin/users.test.ts)
+- [apps/gateway/tests/admin/rbac-matrix.test.ts](../apps/gateway/tests/admin/rbac-matrix.test.ts)
+- [apps/gateway/tests/admin/users.test.ts](../apps/gateway/tests/admin/users.test.ts)

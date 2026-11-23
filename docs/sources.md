@@ -31,4 +31,4 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/gateway/src/ingress/event-id.ts](../apps/gateway/src/ingress/event-id.ts)
 - [apps/gateway/src/admin/routes/sources.ts](../apps/gateway/src/admin/routes/sources.ts)
 - [apps/dashboard/src/pages/endpoints/SourceDetailPage.tsx](../apps/dashboard/src/pages/endpoints/SourceDetailPage.tsx)
-- [apps/gateway/test/ingress/route.test.ts](../apps/gateway/test/ingress/route.test.ts)
+- [apps/gateway/tests/ingress/route.test.ts](../apps/gateway/tests/ingress/route.test.ts)

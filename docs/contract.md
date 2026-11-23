@@ -55,4 +55,4 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/gateway/src/admin/router.ts](../apps/gateway/src/admin/router.ts)
 - [apps/gateway/src/admin/auth/session.ts](../apps/gateway/src/admin/auth/session.ts)
 - [packages/shared/src/admin.ts](../packages/shared/src/admin.ts)
-- [apps/gateway/test/core/sign.test.ts](../apps/gateway/test/core/sign.test.ts)
+- [apps/gateway/tests/core/sign.test.ts](../apps/gateway/tests/core/sign.test.ts)

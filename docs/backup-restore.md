@@ -29,4 +29,4 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/gateway/src/admin/routes/backups.ts](../apps/gateway/src/admin/routes/backups.ts)
 - [scripts/restore-backup.mjs](../scripts/restore-backup.mjs)
 - [scripts/verify-restore.mjs](../scripts/verify-restore.mjs)
-- [apps/gateway/test/jobs/backup-run.test.ts](../apps/gateway/test/jobs/backup-run.test.ts)
+- [apps/gateway/tests/jobs/backup-run.test.ts](../apps/gateway/tests/jobs/backup-run.test.ts)

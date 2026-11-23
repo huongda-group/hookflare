@@ -30,6 +30,6 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/dashboard/src/pages/EventsPage.tsx](../apps/dashboard/src/pages/EventsPage.tsx)
 - [apps/dashboard/src/pages/EventDetailPage.tsx](../apps/dashboard/src/pages/EventDetailPage.tsx)
 - [apps/dashboard/src/components/EventInspector.tsx](../apps/dashboard/src/components/EventInspector.tsx)
-- [apps/dashboard/src/pages/EventDetailPage.test.tsx](../apps/dashboard/src/pages/EventDetailPage.test.tsx)
+- [apps/dashboard/tests/pages/EventDetailPage.test.tsx](../apps/dashboard/tests/pages/EventDetailPage.test.tsx)
 - [apps/dashboard/src/components/PayloadPanel.tsx](../apps/dashboard/src/components/PayloadPanel.tsx)
-- [apps/gateway/test/admin/events.test.ts](../apps/gateway/test/admin/events.test.ts)
+- [apps/gateway/tests/admin/events.test.ts](../apps/gateway/tests/admin/events.test.ts)

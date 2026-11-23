@@ -43,4 +43,4 @@ The files below define behavior and existing checks; listing a test does not mea
 - [packages/shared/src/admin.ts](../packages/shared/src/admin.ts)
 - [apps/dashboard/src/pages/LoginPage.tsx](../apps/dashboard/src/pages/LoginPage.tsx)
 - [apps/dashboard/src/pages/SetupPage.tsx](../apps/dashboard/src/pages/SetupPage.tsx)
-- [apps/gateway/test/admin/routes/auth.test.ts](../apps/gateway/test/admin/routes/auth.test.ts)
+- [apps/gateway/tests/admin/routes/auth.test.ts](../apps/gateway/tests/admin/routes/auth.test.ts)

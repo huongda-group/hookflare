@@ -68,5 +68,5 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/dashboard/public/site.webmanifest](../apps/dashboard/public/site.webmanifest)
 - [apps/dashboard/src/components/AppShell.tsx](../apps/dashboard/src/components/AppShell.tsx)
 - [apps/dashboard/src/components/ui/dialog.tsx](../apps/dashboard/src/components/ui/dialog.tsx)
-- [apps/dashboard/e2e/redesign.spec.ts](../apps/dashboard/e2e/redesign.spec.ts)
-- [apps/dashboard/e2e/smoke.spec.ts](../apps/dashboard/e2e/smoke.spec.ts)
+- [apps/dashboard/tests/e2e/redesign.spec.ts](../apps/dashboard/tests/e2e/redesign.spec.ts)
+- [apps/dashboard/tests/e2e/smoke.spec.ts](../apps/dashboard/tests/e2e/smoke.spec.ts)

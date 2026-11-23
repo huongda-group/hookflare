@@ -7,7 +7,7 @@
 		"dev": "node scripts/ensure-dashboard-dist.mjs && wrangler dev --config apps/gateway/wrangler.jsonc",
 		"dev:dashboard": "pnpm --filter dashboard dev",
 		"build": "pnpm --filter dashboard build",
-		"test": "pnpm --recursive --if-present run test && node --test scripts/test/*.test.mjs",
+		"test": "pnpm --recursive --if-present run test && node --test scripts/tests/*.test.mjs",
 		"typecheck": "pnpm --recursive --if-present run typecheck",
 		"lint": "biome check .",
 		"format": "biome check --write .",

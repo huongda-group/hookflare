@@ -28,5 +28,5 @@ The files below define behavior and existing checks; listing a test does not mea
 - [apps/gateway/src/core/db/stats.ts](../apps/gateway/src/core/db/stats.ts)
 - [apps/gateway/src/jobs/rollup.ts](../apps/gateway/src/jobs/rollup.ts)
 - [apps/dashboard/src/pages/OverviewPage.tsx](../apps/dashboard/src/pages/OverviewPage.tsx)
-- [apps/dashboard/src/pages/OverviewPage.test.tsx](../apps/dashboard/src/pages/OverviewPage.test.tsx)
-- [apps/gateway/test/admin/overview.test.ts](../apps/gateway/test/admin/overview.test.ts)
+- [apps/dashboard/tests/pages/OverviewPage.test.tsx](../apps/dashboard/tests/pages/OverviewPage.test.tsx)
+- [apps/gateway/tests/admin/overview.test.ts](../apps/gateway/tests/admin/overview.test.ts)

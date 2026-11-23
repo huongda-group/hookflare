@@ -20,7 +20,7 @@ All commands run from the repository root.
 | `pnpm dev:dashboard` | `vite` on 5173, proxying `/api` to `wrangler dev` (run `pnpm dev` alongside) |
 | `pnpm build` | builds the dashboard into `apps/dashboard/dist` |
 | `pnpm --filter dashboard e2e` | Playwright smoke test against `wrangler dev` |
-| `pnpm test` | Vitest for every workspace, plus `node --test scripts/test/*.test.mjs` |
+| `pnpm test` | Vitest for every workspace, plus `node --test scripts/tests/*.test.mjs` |
 | `pnpm typecheck` | `tsc --noEmit` for every workspace |
 | `pnpm lint` / `pnpm format` | `biome check` / `biome check --write` |
 | `pnpm cf-typegen` | `wrangler types --strict-vars=false` (regenerates the committed `worker-configuration.d.ts`; run it without a local `.dev.vars`, or local secrets end up in `Env` and CI fails its staleness check) |
@@ -31,7 +31,7 @@ All commands run from the repository root.
 | `pnpm run deploy` / `pnpm deploy:staging` | `scripts/deploy.mjs`: record a restore point, `build`, remote migrations, `wrangler deploy`, smoke test (`--skip-smoke` to skip); see `docs/runbook.md#deploy-and-smoke` |
 | `pnpm run smoke` / `pnpm smoke:staging` | end-to-end smoke test through the sink (needs `HOOKFLARE_URL`/`HOOKFLARE_STAGING_URL`, `HOOKFLARE_API_TOKEN` from an admin API token, `SINK_URL`) |
 
-To run a single test: `pnpm --filter gateway exec vitest run test/core/ids.test.ts -t "strictly increasing"`.
+To run a single test: `pnpm --filter gateway exec vitest run tests/core/ids.test.ts -t "strictly increasing"`.
 
 > `pnpm deploy` is a built-in pnpm command, so the deploy script must be invoked as **`pnpm run deploy`**.
 

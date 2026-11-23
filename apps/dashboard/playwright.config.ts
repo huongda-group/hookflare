@@ -11,7 +11,7 @@ const PORT = 8788;
 // (`pnpm e2e redesign.spec.ts`, then `pnpm e2e smoke.spec.ts`) — never one
 // shared run — so fixture and live suites cannot share worker state.
 export default defineConfig({
-	testDir: "./e2e",
+	testDir: "./tests/e2e",
 	timeout: 60_000,
 	retries: process.env.CI ? 1 : 0,
 	use: { baseURL: `http://127.0.0.1:${PORT}`, trace: "retain-on-failure" },
