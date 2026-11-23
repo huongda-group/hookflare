@@ -4,7 +4,7 @@
 
 Hookflare sits between webhook providers (Stripe, GitHub, Shopify, your own services…) and your backends. It authenticates incoming webhooks according to source configuration, persists them, and delivers them asynchronously. The dashboard lets operators inspect attempts and replay eligible events.
 
-[Feature documentation](docs/README.md) · [Operations runbook](docs/runbook.md) · [Release index](CHANGELOG.md)
+[Documentation and screenshots](https://huongda.com/opensource/hookflare) · [Feature documentation](docs/README.md) · [Operations runbook](docs/runbook.md) · [Release index](CHANGELOG.md)
 
 ---
 
