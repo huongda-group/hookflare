@@ -151,6 +151,28 @@ describe("ResourcePicker", () => {
 		expect(calls).toHaveLength(2);
 	});
 
+	it("keeps Enter in the search box from submitting the enclosing form", async () => {
+		paged("/sources", storeEvents(3));
+		const onSubmit = vi.fn((event: { preventDefault: () => void }) =>
+			event.preventDefault(),
+		);
+		const { user } = renderWith(
+			<form onSubmit={onSubmit}>
+				<Picker kind="source" label="Source" onChange={() => {}} />
+				<button type="submit">Save</button>
+			</form>,
+		);
+		await user.click(screen.getByRole("combobox", { name: "Source" }));
+		await screen.findByRole("option", { name: /src_1\b/ });
+		await user.type(
+			screen.getByLabelText("Search loaded options"),
+			"Store{Enter}",
+		);
+
+		expect(onSubmit).not.toHaveBeenCalled();
+		expect(screen.getByLabelText("Search loaded options")).toHaveValue("Store");
+	});
+
 	it("keeps an unresolved deep-link selection while its name loads", async () => {
 		let release: (() => void) | undefined;
 		const gate = new Promise<void>((resolve) => {

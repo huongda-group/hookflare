@@ -23,7 +23,13 @@ const BARE_ROUTES = new Set(["/setup", "/login"]);
 
 export const Route = createRootRouteWithContext<RouterContext>()({
 	beforeLoad: async ({ context, location }) => {
-		const state = await context.queryClient.ensureQueryData(authStateQuery);
+		const state = await context.queryClient
+			.ensureQueryData(authStateQuery)
+			.catch(() => null);
+		if (state === null) {
+			if (BARE_ROUTES.has(location.pathname)) return;
+			throw redirect({ to: "/login", search: { next: location.href } });
+		}
 		if (state.setup_required && location.pathname !== "/setup") {
 			throw redirect({ to: "/setup" });
 		}

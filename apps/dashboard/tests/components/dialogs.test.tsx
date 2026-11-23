@@ -1484,6 +1484,30 @@ describe("ProjectFormDialog create", () => {
 		await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
 		expect(bodies).toEqual([{ name: "Ops" }]);
 	});
+
+	it("marks cached project names stale after a rename", async () => {
+		server.use(
+			http.patch(apiUrl("/projects/prj_1"), () =>
+				HttpResponse.json(project({ name: "Billing" })),
+			),
+		);
+		const onOpenChange = vi.fn();
+		const { qc, user } = await wrap(
+			<ProjectFormDialog
+				open
+				onOpenChange={onOpenChange}
+				project={project()}
+			/>,
+		);
+		const optionsKey = ["resource-options", "project", null];
+		qc.setQueryData(optionsKey, { pages: [], pageParams: [] });
+		const name = screen.getByLabelText("Name");
+		await user.clear(name);
+		await user.type(name, "Billing");
+		await user.click(screen.getByRole("button", { name: "Save" }));
+		await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+		expect(qc.getQueryState(optionsKey)?.isInvalidated).toBe(true);
+	});
 });
 
 describe("ChangePasswordDialog", () => {

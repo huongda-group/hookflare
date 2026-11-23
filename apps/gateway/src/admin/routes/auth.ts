@@ -10,7 +10,7 @@ import { readCappedBody } from "../../core/body";
 import { sessions, users } from "../../core/db/schema";
 import {
 	deleteSessionStmt,
-	insertSessionStmt,
+	insertSessionIfPasswordUnchangedStmt,
 	SESSION_ABSOLUTE_MS,
 	SESSION_IDLE_MS,
 } from "../../core/db/sessions";
@@ -267,19 +267,27 @@ export function authRoutes() {
 		}
 
 		const token = randomToken();
-		const insert = insertSessionStmt(db, {
+		const insert = insertSessionIfPasswordUnchangedStmt(db, {
 			idHash: await sha256Hex(token),
 			username,
+			passwordHash: user.passwordHash,
 			now: now(),
 		});
 		const previous = getCookie(c, SESSION_COOKIE);
-		if (previous) {
-			await db.batch([
-				deleteSessionStmt(db, await sha256Hex(previous)),
-				insert,
-			]);
-		} else {
-			await insert;
+		const inserted = previous
+			? (
+					await db.batch([
+						deleteSessionStmt(db, await sha256Hex(previous)),
+						insert,
+					])
+				)[1]
+			: await insert;
+		if (inserted.meta.changes === 0) {
+			c.var.logger.warn("admin.login_failed", {
+				username,
+				reason: "password_changed",
+			});
+			return c.json({ error: "invalid_credentials" }, 401);
 		}
 		setSessionCookie(c, token);
 		c.var.logger.info("admin.login_ok", { username });

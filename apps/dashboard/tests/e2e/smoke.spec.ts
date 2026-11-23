@@ -1,6 +1,8 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { seedDeadDelivery } from "./seed";
 
+test.describe.configure({ retries: 0 });
+
 async function passTurnstile(page: Page, submit: Locator) {
 	const box = page
 		.frameLocator('iframe[src*="challenges.cloudflare.com"]')

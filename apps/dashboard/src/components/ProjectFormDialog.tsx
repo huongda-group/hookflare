@@ -68,7 +68,10 @@ function ProjectForm({
 					me ? { ...me, project_required: false } : me,
 				);
 			}
-			await qc.invalidateQueries({ queryKey: qk.projects.all });
+			await Promise.all([
+				qc.invalidateQueries({ queryKey: qk.projects.all }),
+				qc.invalidateQueries({ queryKey: qk.resourceOptions("project") }),
+			]);
 			onDone();
 		} catch (err) {
 			applyServerIssues(form, err);

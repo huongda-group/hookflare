@@ -26,6 +26,25 @@ function useSummary(summary: Record<string, unknown> = SUMMARY) {
 }
 
 describe("Settings › Storage", () => {
+	it.each([
+		"Archive to R2 before deleting (off = delete without files)",
+		"Daily backup",
+	])("guards a toggle-only edit of %s on navigation", async (label) => {
+		useSummary();
+		const { user, router } = renderApp("/settings?tab=storage");
+		await user.click(await screen.findByLabelText(label));
+		await user.click(screen.getByRole("link", { name: "Projects" }));
+		expect(
+			await screen.findByRole("heading", {
+				name: "Discard unsaved changes?",
+			}),
+		).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Discard changes" }));
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe("/projects"),
+		);
+	});
+
 	it("asks for confirmation with the extra eligible count when lowering retention", async () => {
 		const bodies: unknown[] = [];
 		server.use(

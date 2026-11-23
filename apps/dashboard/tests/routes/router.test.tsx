@@ -20,6 +20,33 @@ describe("root route guard", () => {
 		).toBeInTheDocument();
 		expect(router.state.location.pathname).toBe("/login");
 	});
+
+	it("renders the login page's Retry when auth state fails to load", async () => {
+		server.use(
+			http.get(apiUrl("/auth/state"), () =>
+				HttpResponse.json({ error: "internal" }, { status: 500 }),
+			),
+		);
+		const { router } = renderApp("/login");
+		expect(
+			await screen.findByRole("button", { name: "Retry" }),
+		).toBeInTheDocument();
+		expect(router.state.location.pathname).toBe("/login");
+	});
+
+	it("sends other pages to login with next when auth state fails to load", async () => {
+		server.use(
+			http.get(apiUrl("/auth/state"), () =>
+				HttpResponse.json({ error: "internal" }, { status: 500 }),
+			),
+		);
+		const { router } = renderApp("/events");
+		expect(
+			await screen.findByRole("button", { name: "Retry" }),
+		).toBeInTheDocument();
+		expect(router.state.location.pathname).toBe("/login");
+		expect(router.state.location.search).toEqual({ next: "/events" });
+	});
 });
 
 describe("query client 403 handling", () => {

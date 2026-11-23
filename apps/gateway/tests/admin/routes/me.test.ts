@@ -201,6 +201,39 @@ describe("POST /me/password", () => {
 		);
 	});
 
+	it("rejects the change when an admin reset the password during verification", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps, { role: "admin" });
+		await setPassword(deps, api.username, PASSWORD);
+		const realDeriveBits = crypto.subtle.deriveBits.bind(crypto.subtle);
+		const deriveSpy = vi
+			.spyOn(crypto.subtle, "deriveBits")
+			.mockImplementationOnce(async (...args) => {
+				await setPassword(deps, api.username, "reset-by-an-admin");
+				return realDeriveBits(...args);
+			});
+		try {
+			const res = await api.request("POST", "/me/password", {
+				current_password: PASSWORD,
+				new_password: NEW_PASSWORD,
+			});
+			expect(res.status).toBe(401);
+			expect(await res.json()).toEqual({ error: "wrong_password" });
+		} finally {
+			deriveSpy.mockRestore();
+		}
+		const row = await getUser(deps.db, api.username);
+		expect(
+			await verifyPassword("reset-by-an-admin", row?.passwordHash ?? null),
+		).toBe(true);
+		expect(
+			await deps.db
+				.select()
+				.from(auditLogs)
+				.where(eq(auditLogs.resourceId, api.username)),
+		).toEqual([]);
+	});
+
 	it("requires authentication", async () => {
 		const deps = testDeps();
 		const res = await createApp({ createDeps: () => deps }).request(

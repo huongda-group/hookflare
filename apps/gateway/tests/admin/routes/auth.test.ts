@@ -14,6 +14,7 @@ import type { Deps } from "../../../src/deps";
 import { testDeps } from "../../helpers/deps";
 import { denyAllLimiter, testEnv } from "../../helpers/env";
 
+const realDeriveBits = crypto.subtle.deriveBits.bind(crypto.subtle);
 const deriveSpy = vi.spyOn(crypto.subtle, "deriveBits");
 
 const ORIGIN = "https://hookflare.example.com";
@@ -302,6 +303,25 @@ describe("POST /auth/login", () => {
 		expect(cookie).toContain("SameSite=Strict");
 		expect(cookie).toContain("Path=/api/admin");
 		expect(cookie).toContain("Secure");
+	});
+
+	it("rejects a login whose verified password was reset before the session insert", async () => {
+		const deps = testDeps();
+		await seedAdmin(deps);
+		deriveSpy.mockImplementationOnce(async (...args) => {
+			await deps.db
+				.update(users)
+				.set({ passwordHash: await hashPassword("reset-by-an-admin") })
+				.where(eq(users.username, "admin"));
+			return realDeriveBits(...args);
+		});
+		const res = await request(deps, "POST", "/auth/login", {
+			body: { username: "admin", password: PASSWORD },
+		});
+		expect(res.status).toBe(401);
+		expect(await res.json()).toEqual({ error: "invalid_credentials" });
+		expect(res.headers.get("set-cookie")).toBeNull();
+		expect(await deps.db.select().from(sessions)).toEqual([]);
 	});
 
 	it("omits Secure on http://localhost", async () => {

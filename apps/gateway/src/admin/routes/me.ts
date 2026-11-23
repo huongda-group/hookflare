@@ -1,5 +1,5 @@
 import { changePasswordRequest, type Me } from "@hookflare/shared";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppBindings } from "../../app";
 import { auditInsertIfChanged } from "../../core/audit";
@@ -36,9 +36,10 @@ export function meRoutes() {
 		});
 		if (!success) return c.json({ error: "too_many_attempts" }, 429);
 		const existing = await getUser(db, actor.username);
+		const currentHash = existing?.passwordHash;
 		if (
-			!existing ||
-			!(await verifyPassword(current_password, existing.passwordHash))
+			!currentHash ||
+			!(await verifyPassword(current_password, currentHash))
 		) {
 			return c.json({ error: "wrong_password" }, 401);
 		}
@@ -47,11 +48,16 @@ export function meRoutes() {
 		}
 		const ts = now();
 		const passwordHash = await hashPassword(new_password);
-		await db.batch([
+		const [updated] = await db.batch([
 			db
 				.update(users)
 				.set({ passwordHash, passwordChangedAt: ts, updatedAt: ts })
-				.where(eq(users.username, actor.username)),
+				.where(
+					and(
+						eq(users.username, actor.username),
+						eq(users.passwordHash, currentHash),
+					),
+				),
 			auditInsertIfChanged(db, {
 				actor: actor.username,
 				action: "user.password_changed",
@@ -62,6 +68,9 @@ export function meRoutes() {
 			}),
 			deleteUserSessionsStmt(db, actor.username, actor.sessionIdHash),
 		]);
+		if (updated.meta.changes === 0) {
+			return c.json({ error: "wrong_password" }, 401);
+		}
 		return c.body(null, 204);
 	});
 

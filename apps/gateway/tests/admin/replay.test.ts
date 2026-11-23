@@ -118,6 +118,27 @@ describe("POST /events/:id/replay", () => {
 		expect((deps.queue as RecordingQueue).sent).toEqual([]);
 	});
 
+	it("reports a bulk replay to a paused destination as paused and not enqueued", async () => {
+		const deps = testDeps({ queue: recordingQueue() });
+		const p = await seedPipeline(deps, { destination: { status: "paused" } });
+		const { deliveryId } = await seedDelivery(deps, p, { status: "dead" });
+		const api = await adminApp(deps, { role: "operator" });
+		const body = await (
+			await api.request("POST", "/failures/replay", {
+				delivery_ids: [deliveryId],
+				reason,
+			})
+		).json<BulkReplayResult>();
+		expect(body.replayed).toEqual([
+			expect.objectContaining({
+				delivery_id: deliveryId,
+				status: "paused",
+				enqueued: false,
+			}),
+		]);
+		expect((deps.queue as RecordingQueue).sent).toEqual([]);
+	});
+
 	it("answers 404, 409 destination_disabled, and 409 replay_in_progress", async () => {
 		const deps = testDeps();
 		const p = await seedPipeline(deps);
@@ -457,6 +478,7 @@ describe("concurrent replays", () => {
 			{
 				delivery_id: dead.deliveryId,
 				new_delivery_id: rows[0].id,
+				status: "pending",
 				enqueued: true,
 			},
 		]);

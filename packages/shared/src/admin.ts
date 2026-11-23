@@ -460,6 +460,7 @@ export type BulkReplayResult = {
 	replayed: {
 		delivery_id: string;
 		new_delivery_id: string;
+		status: string;
 		enqueued: boolean;
 	}[];
 	skipped: { delivery_id: string; reason: string }[];

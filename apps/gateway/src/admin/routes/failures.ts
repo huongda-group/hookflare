@@ -120,6 +120,7 @@ export function failureRoutes() {
 			replayed: replayed.map((r) => ({
 				delivery_id: r.source_delivery_id,
 				new_delivery_id: r.new_delivery_id,
+				status: r.status,
 				enqueued: r.enqueued,
 			})),
 			skipped: [...allSkipped, ...lost],

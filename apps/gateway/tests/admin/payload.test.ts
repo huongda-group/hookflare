@@ -47,7 +47,7 @@ describe("GET /events/:id/payload", () => {
 		expect(rows.map((r) => [r.action, r.actor])).toEqual([
 			["event.payload_viewed", api.username],
 		]);
-		expect(JSON.stringify(rows)).not.toContain("4242");
+		expect(rows.map((r) => [r.reason, r.diffJson])).toEqual([[null, null]]);
 	});
 
 	it("defaults the payload content type to octet-stream", async () => {

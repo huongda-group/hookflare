@@ -1,4 +1,14 @@
-import { and, eq, gt, inArray, isNotNull, isNull, lte, ne } from "drizzle-orm";
+import {
+	and,
+	eq,
+	gt,
+	inArray,
+	isNotNull,
+	isNull,
+	lte,
+	ne,
+	sql,
+} from "drizzle-orm";
 import type { Db } from "../../deps";
 import { type Role, sessions, users } from "./schema";
 
@@ -28,6 +38,30 @@ export function insertSessionStmt(
 		lastSeenAt: s.now,
 		expiresAt: sessionExpiry(s.now, s.now),
 	});
+}
+
+export function insertSessionIfPasswordUnchangedStmt(
+	db: Db,
+	s: { idHash: string; username: string; passwordHash: string; now: number },
+) {
+	return db.insert(sessions).select(
+		db
+			.select({
+				idHash: sql<string>`${s.idHash}`.as("id_hash"),
+				username: users.username,
+				createdAt: sql<number>`${s.now}`.as("created_at"),
+				lastSeenAt: sql<number>`${s.now}`.as("last_seen_at"),
+				expiresAt: sql<number>`${sessionExpiry(s.now, s.now)}`.as("expires_at"),
+			})
+			.from(users)
+			.where(
+				and(
+					eq(users.username, s.username),
+					eq(users.passwordHash, s.passwordHash),
+					isNull(users.disabledAt),
+				),
+			),
+	);
 }
 
 export async function findSessionActor(

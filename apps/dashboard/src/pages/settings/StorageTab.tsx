@@ -159,7 +159,9 @@ function StorageForm({ initial }: { initial: StorageSettings }) {
 								id="st-archive_enabled"
 								checked={form.watch("archive_enabled")}
 								onCheckedChange={(v) =>
-									form.setValue("archive_enabled", v === true)
+									form.setValue("archive_enabled", v === true, {
+										shouldDirty: true,
+									})
 								}
 							/>
 							<Label htmlFor="st-archive_enabled">
@@ -176,7 +178,9 @@ function StorageForm({ initial }: { initial: StorageSettings }) {
 								id="st-backup_enabled"
 								checked={backupEnabled}
 								onCheckedChange={(v) =>
-									form.setValue("backup_enabled", v === true)
+									form.setValue("backup_enabled", v === true, {
+										shouldDirty: true,
+									})
 								}
 							/>
 							<Label htmlFor="st-backup_enabled">Daily backup</Label>

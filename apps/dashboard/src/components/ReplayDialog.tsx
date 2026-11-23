@@ -39,11 +39,6 @@ type Outcome = {
 
 type Submission = { target: ReplayTarget; reason: string; projectId: string };
 
-type BulkReplayResponse = {
-	replayed: (BulkReplayResult["replayed"][number] & { status?: string })[];
-	skipped: BulkReplayResult["skipped"];
-};
-
 async function replay({
 	target,
 	reason,
@@ -69,7 +64,7 @@ async function replay({
 			skipped: [],
 		};
 	}
-	const r = await api.post<BulkReplayResponse>(
+	const r = await api.post<BulkReplayResult>(
 		projectScopedPath("/failures/replay", projectId),
 		{
 			delivery_ids: target.deliveryIds,

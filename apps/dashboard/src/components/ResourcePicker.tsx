@@ -206,6 +206,9 @@ export function ResourcePicker({
 							ref={searchRef}
 							value={search}
 							onChange={(event) => setSearch(event.target.value)}
+							onKeyDown={(event) => {
+								if (event.key === "Enter") event.preventDefault();
+							}}
 						/>
 					</FormField>
 

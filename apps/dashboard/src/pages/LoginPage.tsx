@@ -58,7 +58,9 @@ export function LoginPage({ next }: { next?: string }) {
 			form.clearErrors("root");
 			try {
 				await login({ ...values, turnstile_token: token ?? undefined });
-				qc.removeQueries({ queryKey: qk.me });
+				qc.removeQueries({
+					predicate: (query) => query.queryKey[0] !== qk.authState[0],
+				});
 				await navigate({ href: safeNext(next) });
 			} catch (err) {
 				setToken(null);

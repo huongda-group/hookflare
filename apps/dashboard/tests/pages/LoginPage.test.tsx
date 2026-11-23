@@ -217,6 +217,24 @@ describe("LoginPage", () => {
 		);
 	});
 
+	it("drops the previous account's cached data but keeps auth state on success", async () => {
+		const { user, queryClient } = renderApp("/login");
+		await user.type(await screen.findByLabelText("Username"), "admin");
+		queryClient.setQueryData(["me"], { username: "previous-user" });
+		queryClient.setQueryData(["projects", "list", {}], { items: [] });
+		await user.type(screen.getByLabelText("Password"), "correct-horse-battery");
+		await user.click(screen.getByRole("button", { name: "Sign in" }));
+		await waitFor(() =>
+			expect(
+				queryClient.getQueryData(["projects", "list", {}]),
+			).toBeUndefined(),
+		);
+		expect(queryClient.getQueryData(["me"])).not.toEqual({
+			username: "previous-user",
+		});
+		expect(queryClient.getQueryData(["auth-state"])).toBeDefined();
+	});
+
 	it("falls back to / for an open-redirect next", async () => {
 		const { user, router } = renderApp(
 			"/login?next=https%3A%2F%2Fevil.example",
