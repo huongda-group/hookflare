@@ -8,6 +8,7 @@
 		"dev:dashboard": "pnpm --filter dashboard dev",
 		"build": "pnpm --filter dashboard build",
 		"test": "pnpm --recursive --if-present run test && node --test scripts/tests/*.test.mjs",
+		"test:coverage": "pnpm --recursive --if-present run test:coverage && node --test --experimental-test-coverage --test-coverage-include='scripts/lib/**' --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 scripts/tests/*.test.mjs",
 		"typecheck": "pnpm --recursive --if-present run typecheck",
 		"lint": "biome check .",
 		"format": "biome check --write .",

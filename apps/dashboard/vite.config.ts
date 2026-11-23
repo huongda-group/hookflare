@@ -8,7 +8,13 @@ import { defineConfig } from "vite";
 export default defineConfig({
 	// The router plugin must run before the React plugin.
 	plugins: [
-		tanstackRouter({ target: "react", autoCodeSplitting: true }),
+		tanstackRouter({
+			target: "react",
+			autoCodeSplitting: true,
+			// Under Vitest the injected dev-only HMR glue would be instrumented
+			// as untestable branches in every route file.
+			codeSplittingOptions: { addHmr: !process.env.VITEST },
+		}),
 		react(),
 		tailwindcss(),
 	],

@@ -13,6 +13,16 @@ export default defineConfig({
 		}),
 	],
 	test: {
+		coverage: {
+			provider: "istanbul",
+			include: ["src/**/*.ts"],
+			thresholds: {
+				lines: 100,
+				branches: 100,
+				functions: 100,
+				statements: 100,
+			},
+		},
 		// Same as apps/gateway: the Workers runtime has no host filesystem
 		// access, so Vitest's persistent FS module cache fails with ENOENT.
 		fsModuleCache: false,

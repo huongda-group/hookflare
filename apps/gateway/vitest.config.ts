@@ -34,6 +34,18 @@ export default defineConfig({
 		}),
 	],
 	test: {
+		coverage: {
+			// The Workers pool cannot collect V8 coverage; istanbul instruments
+			// the source instead.
+			provider: "istanbul",
+			include: ["src/**/*.ts"],
+			thresholds: {
+				lines: 100,
+				branches: 100,
+				functions: 100,
+				statements: 100,
+			},
+		},
 		setupFiles: ["./tests/apply-migrations.ts"],
 		// Vitest's persistent FS module cache defaults on, but the Workers
 		// runtime has no host filesystem access (its VFS is rooted at an

@@ -6,7 +6,8 @@
 	"scripts": {
 		"test": "node ../../scripts/ensure-dashboard-dist.mjs && vitest run",
 		"typecheck": "tsc --noEmit",
-		"db:generate": "drizzle-kit generate"
+		"db:generate": "drizzle-kit generate",
+		"test:coverage": "node ../../scripts/ensure-dashboard-dist.mjs && vitest run --coverage"
 	},
 	"dependencies": {
 		"@hookflare/shared": "workspace:*",
@@ -16,6 +17,7 @@
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-plugin": "^1.4.4",
+		"@vitest/coverage-istanbul": "5.0.5",
 		"drizzle-kit": "^0.31.11",
 		"typescript": "7.0.2",
 		"vitest": "^5.0.5"
