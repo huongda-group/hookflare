@@ -6,6 +6,7 @@ import {
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
+import type { z } from "zod";
 import { DirtyFormGuard } from "@/components/DirtyFormGuard";
 import { FormField } from "@/components/FormField";
 import { FormSection } from "@/components/FormSection";
@@ -88,7 +89,9 @@ function DestinationForm({
 	const defaults = useSettings().data?.retry_defaults;
 	const form = useForm<Values>({
 		resolver: zodResolver(
-			(editing ? patchDestinationRequest : createDestinationRequest) as never,
+			(editing
+				? patchDestinationRequest
+				: createDestinationRequest) as z.ZodType<Values, Values>,
 		),
 		defaultValues: editing
 			? {

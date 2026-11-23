@@ -78,7 +78,7 @@ jobs:
           CI: "true"
       - name: E2E live suite
         if: ${{ !cancelled() }}
-        run: pnpm --filter dashboard e2e smoke.spec.ts
+        run: pnpm --filter dashboard e2e smoke.spec.ts --output test-results-live
         env:
           CI: "true"
       - name: Upload Playwright results
@@ -88,5 +88,6 @@ jobs:
           name: playwright-report
           path: |
             apps/dashboard/test-results
+            apps/dashboard/test-results-live
             apps/dashboard/playwright-report
           if-no-files-found: ignore

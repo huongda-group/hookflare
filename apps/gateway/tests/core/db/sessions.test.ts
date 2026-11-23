@@ -9,7 +9,6 @@ import {
 	purgeExpiredSessions,
 	SESSION_ABSOLUTE_MS,
 	SESSION_IDLE_MS,
-	SESSION_TOUCH_MS,
 	touchSessionStmt,
 } from "../../../src/core/db/sessions";
 import type { Deps } from "../../../src/deps";
@@ -88,9 +87,9 @@ describe("findSessionActor", () => {
 		await insertSessionStmt(deps.db, { idHash, username, now: T0 });
 
 		for (
-			let t = T0 + SESSION_TOUCH_MS;
+			let t = T0 + SESSION_IDLE_MS / 2;
 			t <= T0 + SESSION_ABSOLUTE_MS;
-			t += SESSION_TOUCH_MS
+			t += SESSION_IDLE_MS / 2
 		) {
 			await touchSessionStmt(deps.db, idHash, T0, t);
 		}

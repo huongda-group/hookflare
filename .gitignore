@@ -5,6 +5,7 @@ node_modules/
 dist/
 apps/dashboard/dist
 apps/dashboard/test-results
+apps/dashboard/test-results-live
 apps/dashboard/playwright-report
 .dev.vars*
 !.dev.vars.example
