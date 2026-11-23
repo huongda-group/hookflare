@@ -18,7 +18,6 @@ function envWithDb(db: unknown): typeof env {
 
 describe("app", () => {
 	it("GET /healthz returns 200 when D1 is healthy (migrations applied)", async () => {
-		// Proves the setup file applied migrations before this file ran.
 		const table = await env.DB.prepare(
 			"SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'settings'",
 		).first<{ name: string }>();
@@ -68,7 +67,6 @@ describe("app", () => {
 	it("GET /healthz returns 503 when the D1 probe outlasts the timeout", async () => {
 		vi.useFakeTimers();
 		try {
-			// The heartbeat read answers; only the SELECT 1 probe hangs.
 			const hangingEnv = envWithDb({
 				prepare: () => ({ first: () => new Promise(() => {}) }),
 			});
@@ -101,7 +99,6 @@ describe("app", () => {
 
 	it("an error before the request context is set still returns a JSON 500 with a fresh request_id", async () => {
 		const req = new Request("https://hookflare.example.com/healthz");
-		// Reading cf-ray is the first thing the request middleware does.
 		Object.defineProperty(req, "headers", {
 			get() {
 				throw new Error("headers unavailable");

@@ -9,13 +9,6 @@ const TERMINAL: Record<string, string> = {
 	dead: "Dead",
 };
 
-/**
- * Spec §11: Received (or, for a replay, its creation) → attempts → retrying /
- * pending / terminal. Attempts render chronologically. The attempt list is
- * collapsible so an event with many deliveries keeps every history in the DOM
- * without forcing the reader past all of it; collapsed responses and
- * collapsed deliveries are not mounted until opened.
- */
 export function DeliveryTimeline({
 	delivery,
 	receivedAt,
@@ -25,7 +18,6 @@ export function DeliveryTimeline({
 }: {
 	delivery: Delivery;
 	receivedAt: number;
-	/** Newest delivery on the page renders open; older ones render collapsed. */
 	defaultOpen?: boolean;
 	selectedAttemptId?: string;
 	onSelectAttempt?: (attempt: DeliveryAttempt) => void;

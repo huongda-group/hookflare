@@ -31,7 +31,6 @@ describe("createDeps outbound and limiter seams", () => {
 
 	it("fetch delegates to the global fetch at call time", async () => {
 		const deps = createDeps(testEnv());
-		// Stubbed after createDeps: the seam must not capture fetch eagerly.
 		const spy = vi
 			.spyOn(globalThis, "fetch")
 			.mockResolvedValue(new Response("pong", { status: 201 }));
@@ -49,12 +48,10 @@ describe("createDeps outbound and limiter seams", () => {
 		const destB = `dst_${crypto.randomUUID()}`;
 		const first = await deps.limiter(destA).acquire(req);
 		expect(first.ok).toBe(true);
-		// Same name: the same object, whose only slot is taken.
 		await expect(deps.limiter(destA).acquire(req)).resolves.toMatchObject({
 			ok: false,
 			reason: "in_flight",
 		});
-		// Another destination has its own counter.
 		await expect(deps.limiter(destB).acquire(req)).resolves.toMatchObject({
 			ok: true,
 		});

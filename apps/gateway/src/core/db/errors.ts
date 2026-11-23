@@ -1,4 +1,3 @@
-/** D1 wraps SQLite errors; walk the cause chain and match the SQLite message. */
 function messages(err: unknown): string[] {
 	const out: string[] = [];
 	let cur: unknown = err;

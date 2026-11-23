@@ -28,7 +28,6 @@ function streamOf(bytes: Uint8Array): ReadableStream<Uint8Array> {
 
 describe("readJson", () => {
 	it("stops reading at the cap when there is no content-length", async () => {
-		// Never ends: only a reader that enforces the cap while streaming returns.
 		const endless = new ReadableStream<Uint8Array>({
 			pull(controller) {
 				controller.enqueue(new Uint8Array(MAX_ADMIN_BODY_BYTES / 4));
@@ -37,7 +36,7 @@ describe("readJson", () => {
 		const res = await app.request("/", {
 			method: "POST",
 			body: endless,
-			// @ts-expect-error duplex is required for stream bodies but missing from RequestInit
+			// @ts-expect-error
 			duplex: "half",
 		});
 		expect(res.status).toBe(413);
@@ -47,7 +46,7 @@ describe("readJson", () => {
 		const res = await app.request("/", {
 			method: "POST",
 			body: streamOf(new TextEncoder().encode('{"name":"a"}')),
-			// @ts-expect-error duplex is required for stream bodies but missing from RequestInit
+			// @ts-expect-error
 			duplex: "half",
 		});
 		expect(res.status).toBe(200);

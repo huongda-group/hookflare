@@ -79,7 +79,6 @@ describe("heartbeat", () => {
 		const err = vi.spyOn(console, "error").mockImplementation(() => {});
 		try {
 			const base = testDeps();
-			// lease_until only appears in reconcile's expired-leases query.
 			const deps = faultyDeps(base, { d1: [{ match: /lease_until/ }] });
 			await runScheduled(RECONCILE_CRON, deps);
 			const jobs = await readHeartbeat(base.db);

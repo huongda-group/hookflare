@@ -152,7 +152,6 @@ describe("processDelivery with a limiter (spec §5.3)", () => {
 		const { deliveryId } = await seedLimited(deps, { maxInFlight: 1 });
 		deps.limiter = () => ({
 			async acquire() {
-				// Another worker leases the delivery while we wait for a slot.
 				await deps.db
 					.update(deliveries)
 					.set({ status: "in_flight", leaseUntil: Date.now() + 60_000 })
@@ -177,7 +176,6 @@ describe("processDelivery with a limiter (spec §5.3)", () => {
 		let calls = 0;
 		deps.db.batch = ((stmts: unknown) => {
 			calls++;
-			// acquireLease does not batch; the first batch is recordLeasedAttempt.
 			if (calls === 1) return Promise.reject(new Error("D1_ERROR"));
 			return realBatch(stmts as never);
 		}) as typeof deps.db.batch;
@@ -214,7 +212,6 @@ describe("processDelivery with a limiter (spec §5.3)", () => {
 			delivery: { status: "retrying", nextAttemptAt: T0, attemptCount: 2 },
 		});
 		const ids = [queued.deliveryId, retrying.deliveryId];
-		// 40 simulated minutes: the consumer keeps re-sending, reconcile runs every minute.
 		for (let m = 0; m <= 40; m++) {
 			t = T0 + m * 60_000;
 			for (const id of ids) {

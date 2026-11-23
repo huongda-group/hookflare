@@ -41,7 +41,6 @@ afterEach(() => {
 	rmSync(dir, { recursive: true, force: true });
 });
 
-/** A wrangler config (JSONC) with one D1 database id. */
 function config(name, id) {
 	const path = join(dir, `${name}.jsonc`);
 	writeFileSync(
@@ -58,7 +57,6 @@ function known() {
 	};
 }
 
-/** Gzipped NDJSON part plus its manifest entry. */
 function part(table, key, rows) {
 	const body = gzipSync(`${rows.map((r) => JSON.stringify(r)).join("\n")}\n`);
 	const blob_bytes = {};
@@ -83,10 +81,6 @@ function part(table, key, rows) {
 	};
 }
 
-/**
- * A two-table backup in a fake bucket: projects, and items whose FK
- * points at projects. One item is an orphan with a secret body.
- */
 function backup({ itemRows } = {}) {
 	const projects = part("projects", `${PREFIX}projects/0000.ndjson.gz`, [
 		{ id: "prj_1" },
@@ -143,7 +137,6 @@ function backup({ itemRows } = {}) {
 	return { manifest, bucket };
 }
 
-/** In-memory SQLite standing in for the target D1 database. */
 function targetDb(migrations = MIGRATIONS) {
 	const db = new DatabaseSync(":memory:");
 	db.exec(`
@@ -157,7 +150,6 @@ function targetDb(migrations = MIGRATIONS) {
 	return db;
 }
 
-/** Fake wrangler deps over a bucket map and a SQLite database. */
 function deps(bucket, db, { failOn } = {}) {
 	const executed = [];
 	return {
@@ -177,8 +169,6 @@ function deps(bucket, db, { failOn } = {}) {
 				failOn.delete(name);
 				throw new Error(`boom in ${name}`);
 			}
-			// D1 applies a --file as one transaction, so the file's
-			// `PRAGMA defer_foreign_keys` holds until its end.
 			db.exec(`BEGIN;\n${readFileSync(file, "utf8")}\nCOMMIT;`);
 			executed.push(name);
 		},
@@ -209,7 +199,6 @@ describe("wranglerBin", () => {
 
 	it("resolves wrangler.cmd on Windows", (t) => {
 		t.mock.property(process, "platform", "win32");
-		/** @type {string[]} */
 		const checked = [];
 		assert.equal(
 			wranglerBin("/repo", (path) => {
@@ -289,7 +278,6 @@ describe("readPartRows", () => {
 		writeFileSync(path, Buffer.from("not gzip at all"));
 		await assert.rejects(async () => {
 			for await (const _ of readPartRows(path)) {
-				// drain
 			}
 		});
 	});
@@ -549,7 +537,6 @@ describe("backupIdOf", () => {
 });
 
 describe("configDatabaseId", () => {
-	/** @param {string} body */
 	function raw(body) {
 		const path = join(dir, "raw.jsonc");
 		writeFileSync(path, body);
@@ -741,7 +728,6 @@ describe("restoreBackup guards and resume safety", () => {
 		for (let i = 0; i < 1005; i++) {
 			rows.push({ id: `n${i}`, parent_id: i === 0 ? null : `n${i - 1}` });
 		}
-		// Forward reference into the second preload batch.
 		rows[0].parent_id = "n1004";
 		rows.push(
 			{ id: "o1", parent_id: "gone", data: { $b64: "AA==" } },

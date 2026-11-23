@@ -24,7 +24,6 @@ declare global {
 
 let scriptPromise: Promise<void> | null = null;
 
-/** Loads `api.js` exactly once per page, whoever renders first (spec §6.5.1). */
 function loadTurnstile(): Promise<void> {
 	if (window.turnstile) return Promise.resolve();
 	scriptPromise ??= new Promise<void>((resolve, reject) => {
@@ -42,12 +41,6 @@ function loadTurnstile(): Promise<void> {
 	return scriptPromise;
 }
 
-/**
- * The explicit-render Turnstile widget (spec §6.5.1, §8.1–8.2). States are
- * explicit: loading while the script renders, off (a neutral notice), and
- * error/expiry (no UI bypass). Tokens are single-use, so the page bumps
- * `resetKey` after every failed submit and the yielded token is dropped.
- */
 export function TurnstileWidget({
 	siteKey,
 	action,
@@ -64,7 +57,6 @@ export function TurnstileWidget({
 	const [status, setStatus] = useState<"loading" | "ready" | "error">(
 		"loading",
 	);
-	// The callback is read through a ref so a re-render never re-renders the widget.
 	const onTokenRef = useRef(onToken);
 	useEffect(() => {
 		onTokenRef.current = onToken;
@@ -87,7 +79,7 @@ export function TurnstileWidget({
 						onTokenRef.current(null);
 					},
 				});
-				/* istanbul ignore else -- @preserve unreachable: render() is synchronous, so the cleanup cannot run between the check above and here */
+				/* istanbul ignore else -- @preserve */
 				if (!cancelled) setStatus("ready");
 			})
 			.catch(() => {

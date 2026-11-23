@@ -2,11 +2,6 @@ import { useId, useState } from "react";
 import { formatAbsolute, formatIso, formatRelative } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
-/**
- * Relative time whose exact browser-local and UTC timestamps are reachable on
- * hover, on keyboard focus, and on tap/click (spec §11). The detail stays in
- * flow, so it is never clipped by a table's own scroll region.
- */
 export function TimeText({
 	ms,
 	className,

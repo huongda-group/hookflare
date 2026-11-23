@@ -22,13 +22,10 @@ export function backupRoutes() {
 
 	routes.post("/run", requirePermission("settings.manage"), async (c) => {
 		const deps = c.var.deps;
-		// Also fails `running` rows whose instance is gone, so they stop blocking.
 		if (await isBackupRunning(deps))
 			return c.json({ error: "backup_running" }, 409);
 		const day = new Date(deps.now()).toISOString().slice(0, 10);
 		const backupId = `backup-${day}-manual-${newId("bkp").slice(4).toLowerCase()}`;
-		// The row and its audit land together. `backups_one_running_idx`
-		// makes a racing second POST fail its insert, so only one wins.
 		try {
 			await deps.db.batch([
 				deps.db
@@ -45,8 +42,6 @@ export function backupRoutes() {
 				return c.json({ error: "backup_running" }, 409);
 			throw err;
 		}
-		// The Workflow cannot join the batch: start it after, and fail the row
-		// if it does not start so it never blocks the next run.
 		try {
 			await startBackupRun(
 				deps,

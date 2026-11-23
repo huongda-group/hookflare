@@ -124,7 +124,6 @@ export function eventRoutes() {
 			return c.json({ error: "unavailable" }, 503);
 		}
 		if (body === null) return c.json({ error: "payload_missing" }, 404);
-		// Spec §8.3: no audit row, no payload.
 		try {
 			await auditStmt(c, {
 				action: "event.payload_viewed",
@@ -187,7 +186,6 @@ export function eventRoutes() {
 				resourceType: "event",
 				resourceId: eventId,
 			});
-			// Lost to a concurrent replay of the same pair after precheck.
 			if (!r) return c.json({ error: "replay_in_progress" }, 409);
 			return c.json(
 				{

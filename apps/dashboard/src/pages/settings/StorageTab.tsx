@@ -54,7 +54,6 @@ function StorageForm({ initial }: { initial: StorageSettings }) {
 	} | null>(null);
 	const [saved, setSaved] = useState(false);
 	const [writing, setWriting] = useState(false);
-	// Blocks a second confirm click that lands before the disabled state renders.
 	const writeInFlight = useRef(false);
 	type StorageFormValues = z.input<typeof storageSettingsSchema>;
 	const form = useForm<StorageFormValues>({
@@ -62,15 +61,13 @@ function StorageForm({ initial }: { initial: StorageSettings }) {
 		defaultValues: initial,
 	});
 
-	// A shown confirmation describes the values at submit time. Any further
-	// edit makes it stale, so drop it instead of saving something unreviewed.
 	useEffect(() => {
 		const sub = form.watch(() => setConfirm(null));
 		return () => sub.unsubscribe();
 	}, [form]);
 
 	async function write(storage: StorageSettings) {
-		/* istanbul ignore if -- @preserve unreachable: React commits the disabled state synchronously after a discrete click, so a second click never reaches this handler; the ref is defense in depth */
+		/* istanbul ignore if -- @preserve */
 		if (writeInFlight.current) return;
 		writeInFlight.current = true;
 		setWriting(true);
@@ -90,7 +87,6 @@ function StorageForm({ initial }: { initial: StorageSettings }) {
 
 	const submit = form.handleSubmit(async (value) => {
 		setSaved(false);
-		// The schema defaults fill the backup fields when untouched.
 		const storage: StorageSettings = storageSettingsSchema.parse(value);
 		const lowered =
 			storage.hot_retention_days < initial.hot_retention_days ||
@@ -291,10 +287,7 @@ function BackupStatus() {
 			if (err instanceof ApiError && err.code === "backup_running") {
 				setError("A backup is already running");
 			} else {
-				// The non-Error fallback is unreachable (runBackupNow rejects only with
-				// ApiError or a JSON SyntaxError), and the transform drops inline
-				// branch hints, so the hint covers the statement; tests cover err.message.
-				/* istanbul ignore next -- @preserve unreachable: non-Error rejection */
+				/* istanbul ignore next -- @preserve */
 				setError(err instanceof Error ? err.message : "Failed to start backup");
 			}
 		} finally {
@@ -382,10 +375,9 @@ function LastRun({
 	const [started, setStarted] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [pending, setPending] = useState(false);
-	// Blocks a second click that lands before the disabled state renders.
 	const inFlight = useRef(false);
 	async function runNow() {
-		/* istanbul ignore if -- @preserve unreachable: React commits the disabled state synchronously after a discrete click, so a second click never reaches this handler; the ref is defense in depth */
+		/* istanbul ignore if -- @preserve */
 		if (inFlight.current) return;
 		inFlight.current = true;
 		setPending(true);
@@ -395,9 +387,7 @@ function LastRun({
 			setStarted(r.instance_id);
 			await qc.invalidateQueries({ queryKey: qk.settings });
 		} catch (err) {
-			// The non-Error fallback is unreachable: api.post rejects only with
-			// ApiError or a JSON SyntaxError.
-			/* istanbul ignore next -- @preserve unreachable: non-Error rejection */
+			/* istanbul ignore next -- @preserve */
 			setError(
 				err instanceof Error ? err.message : "Failed to start archive run",
 			);

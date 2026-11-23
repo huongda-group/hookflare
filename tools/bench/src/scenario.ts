@@ -5,7 +5,6 @@ export type SinkSpec = {
 	fail_pct?: number;
 };
 
-/** A load step, optionally with its own sink behaviour. */
 export type ScenarioStep = Step & { sink?: SinkSpec };
 
 export type Scenario = {
@@ -62,15 +61,10 @@ function parseSink(raw: unknown): SinkSpec {
 	return raw as SinkSpec;
 }
 
-/** The sink spec in effect for step `index`: its own, else the scenario's. */
 export function stepSink(scenario: Scenario, index: number): SinkSpec {
 	return scenario.steps[index]?.sink ?? scenario.sink;
 }
 
-/**
- * Parse and validate an unknown scenario document. Unknown keys are
- * rejected so typos fail loudly instead of running the wrong benchmark.
- */
 export function parseScenario(raw: unknown): Scenario {
 	if (!isRecord(raw)) fail("scenario must be an object");
 	for (const key of Object.keys(raw)) {

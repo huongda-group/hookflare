@@ -76,9 +76,8 @@ describe("runArchive", () => {
 			deps.payloads,
 			batchPrefix("events", b.day, b.id),
 		);
-		expect(files).toHaveLength(2); // part + manifest
+		expect(files).toHaveLength(2);
 
-		// A later run inside archive_retention_days keeps them, too.
 		await runArchive(plain, () => deps, "inst-c1-b", logger);
 		expect(
 			await listKeys(deps.payloads, batchPrefix("events", b.day, b.id)),
@@ -111,13 +110,12 @@ describe("runArchive", () => {
 		const crashy: StepFn = async (name, fn) => {
 			if (!name.startsWith("purge:") || crashed) return fn();
 			crashed = true;
-			// A replay clears one mark between the select and the delete step.
 			await deps.db
 				.update(webhookEvents)
 				.set({ archiveBatchId: null, archivePart: null })
 				.where(eq(webhookEvents.id, survivor));
-			await fn(); // the D1 batch commits...
-			return fn(); // ...the step throws, and the retry deletes nothing.
+			await fn();
+			return fn();
 		};
 		await runArchive(crashy, () => deps, "inst-i5", logger);
 		expect(crashed).toBe(true);
@@ -138,7 +136,6 @@ describe("runArchive", () => {
 		const dayA = NOW - 50 * DAY_MS;
 		const dayB = NOW - 45 * DAY_MS;
 		const ids = [];
-		// 20 MiB each: the 32 MiB byte cap puts one event in each part.
 		for (const at of [dayA, dayA + 1, dayA + 2, dayB])
 			ids.push(
 				(
@@ -148,7 +145,6 @@ describe("runArchive", () => {
 					})
 				).eventId,
 			);
-		// Room for one 2-part events batch per run.
 		const limits = { stepBudget: 80, maxPartsPerBatch: 2 };
 		await runArchive(plain, () => deps, "inst-i7-1", logger, limits);
 		expect((await Promise.all(ids.map(exists))).filter((x) => !x)).toHaveLength(
@@ -177,8 +173,6 @@ describe("runArchive", () => {
 			status: "delivered",
 			event: { receivedAt: receivedAt + 1 },
 		});
-		// A crashed run marked two parts but recorded neither; then part 1's
-		// only event got a live delivery (replay) and lost its mark.
 		const batch = await seedBatch(deps, {
 			day,
 			workflowInstanceId: "inst-dead",
@@ -194,7 +188,6 @@ describe("runArchive", () => {
 			.select()
 			.from(webhookEvents)
 			.where(eq(webhookEvents.id, left.eventId));
-		// Either archived, or released for the next run; never pinned.
 		if (row) expect(row.archiveBatchId).toBeNull();
 		await runArchive(plain, () => deps, "inst-m5-b", logger);
 		expect(await exists(left.eventId)).toBe(false);
@@ -208,8 +201,6 @@ describe("runArchive", () => {
 			const p = await seedPipeline(deps);
 			const receivedAt = NOW - 40 * DAY_MS;
 			const day = dayOf(receivedAt);
-			// Payload lost (a D1 restore to before a purge), and big enough to
-			// fill the whole first part on its own.
 			const lost = await seedDelivery(deps, p, {
 				status: "delivered",
 				body: big(),
@@ -245,7 +236,6 @@ describe("runArchive", () => {
 				errorSpy.mock.calls.map((c) => JSON.parse(String(c[0])).msg),
 			).toContain("archive.payload_missing");
 
-			// The next run does not pick the lost event up again.
 			await runArchive(plain, () => deps, "inst-lost-b", logger);
 			expect(await batchesOf(day)).toHaveLength(1);
 			expect(await exists(lost.eventId)).toBe(true);
@@ -254,7 +244,6 @@ describe("runArchive", () => {
 		}
 	});
 
-	/** Records step names, then runs them. */
 	function recorder() {
 		const names: string[] = [];
 		const step: StepFn = (name, fn) => {
@@ -337,7 +326,7 @@ describe("runArchive", () => {
 			).toEqual([]);
 			expect(
 				await listKeys(deps.payloads, batchPrefix("audit", b.day, b.id)),
-			).toHaveLength(2); // part + manifest
+			).toHaveLength(2);
 		} finally {
 			await deps.db.delete(auditLogs).where(eq(auditLogs.id, "aud_run_1"));
 		}
@@ -351,7 +340,6 @@ describe("runArchive", () => {
 			event: { receivedAt },
 		});
 		const { names, step: inner } = recorder();
-		// The part file is lost between build and verify.
 		const step: StepFn = async (name, fn) => {
 			if (name.startsWith("verify:")) {
 				const parts = await deps.db.select().from(archiveParts);
@@ -384,7 +372,6 @@ describe("runArchive", () => {
 	it("purges a part of more than one chunk, following the select cursor", async () => {
 		const p = await seedPipeline(deps);
 		const receivedAt = NOW - 40 * DAY_MS;
-		// Exactly one full chunk: the second select comes back empty and done.
 		await deps.db.run(sql`INSERT INTO webhook_events
 			(id, project_id, source_id, received_at, headers_json, content_type, size_bytes, payload_sha256, body_inline)
 			WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM c WHERE n < ${PURGE_CHUNK})

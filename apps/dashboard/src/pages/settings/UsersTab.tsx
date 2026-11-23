@@ -47,6 +47,16 @@ export function UsersTab() {
 	const [pending, setPending] = useState<Pending | null>(null);
 	const [resetUser, setResetUser] = useState<string | null>(null);
 	const [tokensUser, setTokensUser] = useState<string | null>(null);
+	const tokensButton = (name: string) => (
+		<Button
+			variant="outline"
+			size="sm"
+			aria-label={`API tokens for ${name}`}
+			onClick={() => setTokensUser(name)}
+		>
+			API tokens
+		</Button>
+	);
 	const query = useInfiniteQuery({
 		queryKey: qk.users.all,
 		queryFn: ({ pageParam }) =>
@@ -59,8 +69,6 @@ export function UsersTab() {
 		setAdding(true);
 		setAddError(null);
 		try {
-			// The username is normalized like the server schema; the password
-			// is never trimmed or otherwise touched (spec M7 §6.2).
 			await api.post("/users", {
 				username: username.trim().toLowerCase(),
 				role,
@@ -179,7 +187,9 @@ export function UsersTab() {
 					{
 						header: "",
 						cell: (u) =>
-							u.username === me?.username ? null : (
+							u.username === me?.username ? (
+								<div className="flex gap-2">{tokensButton(u.username)}</div>
+							) : (
 								<div className="flex gap-2">
 									<Button
 										variant="outline"
@@ -189,14 +199,7 @@ export function UsersTab() {
 									>
 										Reset password
 									</Button>
-									<Button
-										variant="outline"
-										size="sm"
-										aria-label={`API tokens for ${u.username}`}
-										onClick={() => setTokensUser(u.username)}
-									>
-										API tokens
-									</Button>
+									{tokensButton(u.username)}
 									{u.disabled_at ? (
 										<Button
 											variant="outline"
@@ -238,7 +241,7 @@ export function UsersTab() {
 			<ConfirmDialog
 				open={pending !== null}
 				onOpenChange={(o) => {
-					/* istanbul ignore else -- @preserve unreachable: Radix calls onOpenChange(true) only from a Dialog.Trigger, and this dialog has none */
+					/* istanbul ignore else -- @preserve */
 					if (!o) setPending(null);
 				}}
 				title={pending?.title ?? ""}
@@ -246,7 +249,7 @@ export function UsersTab() {
 				confirmLabel={pending?.label ?? "Confirm"}
 				destructive={pending?.body.disabled === true}
 				onConfirm={async (reason) => {
-					/* istanbul ignore if -- @preserve unreachable: the dialog is open, so it can confirm, only while pending is set */
+					/* istanbul ignore if -- @preserve */
 					if (!pending) return;
 					await api.patch(`/users/${encodeURIComponent(pending.username)}`, {
 						...pending.body,
@@ -258,7 +261,7 @@ export function UsersTab() {
 			<ResetPasswordDialog
 				username={resetUser}
 				onOpenChange={(o) => {
-					/* istanbul ignore else -- @preserve unreachable: ResetPasswordDialog only reports closes (close() passes false) */
+					/* istanbul ignore else -- @preserve */
 					if (!o) setResetUser(null);
 				}}
 			/>
@@ -267,7 +270,7 @@ export function UsersTab() {
 					username={tokensUser}
 					open
 					onOpenChange={(o) => {
-						/* istanbul ignore else -- @preserve unreachable: Radix calls onOpenChange(true) only from a Dialog.Trigger, and this dialog has none */
+						/* istanbul ignore else -- @preserve */
 						if (!o) setTokensUser(null);
 					}}
 				/>
@@ -276,7 +279,6 @@ export function UsersTab() {
 	);
 }
 
-/** Admin reset: sets the password and signs the user out everywhere (spec M7 §6.6). */
 function ResetPasswordDialog({
 	username,
 	onOpenChange,
@@ -288,8 +290,6 @@ function ResetPasswordDialog({
 	const [error, setError] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [saved, setSaved] = useState(false);
-	// The typed password is sensitive: closing the dialog while it is dirty
-	// asks first, and every close path clears it without touching Query storage.
 	const dirty = password.length > 0 && !saved;
 	const close = () => {
 		setPassword("");
@@ -298,7 +298,7 @@ function ResetPasswordDialog({
 		onOpenChange(false);
 	};
 	const reset = async () => {
-		/* istanbul ignore if -- @preserve unreachable: the dialog, and so its Reset button, is open only while username is set */
+		/* istanbul ignore if -- @preserve */
 		if (!username) return;
 		setBusy(true);
 		setError(null);
@@ -319,7 +319,7 @@ function ResetPasswordDialog({
 				<Dialog
 					open={username !== null}
 					onOpenChange={(o) => {
-						/* istanbul ignore else -- @preserve unreachable: Radix calls onOpenChange(true) only from a Dialog.Trigger, and this dialog has none */
+						/* istanbul ignore else -- @preserve */
 						if (!o) requestClose(close);
 					}}
 				>

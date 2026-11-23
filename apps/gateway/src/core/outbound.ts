@@ -7,7 +7,6 @@ export type SendResult =
 	| { kind: "response"; status: number; retryAfter: string | null }
 	| { kind: "error"; error: unknown };
 
-/** At most `maxBytes` of the body as lossy UTF-8; stream errors keep what was read. */
 export async function readSnippet(
 	response: Response,
 	maxBytes = SNIPPET_BYTES,
@@ -27,14 +26,12 @@ export async function readSnippet(
 			len += take;
 		}
 	} catch {
-		// Keep the partial snippet; the HTTP status already decided the outcome.
 	} finally {
 		reader.cancel().catch(() => {});
 	}
 	return len === 0 ? null : new TextDecoder().decode(buf.subarray(0, len));
 }
 
-/** Error kind and a short, non-sensitive message; null for 2xx. */
 export function failureOf(
 	result: SendResult,
 	timeoutMs: number,
@@ -61,7 +58,6 @@ export function failureOf(
 	};
 }
 
-/** One outbound POST: HTTPS was checked by the caller; never follows redirects. */
 export async function sendSigned(
 	deps: Deps,
 	req: {

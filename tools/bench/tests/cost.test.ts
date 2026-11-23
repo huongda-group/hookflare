@@ -32,9 +32,7 @@ describe("estimateScenario", () => {
 		const e = estimateScenario(parseScenario(base));
 		expect(e.requests).toBe(1000);
 		expect(e.attempts).toBe(1000);
-		// ingress + consumer + sink, one each per request
 		expect(e.workers_requests).toBe(3000);
-		// write + read + delete per message
 		expect(e.queue_ops).toBe(3000);
 		expect(e.d1_rows_written).toBe(1000 * (12 + 9));
 		expect(e.d1_rows_read).toBe(1000 * (3 + 5));

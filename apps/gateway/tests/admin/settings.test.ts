@@ -39,8 +39,6 @@ beforeEach(async () => {
 		.delete(settings)
 		.where(eq(settings.key, ALERT_RULES_SETTING.key));
 	await deps.db.delete(settings).where(eq(settings.key, STORAGE_SETTING.key));
-	// Same fixed resource ID in every test: drop audit rows too so the
-	// batch-atomicity test sees only rows written by its own request.
 	await deps.db
 		.delete(auditLogs)
 		.where(eq(auditLogs.resourceId, RETRY_DEFAULTS_KEY));
@@ -158,8 +156,6 @@ describe("PATCH /settings", () => {
 	});
 
 	it("advances updated_at when two updates land in the same millisecond", async () => {
-		// updated_at is the compare-and-swap version: a repeat of the stored
-		// value would let a writer that read the previous version slip through.
 		const deps = testDeps({ now: () => 1_000 });
 		const api = await adminApp(deps);
 		const first = await api.request("PATCH", "/settings", {
@@ -176,7 +172,7 @@ describe("PATCH /settings", () => {
 	it("answers 409 and writes no audit row when another update wins the race", async () => {
 		const deps = testDeps();
 		const api = await adminApp(deps);
-		await api.request("GET", "/me"); // bootstrap batch happens here
+		await api.request("GET", "/me");
 		beforeNextBatch(deps, () =>
 			upsertRetryDefaults(deps.db, { ...next, max_attempts: 9 }, 1),
 		);
@@ -244,7 +240,6 @@ describe("PATCH /settings", () => {
 		const body = await res.json<Settings>();
 		expect(body.alert_rules).toEqual(next);
 		expect(body.alert_rules_updated_at).toEqual(expect.any(Number));
-		// retry_defaults untouched
 		expect(body.updated_at).toBeNull();
 		const audits = await auditRows(deps, "alert_rules");
 		expect(audits.map((a) => a.action)).toEqual(["settings.updated"]);

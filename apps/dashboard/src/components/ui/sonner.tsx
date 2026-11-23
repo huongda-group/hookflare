@@ -9,10 +9,6 @@ import {
 } from "lucide-react"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 
-/**
- * Fixed light theme (spec §5): this iteration has no dark theme and no theme
- * switch, so the toaster never follows the OS preference.
- */
 const Toaster = ({ ...props }: ToasterProps) => {
   return (
     <Sonner

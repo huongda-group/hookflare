@@ -15,7 +15,6 @@ import type { ComponentType, JSX, SVGProps } from "react";
 import { useCan } from "@/lib/permissions";
 import { isProjectCollection, useActiveProject } from "@/lib/project-selection";
 
-/** Every destination the shell links to; literal so `Link` stays type-checked. */
 type NavPath =
 	| "/"
 	| "/events"
@@ -33,22 +32,15 @@ type NavItemSpec = {
 	to: NavPath;
 	label: string;
 	Icon: IconComponent;
-	/** Stricter than the group's permission (for example `audit.read`). */
 	permission?: Permission;
 };
 
 type NavGroupSpec = {
 	label: string;
-	/** A group renders only when this permission is held (spec §9). */
 	permission: Permission;
 	items: NavItemSpec[];
 };
 
-/**
- * Spec §6 navigation groups. `permission` is the shared capability the route
- * needs, never a role name: a 403 mid-session refetch of `/me` removes the
- * entry on the next render.
- */
 const GROUPS: NavGroupSpec[] = [
 	{
 		label: "Monitor",
@@ -84,10 +76,6 @@ const GROUPS: NavGroupSpec[] = [
 	},
 ];
 
-/**
- * The primary navigation, shared by the ≥1024px sidebar and the mobile drawer.
- * `onNavigate` lets the drawer close itself when a destination is chosen.
- */
 export function AppNavigation({
 	onNavigate,
 }: {
@@ -153,13 +141,11 @@ function NavItem({
 						: undefined
 				}
 				onClick={onNavigate}
-				// Active shows background plus text weight, not color alone.
 				className="flex min-h-10 items-center gap-2.5 rounded-[7px] px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:min-h-11"
 				activeProps={{
 					className: "bg-selected font-medium text-selected-foreground",
 					"aria-current": "page",
 				}}
-				// Ignore filters and tabs; detail routes still highlight their parent.
 				activeOptions={{ exact: to === "/", includeSearch: false }}
 			>
 				<Icon className="size-4 shrink-0" aria-hidden="true" />

@@ -8,7 +8,6 @@ type Props =
 			text: string;
 			contentType: string | null;
 			filename?: string;
-			/** The original bytes for Download; defaults to the text as UTF-8. */
 			download?: Blob;
 	  }
 	| { value: unknown };
@@ -17,11 +16,8 @@ type Parsed =
 	| { ok: true; value: unknown; size: number; unsafe: boolean }
 	| { ok: false };
 
-// A JSON string literal or a bare integer token; strings are matched first so
-// digits inside them are skipped. Fractions and exponents are not integers.
 const TOKEN = /"(?:[^"\\]|\\.)*"|(?<![\w.+-])-?\d+(?![\w.])/g;
 
-/** True when an integer literal outside strings exceeds MAX_SAFE_INTEGER. */
 function hasUnsafeInteger(text: string): boolean {
 	for (const [tok] of text.matchAll(TOKEN)) {
 		if (tok.startsWith('"')) continue;
@@ -44,7 +40,6 @@ function parse(props: Props): Parsed {
 			unsafe: hasUnsafeInteger(props.text),
 		};
 	} catch {
-		// Fall through to text: a body labelled JSON may still be broken.
 		return { ok: false };
 	}
 }
@@ -58,19 +53,13 @@ export function downloadBlob(blob: Blob, name: string) {
 	URL.revokeObjectURL(url);
 }
 
-/**
- * Nested lists with disclosure buttons (each button carries aria-expanded),
- * rather than an ARIA tree that would need roving-focus keyboard handling.
- * Text nodes only: values are never interpreted as markup (spec §11).
- * A text payload that parses as JSON also offers Raw, the exact original text,
- * since JSON.parse rounds integers beyond Number.MAX_SAFE_INTEGER. */
 export function JsonViewer(props: Props) {
 	const parsed = parse(props);
 	const [raw, setRaw] = useState(false);
 	if (!("text" in props)) {
 		return parsed.ok ? (
 			<Tree value={parsed.value} size={0} />
-		) : /* istanbul ignore next -- @preserve unreachable: a `value` prop always parses */ null;
+		) : /* istanbul ignore next -- @preserve */ null;
 	}
 	const name = props.filename || "payload.txt";
 	const looksJson = /[/+]json\b/i.test(props.contentType ?? "");

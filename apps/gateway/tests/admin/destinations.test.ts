@@ -27,10 +27,6 @@ type Dest = {
 	signing_secret_fingerprint: string;
 };
 
-/**
- * A D1 whose `nth` execution of a statement matching `match` first runs
- * `hook`, so a test can change a row between two reads of one request.
- */
 function d1WithHook(
 	db: D1Database,
 	match: RegExp,
@@ -133,7 +129,6 @@ describe("admin destinations", () => {
 			[query.id]: "https://q.example.com/…",
 		};
 
-		// Admins keep the full url (the edit form needs it).
 		const adminGot = await (
 			await admin.request("GET", `/destinations/${destination.id}`)
 		).json<Dest>();
@@ -153,7 +148,6 @@ describe("admin destinations", () => {
 			expect(one.url).toBe(masked[destination.id]);
 		}
 
-		// Operators can pause and resume; those responses are masked too.
 		const operator = await adminApp(deps, { role: "operator" });
 		const paused = await (
 			await operator.request("POST", `/destinations/${destination.id}/pause`)
@@ -163,7 +157,6 @@ describe("admin destinations", () => {
 			await operator.request("POST", `/destinations/${destination.id}/resume`)
 		).json<{ destination: Dest }>();
 		expect(resumed.destination.url).toBe(masked[destination.id]);
-		// A repeat (no-op) pause answers through the settled path.
 		await operator.request("POST", `/destinations/${destination.id}/pause`);
 		const again = await (
 			await operator.request("POST", `/destinations/${destination.id}/pause`)
@@ -276,7 +269,7 @@ describe("admin destinations", () => {
 		const deps = testDeps();
 		const { destination } = await seedPipeline(deps);
 		const api = await adminApp(deps);
-		await api.request("GET", "/me"); // bootstrap batch happens here
+		await api.request("GET", "/me");
 		beforeNextBatch(deps, () =>
 			deps.db
 				.update(destinations)
@@ -339,7 +332,6 @@ describe("admin destinations", () => {
 		const { destination } = await seedPipeline(base, {
 			destination: { status: "paused" },
 		});
-		// The second read of the row is the re-check after the no-op pause.
 		const deps = {
 			...base,
 			db: drizzle(
@@ -631,7 +623,6 @@ describe("admin destinations", () => {
 				status: "disabled",
 			});
 			expect(disabled.status).toBe(200);
-			// Touching the backoff fields still validates against the defaults.
 			const touched = await api.request("PATCH", `/destinations/${d.id}`, {
 				backoff_max_s: 90,
 			});

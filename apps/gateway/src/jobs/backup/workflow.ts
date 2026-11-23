@@ -14,7 +14,6 @@ const STEP = {
 	timeout: "10 minutes",
 } as const;
 
-/** Spec M6. The orchestration lives in `runBackup`; this binds it to step.do(). */
 export class BackupWorkflow extends WorkflowEntrypoint<
 	Deps["env"],
 	BackupParams

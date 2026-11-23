@@ -16,8 +16,6 @@ export const SOURCE_STATUSES = ["active", "disabled"] as const;
 export const AUTH_TYPES = ["none", "hmac", "token"] as const;
 export const EVENT_ID_FROM = ["none", "header", "json_path"] as const;
 export const DELIVERY_KINDS = ["initial", "replay", "test"] as const;
-// The full roadmap §6 state machine, although M1 only writes some of them:
-// changing a CHECK constraint in SQLite requires rebuilding the table.
 export const DELIVERY_STATUSES = [
 	"pending",
 	"queued",
@@ -37,7 +35,6 @@ export const ERROR_KINDS = [
 ] as const;
 
 export const ROLES = ["admin", "operator", "viewer"] as const;
-/** Test deliveries also record an SSRF block, which never reaches the backend. */
 export const TEST_ERROR_KINDS = [...ERROR_KINDS, "ssrf_blocked"] as const;
 export const ALERT_CHANNEL_TYPES = ["discord", "slack", "telegram"] as const;
 export const ALERT_RESOURCE_TYPES = ["destination", "system"] as const;
@@ -57,7 +54,6 @@ export const ARCHIVE_STATUSES = [
 	"failed",
 	"expired",
 ] as const;
-/** `expiring`: retention started deleting its objects; never restorable again. */
 export const BACKUP_STATUSES = [
 	"running",
 	"verified",
@@ -73,12 +69,10 @@ export type ErrorKind = (typeof ERROR_KINDS)[number];
 export type Role = (typeof ROLES)[number];
 export type TestErrorKind = (typeof TEST_ERROR_KINDS)[number];
 
-/** `"<column>" IN ('a', 'b')` from a constant list (never user input). */
 function inList(column: string, values: readonly string[]) {
 	return sql.raw(`"${column}" IN (${values.map((v) => `'${v}'`).join(", ")})`);
 }
 
-/** BLOB as Uint8Array. D1 may return BLOBs as ArrayBuffer or number[]. */
 const bytes = customType<{
 	data: Uint8Array;
 	driverData: ArrayBuffer | Uint8Array | number[];
@@ -95,7 +89,6 @@ const bytes = customType<{
 	},
 });
 
-/** Key/value settings (retry defaults, storage, alert rules); one JSON value per key. */
 export const settings = sqliteTable("settings", {
 	key: text("key").primaryKey(),
 	valueJson: text("value_json").notNull(),
@@ -129,19 +122,14 @@ export const destinations = sqliteTable(
 			.notNull()
 			.default("active"),
 		signingSecretEnc: text("signing_secret_enc").notNull(),
-		/** Previous secret during a rotation grace window (spec §11); both or neither set. */
 		signingSecretPrevEnc: text("signing_secret_prev_enc"),
 		signingSecretPrevExpiresAt: integer("signing_secret_prev_expires_at"),
 		timeoutMs: integer("timeout_ms"),
-		// NULL means the global default (core/policy.ts).
 		maxAttempts: integer("max_attempts"),
 		backoffBaseS: integer("backoff_base_s"),
 		backoffMaxS: integer("backoff_max_s"),
-		// M5a limits (spec §5.1). Bounds 1–1000 are enforced by the API only:
-		// a table-level CHECK would make drizzle-kit rebuild this FK target.
 		maxInFlight: integer("max_in_flight"),
 		rateLimitPerS: integer("rate_limit_per_s"),
-		/** M5-12: 0 after a delivered attempt, +1 after any other; written in the fenced record batch. */
 		consecutiveFailures: integer("consecutive_failures").notNull().default(0),
 		createdAt: integer("created_at").notNull(),
 		updatedAt: integer("updated_at").notNull(),
@@ -171,7 +159,6 @@ export const sources = sqliteTable(
 			.$type<Record<string, unknown>>()
 			.notNull(),
 		secretEnc: text("secret_enc"),
-		/** Previous secret during a rotation grace window (spec §11); both or neither set. */
 		secretPrevEnc: text("secret_prev_enc"),
 		secretPrevExpiresAt: integer("secret_prev_expires_at"),
 		eventIdFrom: text("event_id_from", { enum: EVENT_ID_FROM })
@@ -217,9 +204,7 @@ export const webhookEvents = sqliteTable(
 		sizeBytes: integer("size_bytes").notNull(),
 		payloadSha256: text("payload_sha256").notNull(),
 		bodyInline: bytes("body_inline").notNull(),
-		/** Set when the body is in R2 (> 64 KiB); body_inline is then empty. */
 		r2Key: text("r2_key"),
-		/** M5-17 mark: the batch and part this event is being archived in. Replay clears it. */
 		archiveBatchId: text("archive_batch_id"),
 		archivePart: integer("archive_part"),
 	},
@@ -252,9 +237,7 @@ export const deliveries = sqliteTable(
 		status: text("status", { enum: DELIVERY_STATUSES }).notNull(),
 		attemptCount: integer("attempt_count").notNull().default(0),
 		enqueuedAt: integer("enqueued_at"),
-		/** Only while status = 'retrying'. */
 		nextAttemptAt: integer("next_attempt_at"),
-		/** Only while status = 'in_flight'; also the fencing token (spec §7.2). */
 		leaseUntil: integer("lease_until"),
 		lastHttpStatus: integer("last_http_status"),
 		lastError: text("last_error"),
@@ -309,10 +292,8 @@ export const deliveryAttempts = sqliteTable(
 export const users = sqliteTable(
 	"users",
 	{
-		/** Always lowercased. */
 		username: text("username").primaryKey(),
 		role: text("role", { enum: ROLES }).notNull(),
-		/** NULL until onboarding/password reset; a row without one cannot log in. */
 		passwordHash: text("password_hash"),
 		passwordChangedAt: integer("password_changed_at"),
 		createdAt: integer("created_at").notNull(),
@@ -322,7 +303,6 @@ export const users = sqliteTable(
 	() => [check("users_role_check", inList("role", ROLES))],
 );
 
-/** M7: server-side login sessions. `expires_at` folds idle + absolute expiry. */
 export const sessions = sqliteTable(
 	"sessions",
 	{
@@ -340,7 +320,6 @@ export const sessions = sqliteTable(
 	],
 );
 
-/** M7: API tokens for non-interactive admin callers. */
 export const apiTokens = sqliteTable(
 	"api_tokens",
 	{
@@ -365,7 +344,6 @@ export const auditLogs = sqliteTable(
 		actor: text("actor").notNull(),
 		action: text("action").notNull(),
 		resourceType: text("resource_type").notNull(),
-		/** NULL for actions over many resources (bulk replay). */
 		resourceId: text("resource_id"),
 		reason: text("reason"),
 		diffJson: text("diff_json", { mode: "json" }).$type<
@@ -422,10 +400,6 @@ export type ApiTokenRow = typeof apiTokens.$inferSelect;
 export type AuditLogRow = typeof auditLogs.$inferSelect;
 export type TestDeliveryRow = typeof testDeliveries.$inferSelect;
 
-/**
- * Hourly counters filled by the rollup job (spec §5–§6). No foreign keys:
- * stats outlive archived events (M5). `hour` is the start of a UTC hour.
- */
 export const statsHourly = sqliteTable(
 	"stats_hourly",
 	{
@@ -449,7 +423,6 @@ export const statsHourly = sqliteTable(
 
 export type StatsHourlyRow = typeof statsHourly.$inferSelect;
 
-/** M5b channels (spec §6.1). config_enc holds the whole config (M5-9). */
 export const alertChannels = sqliteTable(
 	"alert_channels",
 	{
@@ -460,9 +433,7 @@ export const alertChannels = sqliteTable(
 		configFingerprint: text("config_fingerprint").notNull(),
 		chatId: text("chat_id"),
 		enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
-		/** JSON array of rules; [] = every rule. */
 		rulesJson: text("rules_json").notNull().default("[]"),
-		/** JSON array of project IDs; [] = every project and system incidents. */
 		projectIdsJson: text("project_ids_json").notNull().default("[]"),
 		createdAt: integer("created_at").notNull(),
 		updatedAt: integer("updated_at").notNull(),
@@ -472,7 +443,6 @@ export const alertChannels = sqliteTable(
 	],
 );
 
-/** M5-11: at most one open incident per (rule, resource). */
 export const alerts = sqliteTable(
 	"alerts",
 	{
@@ -502,7 +472,6 @@ export const alerts = sqliteTable(
 	],
 );
 
-/** M5-14 outbox: one row per (state change, channel). */
 export const alertNotifications = sqliteTable(
 	"alert_notifications",
 	{
@@ -520,7 +489,6 @@ export const alertNotifications = sqliteTable(
 		tries: integer("tries").notNull().default(0),
 		lastError: text("last_error"),
 		createdAt: integer("created_at").notNull(),
-		/** When the current `sending` claim started; a claim older than 60 s is reclaimed. */
 		claimedAt: integer("claimed_at"),
 		sentAt: integer("sent_at"),
 	},
@@ -539,13 +507,11 @@ export type AlertChannelRow = typeof alertChannels.$inferSelect;
 export type AlertRow = typeof alerts.$inferSelect;
 export type AlertNotificationRow = typeof alertNotifications.$inferSelect;
 
-/** M5-18: one day is archived more than once, so batches are keyed by ID. */
 export const archiveBatches = sqliteTable(
 	"archive_batches",
 	{
 		id: text("id").primaryKey(),
 		kind: text("kind", { enum: ARCHIVE_KINDS }).notNull(),
-		/** UTC day, YYYY-MM-DD. */
 		day: text("day").notNull(),
 		status: text("status", { enum: ARCHIVE_STATUSES }).notNull(),
 		withFiles: integer("with_files", { mode: "boolean" }).notNull(),
@@ -573,7 +539,6 @@ export const archiveParts = sqliteTable(
 			.notNull()
 			.references(() => archiveBatches.id),
 		partNo: integer("part_no").notNull(),
-		/** NULL when the batch has no files (archive_enabled = false, M5-21). */
 		r2Key: text("r2_key"),
 		itemCount: integer("item_count").notNull(),
 		bytes: integer("bytes").notNull(),
@@ -587,21 +552,16 @@ export const archiveParts = sqliteTable(
 export type ArchiveBatchRow = typeof archiveBatches.$inferSelect;
 export type ArchivePartRow = typeof archiveParts.$inferSelect;
 
-/** M6: full-DB backups to R2 (one row per day attempt). */
 export const backups = sqliteTable(
 	"backups",
 	{
 		id: text("id").primaryKey(),
-		/** UTC day, YYYY-MM-DD. */
 		day: text("day").notNull(),
 		status: text("status", { enum: BACKUP_STATUSES }).notNull(),
-		/** R2 prefix holding this backup's parts. */
 		prefix: text("prefix").notNull(),
 		partCount: integer("part_count").notNull().default(0),
-		/** JSON object of table name to row count. */
 		rowCountsJson: text("row_counts_json").notNull().default("{}"),
 		bytes: integer("bytes").notNull().default(0),
-		/** The latest workflow instance working on this backup. */
 		instanceId: text("instance_id").notNull(),
 		trigger: text("trigger", { enum: BACKUP_TRIGGERS }).notNull(),
 		startedAt: integer("started_at").notNull(),
@@ -612,7 +572,6 @@ export const backups = sqliteTable(
 		check("backups_status_check", inList("status", BACKUP_STATUSES)),
 		index("backups_status_idx").on(t.status),
 		index("backups_started_at_idx").on(t.startedAt),
-		/** At most one backup runs at a time: a racing second start fails its insert. */
 		uniqueIndex("backups_one_running_idx")
 			.on(t.status)
 			.where(sql`status = 'running'`),

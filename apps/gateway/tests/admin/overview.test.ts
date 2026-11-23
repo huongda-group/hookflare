@@ -30,7 +30,7 @@ async function fixture() {
 		attempts: 12,
 	});
 	await row(T - 2 * HOUR_MS, { received: 4, delivered: 4, attempts: 4 });
-	await row(T - 24 * HOUR_MS, { received: 100, delivered: 100 }); // outside 24h
+	await row(T - 24 * HOUR_MS, { received: 100, delivered: 100 });
 	const api = await adminApp(deps, { role: "viewer" });
 	const get = async (q: string) =>
 		(
@@ -125,7 +125,7 @@ describe("GET /overview", () => {
 				projectId: p.project.id,
 				sourceId: p.source.id,
 				destinationId: id,
-				dead: i, // d0 has no failures
+				dead: i,
 				delivered: 1,
 			});
 		}

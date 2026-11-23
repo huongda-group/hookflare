@@ -17,7 +17,6 @@ function harness() {
 	return { client, wrapper };
 }
 
-/** Records every option-list request's query string. */
 function record(path: string, pages: Record<string, unknown>[]) {
 	const calls: URLSearchParams[] = [];
 	server.use(

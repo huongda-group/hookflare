@@ -13,7 +13,6 @@ import {
 import { newId } from "../../src/core/ids";
 import type { Deps } from "../../src/deps";
 
-/** The Standard Webhooks reference test secret. */
 export const TEST_SIGNING_SECRET = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw";
 export const TEST_SOURCE_SECRET = "test-source-secret-0123456789";
 
@@ -114,7 +113,6 @@ export async function seedDelivery(
 		contentType?: string | null;
 		delivery?: Partial<typeof deliveries.$inferInsert>;
 		event?: Partial<typeof webhookEvents.$inferInsert>;
-		/** Adds the delivery to this existing event instead of inserting one. */
 		eventId?: string;
 	} = {},
 ): Promise<{ eventId: string; deliveryId: string }> {
@@ -123,7 +121,6 @@ export async function seedDelivery(
 	const deliveryId = newId("dlv", now);
 	const body = opts.body ?? new TextEncoder().encode('{"hello":"world"}');
 	if (!opts.eventId) {
-		// Bodies over 64 KiB live in R2, like ingress stores them.
 		const r2Key = body.byteLength > 64 * 1024 ? `events/test/${eventId}` : null;
 		if (r2Key) await deps.payloads.put(r2Key, body);
 		await deps.db.insert(webhookEvents).values({

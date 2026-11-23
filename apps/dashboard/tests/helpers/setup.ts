@@ -4,13 +4,11 @@ import { toast } from "sonner";
 import { afterAll, afterEach, beforeAll } from "vitest";
 import { server } from "./server";
 
-// findBy*/waitFor default to 1 s, which a loaded runner (all workspaces at once) can miss.
 configure({ asyncUtilTimeout: 5_000 });
 
 beforeAll(() => server.listen({ onUnhandledFrame: "error" }));
 afterEach(() => {
 	cleanup();
-	// Sonner replays active notifications when a new toaster mounts.
 	toast.dismiss();
 	server.resetHandlers();
 });
@@ -27,7 +25,6 @@ Element.prototype.scrollIntoView ??= () => {};
 Element.prototype.hasPointerCapture ??= () => false;
 Element.prototype.releasePointerCapture ??= () => {};
 
-// jsdom lacks matchMedia; sonner/next-themes call it on mount.
 window.matchMedia ??= () =>
 	({
 		matches: false,

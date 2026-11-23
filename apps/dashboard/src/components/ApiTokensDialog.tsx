@@ -19,7 +19,6 @@ import { errorText } from "@/lib/forms";
 
 const path = (username: string) => `/users/${encodeURIComponent(username)}`;
 
-/** Spec M7 §6.9: admins manage any user's machine tokens from Settings › Users. */
 export function ApiTokensDialog({
 	username,
 	open,
@@ -33,7 +32,6 @@ export function ApiTokensDialog({
 	const key = ["users", username, "tokens"] as const;
 	const tokens = useQuery({
 		queryKey: key,
-		// The list never carries secrets; the plaintext is shown once at creation.
 		queryFn: () => api.get<{ data: ApiToken[] }>(`${path(username)}/tokens`),
 		enabled: open,
 	});
@@ -69,10 +67,7 @@ export function ApiTokensDialog({
 			<Dialog
 				open={open}
 				onOpenChange={(o) => {
-					// The parent unmounts on close, which drops every local state;
-					// clearing the disclosure here too keeps the one-time token and
-					// the last server error out of any remount.
-					/* istanbul ignore else -- @preserve unreachable: Radix calls onOpenChange(true) only from a Trigger, and this dialog has none */
+					/* istanbul ignore else -- @preserve */
 					if (!o) {
 						setSecret(null);
 						setCreateError(null);
@@ -168,17 +163,16 @@ export function ApiTokensDialog({
 			<ConfirmDialog
 				open={revoking !== null}
 				onOpenChange={(o) => {
-					/* istanbul ignore else -- @preserve unreachable: Radix calls onOpenChange(true) only from a Trigger, and this dialog has none */
+					/* istanbul ignore else -- @preserve */
 					if (!o) setRevoking(null);
 				}}
 				title={revoking ? `Revoke token ${revoking.name}?` : ""}
 				description="Automation using this token stops working immediately."
 				confirmLabel="Revoke"
 				destructive
-				// The revoke route does not read a body, so do not ask for a reason.
 				showReason={false}
 				onConfirm={async () => {
-					/* istanbul ignore if -- @preserve unreachable: the confirm dialog is only open while a token is being revoked */
+					/* istanbul ignore if -- @preserve */
 					if (!revoking) return;
 					await api.postVoid(`${path(username)}/tokens/${revoking.id}/revoke`);
 					await refresh();

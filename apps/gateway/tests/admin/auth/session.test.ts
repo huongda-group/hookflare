@@ -27,10 +27,8 @@ import { testDeps } from "../../helpers/deps";
 
 const T0 = 1_800_000_000_000;
 const ORIGIN = "https://hookflare.example.com";
-/** Only "IS NOT NULL" matters; the value is never parsed by the middleware. */
 const PASSWORD_HASH = "pbkdf2-sha256$100000$c2FsdA==$aGFzaA==";
 
-/** Storage is shared across this file, so keys are unique per test. */
 function uid(prefix = "u") {
 	return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 }
@@ -63,7 +61,6 @@ async function seedUser(
 	});
 }
 
-/** A session row plus the raw cookie token that resolves to it. */
 async function cookieSession(
 	deps: Deps,
 	opts: {
@@ -88,7 +85,6 @@ async function cookieSession(
 	return { username, token, idHash };
 }
 
-/** An API token row plus the raw `hf_…` token that resolves to it. */
 async function bearerToken(
 	deps: Deps,
 	opts: {
@@ -170,8 +166,6 @@ describe("authMiddleware", () => {
 
 	it("returns 401 once the session is idle-expired", async () => {
 		const { deps, set } = clock();
-		// last-seen is within SESSION_TOUCH_MS of the deadline, so the 200
-		// request below does not touch (and thus does not extend) the session.
 		const { token } = await cookieSession(deps, {
 			createdAt: T0,
 			lastSeenAt: T0 + SESSION_IDLE_MS - SESSION_TOUCH_MS,
@@ -194,7 +188,6 @@ describe("authMiddleware", () => {
 
 	it("returns 401 once the session is absolute-expired", async () => {
 		const { deps, set } = clock();
-		// Plenty of idle time left, but the 7-day cap has passed.
 		const { token } = await cookieSession(deps, {
 			createdAt: T0,
 			lastSeenAt: T0 + SESSION_ABSOLUTE_MS - 60_000,

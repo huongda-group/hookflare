@@ -16,9 +16,6 @@ const MAX_DEPTH = 10;
 
 const REDACTED = "[REDACTED]";
 
-// Compared against keys lowercased with "-" and "_" stripped, so "api-key",
-// "api_key", "apikey", and "x-api-key" all match; matched as substrings so
-// "accessToken" and "client_secret" are also caught.
 const SENSITIVE_TOKENS = [
 	"authorization",
 	"cookie",
@@ -53,10 +50,6 @@ function serializeError(err: Error): Record<string, unknown> {
 	return out;
 }
 
-/**
- * Recursive depth-limited redaction walk. Handles cycles and exotic types, but
- * throwing getters or toJSON() propagate; log() catches them.
- */
 export function redactValue(
 	value: unknown,
 	extraNames: string[] = [],
@@ -79,7 +72,7 @@ export function redactValue(
 	if (depth > MAX_DEPTH) {
 		return "[TRUNCATED]";
 	}
-	/* istanbul ignore if -- @preserve unreachable: every other typeof result returned above; kept as a type guard */
+	/* istanbul ignore if */
 	if (typeof value !== "object") {
 		return value;
 	}
@@ -147,7 +140,6 @@ export function redactValue(
 	}
 }
 
-/** Redact a headers collection to a plain lowercase-keyed record. */
 export function redactHeaders(
 	headers: Headers | Record<string, string | string[] | undefined>,
 	extraNames: string[] = [],
@@ -196,10 +188,6 @@ export function shouldLog(level: LogLevel, env?: LogEnv): boolean {
 
 export type LogFields = Record<string, unknown>;
 
-/**
- * Emit one JSON line: `{level, msg, request_id?, ...}`. Fields are redacted
- * and Errors serialized. Levels below LOG_LEVEL (default info) are dropped.
- */
 export function log(
 	level: LogLevel,
 	msg: string,
@@ -212,10 +200,8 @@ export function log(
 	let line: string;
 	try {
 		const redacted = redactValue(fields) as LogFields;
-		// level and msg come last so fields can never override them.
 		line = JSON.stringify({ ...redacted, level, msg });
 	} catch (err) {
-		// Logging must never throw (e.g. a getter that throws, a Proxy).
 		line = JSON.stringify({
 			level: "error",
 			msg: "log_error",
@@ -239,7 +225,6 @@ export type Logger = Record<
 	(msg: string, fields?: LogFields) => void
 >;
 
-/** Logger with env (and optional base fields like request_id) bound. */
 export function createLogger(env?: LogEnv, baseFields: LogFields = {}): Logger {
 	const withBase =
 		(level: LogLevel) =>

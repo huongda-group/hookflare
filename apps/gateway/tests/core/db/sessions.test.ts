@@ -16,14 +16,12 @@ import type { Deps } from "../../../src/deps";
 import { testDeps } from "../../helpers/deps";
 
 const T0 = 1_800_000_000_000;
-/** Only "IS NOT NULL" matters here; the value itself is never parsed. */
 const PASSWORD_HASH = "pbkdf2-sha256$100000$c2FsdA==$aGFzaA==";
 
 function clock(now = T0) {
 	return testDeps({ now: () => now });
 }
 
-/** Storage may be shared across a file, so keys are unique per test. */
 function uid(prefix = "u") {
 	return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 }
@@ -57,7 +55,6 @@ describe("findSessionActor", () => {
 			.select()
 			.from(sessions)
 			.where(eq(sessions.idHash, idHash));
-		// Fresh sessions expire on the idle timeout, the earlier of the two.
 		expect(row?.expiresAt).toBe(T0 + SESSION_IDLE_MS);
 
 		expect(await findSessionActor(deps.db, idHash, T0)).toEqual({
@@ -90,7 +87,6 @@ describe("findSessionActor", () => {
 		await seedUser(deps, username);
 		await insertSessionStmt(deps.db, { idHash, username, now: T0 });
 
-		// Touch every 5 min for the whole absolute lifetime.
 		for (
 			let t = T0 + SESSION_TOUCH_MS;
 			t <= T0 + SESSION_ABSOLUTE_MS;
@@ -220,7 +216,6 @@ describe("purgeExpiredSessions", () => {
 		expect(afterFirst.filter((r) => r.idHash === live)).toHaveLength(1);
 		expect(afterFirst.filter((r) => r.expiresAt <= T0)).toHaveLength(2);
 
-		// The next pass drains the rest, then reports nothing left.
 		expect(await purgeExpiredSessions(deps.db, T0, 3)).toBe(2);
 		expect(await purgeExpiredSessions(deps.db, T0, 3)).toBe(0);
 		expect(await findSessionActor(deps.db, live, T0)).toBeDefined();

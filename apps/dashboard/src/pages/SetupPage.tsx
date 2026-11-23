@@ -25,7 +25,6 @@ import { applyServerIssues } from "@/lib/forms";
 import { authStateQuery, setup } from "@/lib/queries/auth";
 import { qk } from "@/lib/queries/keys";
 
-/** The confirm field never leaves the client; the server schema stays strict. */
 const setupForm = setupRequest
 	.extend({ confirm: z.string() })
 	.refine((value) => value.password === value.confirm, {
@@ -67,7 +66,6 @@ export function SetupPage() {
 	const submit = form.handleSubmit(
 		async (values) => {
 			setError(null);
-			// Drop any root error from a previous attempt so only the latest shows.
 			form.clearErrors("root");
 			try {
 				await setup({
@@ -75,11 +73,9 @@ export function SetupPage() {
 					password: values.password,
 					turnstile_token: token ?? undefined,
 				});
-				// Onboarding is closed now: let the root loader see the new state.
 				await qc.invalidateQueries({ queryKey: qk.authState });
 				await navigate({ to: "/" });
 			} catch (err) {
-				// Turnstile tokens are single-use: drop it and reset the widget.
 				setToken(null);
 				setResetKey((k) => k + 1);
 				if (err instanceof ApiError && err.status === 409) {
@@ -138,8 +134,7 @@ export function SetupPage() {
 						message={errors.username?.message}
 					/>
 				</FormField>
-				{/* Share row tracks so the toggles can overlay their controls while
-				    staying after both inputs in the natural Tab order. */}
+
 				<div className="relative grid grid-cols-1 gap-2">
 					<FormField
 						htmlFor="setup-password"

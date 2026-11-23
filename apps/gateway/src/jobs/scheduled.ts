@@ -15,7 +15,6 @@ export const ROLLUP_CRON = "*/5 * * * *";
 export const ARCHIVE_CRON = "0 3 * * *";
 export const BACKUP_CRON = "0 20 * * *";
 
-/** A heartbeat must never fail the job: beat throws, this logs. */
 async function beatSafe(
 	deps: Deps,
 	logger: Logger,
@@ -28,7 +27,6 @@ async function beatSafe(
 	}
 }
 
-/** Dispatches on controller.cron. */
 export async function runScheduled(cron: string, deps: Deps): Promise<void> {
 	const logger = createLogger(deps.env, { cron });
 	if (cron === RECONCILE_CRON) {
@@ -36,7 +34,6 @@ export async function runScheduled(cron: string, deps: Deps): Promise<void> {
 			logger.info("reconcile.run", await reconcile(deps));
 			await beatSafe(deps, logger, "reconcile");
 		} catch (err) {
-			// Idempotent: the next minute starts over.
 			logger.error("reconcile.failed", { error: String(err) });
 		}
 		try {
@@ -50,7 +47,6 @@ export async function runScheduled(cron: string, deps: Deps): Promise<void> {
 			const count = await purgeExpiredSessions(deps.db, deps.now());
 			logger.info("sessions.purged", { count });
 		} catch (err) {
-			// Cleanup is best-effort: a failure must not reject the minute beat.
 			logger.error("sessions.purge_failed", { error: String(err) });
 		}
 		return;
@@ -60,7 +56,6 @@ export async function runScheduled(cron: string, deps: Deps): Promise<void> {
 			logger.info("rollup.run", await rollup(deps, logger));
 			await beatSafe(deps, logger, "rollup");
 		} catch (err) {
-			// Idempotent: the next run recomputes the same hours (spec M4-5).
 			logger.error("rollup.failed", { error: String(err) });
 		}
 		return;
@@ -86,8 +81,6 @@ export async function runScheduled(cron: string, deps: Deps): Promise<void> {
 				await beatSafe(deps, logger, "backup");
 				return;
 			}
-			// A previous (or manual) backup may still be going: a second
-			// one would double the D1 read load for no gain.
 			if (await isBackupRunning(deps)) {
 				logger.info("backup.skipped_running", {});
 				await beatSafe(deps, logger, "backup");

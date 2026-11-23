@@ -1,11 +1,6 @@
 import type { JSX, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
-/**
- * The single page-level heading for a screen: one `<h1>`, an optional
- * description, page-level actions, and a slot for page-local controls
- * (filters, tabs, project pickers). Spec §5 typography: 26–28px titles.
- */
 export function PageHeader({
 	title,
 	description,

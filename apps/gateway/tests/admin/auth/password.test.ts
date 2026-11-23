@@ -15,8 +15,6 @@ function toBase64(bytes: Uint8Array): string {
 	return btoa(binary);
 }
 
-/** Independent PBKDF2-HMAC-SHA256 derivation, so the tests do not lean on the
- * module under test to build their own fixtures. */
 async function derive(
 	password: string,
 	salt: Uint8Array,
@@ -63,7 +61,6 @@ describe("password hashing", () => {
 		];
 		expect(algorithm).toBe("pbkdf2-sha256");
 		expect(iterations).toBe("100000");
-		// 16-byte salt and 32-byte key, padded base64.
 		expect(salt).toMatch(/^[A-Za-z0-9+/]{22}==$/);
 		expect(hash).toMatch(/^[A-Za-z0-9+/]{43}=$/);
 	});
@@ -118,7 +115,6 @@ describe("password hashing", () => {
 			"pbkdf2-sha256$-1$AAAA$BBBB",
 			"pbkdf2-sha256$1000$!!!$BBBB",
 			"pbkdf2-sha256$1000$AAAA$!!!!",
-			// A base64 length of 4n+1 can never decode.
 			"pbkdf2-sha256$1000$AAAAA$BBBB",
 			"pbkdf2-sha256$999999999$AAAA$BBBB",
 		];

@@ -37,8 +37,6 @@ async function statsOf(run: string): Promise<{
 }
 
 describe("sink", () => {
-	// Must run before any test calls setSleep: the default sleep cannot be
-	// restored once replaced.
 	it("waits delay_ms with the real sleep before answering", async () => {
 		const run = runId();
 		const started = Date.now();

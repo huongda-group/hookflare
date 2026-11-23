@@ -33,8 +33,8 @@ In commands below, replace `<config>`, `<db-name>`, `<backup-prefix>`, and `<ver
    ```
 
    Set a Turnstile widget's public `TURNSTILE_SITE_KEY` in config and its `TURNSTILE_SECRET_KEY` through `wrangler secret put`. Both set means enforced; neither means off; one alone fails closed. Local development uses `apps/gateway/.dev.vars.example`, never committed real credentials.
-4. Deploy the sink: `pnpm --filter sink run deploy`. First gateway deploy: `node scripts/deploy.mjs --config <config> --skip-smoke`. If the restore-point step fails on an empty environment, stop and inspect it; do not claim deployment succeeded or bypass it silently.
-5. Open the Worker URL and create the first admin immediately, before the URL is public — setup is first-come and needs no token, and it closes once a password-bearing account exists. Create an admin API token for smoke automation in Settings → Users. Store it securely, export it as `HOOKFLARE_API_TOKEN`, set `SINK_URL` and the environment's smoke URL variable, then run smoke.
+4. Deploy the sink: `pnpm --filter sink run deploy`. First gateway deploy: `node scripts/deploy.mjs --config <config> --skip-smoke`. When the Worker does not exist yet (`wrangler deployments list` fails with API error 10007), the script records `previousVersion: "none"` and lists no Worker rollback. Any other restore-point failure stops the deploy: inspect it; do not claim deployment succeeded or bypass it silently.
+5. Open the Worker URL and create the first admin immediately, before the URL is public — setup is first-come and needs no token, and it closes once a password-bearing account exists. Create an admin API token for smoke automation in Settings → Users (on your own row, or on a dedicated automation admin). Store it securely, export it as `HOOKFLARE_API_TOKEN`, set `SINK_URL` and the environment's smoke URL variable, then run smoke.
 
 See [login](login.md), [API tokens](api-tokens.md), and the [root quick start](../README.md) for account and first-webhook details.
 
@@ -50,13 +50,13 @@ pnpm run smoke
 
 The deploy script runs **build → restore-point record → migrate → deploy → smoke**. The D1 bookmark is recorded immediately before migrations, after the build, so it is as recent as possible. Missing smoke environment stops it before changes unless `--skip-smoke` is explicit. A gradual version split must be resolved before recording a single rollback target. Git-connected builds that skip smoke still need a separate smoke run afterward.
 
-Keep `.deploy/<timestamp>.json`: it records the previous/new Worker versions, D1 bookmark and the time it was recorded (`bookmarkAt`), whether the migrate step applied migrations (`migrationsApplied`), the smoke result, and manual rollback commands. The script prints recovery commands but never executes them automatically. A failure before migration/deployment starts has nothing from those steps to undo.
+A successful run writes `.deploy/<timestamp>.json`; keep it. It records the previous/new Worker versions, D1 bookmark and the time it was recorded (`bookmarkAt`), whether the migrate step applied migrations (`migrationsApplied`), the smoke result (`passed` or `skipped`), and manual rollback commands. A failed run exits 1 and prints `rollback:` commands for the steps that started, without writing a record file, so copy them from the output. The script never executes recovery commands. A failure before migration/deployment starts has nothing from those steps to undo.
 
 The Worker rollback (`wrangler rollback <previousVersion>`) is the normal recovery for a failed smoke. The D1 `time-travel restore` command is listed only when migrations were actually applied: wrangler's "No migrations to apply" output means D1 is unchanged and no restore is offered; a failed or unrecognized migrate run is treated as applied. When listed, it follows a `# DESTRUCTIVE` comment line because it discards every D1 write since `bookmarkAt`, including webhooks already accepted with 202. Use it only when the new migrations themselves must be undone, after weighing that loss (see [Path A](#path-a-time-travel)).
 
 Smoke creates/reuses the dedicated `smoke` project, source, and destination, rotates its source secret, sends one signed event, replays it, and verifies both deliveries at the sink. Success is exit 0 with one event ID and two delivery IDs. Use the correct URL variable from the table; the origin must match the selected config. Smoke changes its dedicated resources, so do not use them for business traffic.
 
-To reuse a specific dedicated project, set `HOOKFLARE_SMOKE_PROJECT_ID` for production or `HOOKFLARE_STAGING_SMOKE_PROJECT_ID` for staging. Set this before upgrading if the dedicated project was renamed. Without an ID, smoke looks for a unique project named `smoke` and stops if the name is ambiguous.
+To reuse a specific dedicated project, set `HOOKFLARE_SMOKE_PROJECT_ID` for production or `HOOKFLARE_STAGING_SMOKE_PROJECT_ID` for staging. Set it when the dedicated project has been renamed. Without an ID, smoke looks for a unique project named `smoke` and stops if the name is ambiguous.
 
 ## Migrations
 
@@ -69,7 +69,7 @@ pnpm exec wrangler d1 migrations list --remote --config <config>
 
 Normally the deploy script applies migrations. A contract migration, Durable Object migration, or incompatible Workflow-class change can make old code unusable: [roll forward](#rollback) instead of assuming Worker rollback is safe.
 
-The pre-release migration chain was replaced by `0000_baseline.sql`. Apply it only to an empty D1 database. There is no in-place upgrade from the superseded migrations: use a fresh database for disposable environments and make a separate migration plan for any data you need to keep. Current files: [migrations](../apps/gateway/migrations), [migration checker](../scripts/check-migrations.mjs).
+The migration chain starts at `0000_baseline.sql`; apply it to an empty D1 database. A database whose `d1_migrations` journal does not follow this chain cannot be upgraded in place: use a fresh database for disposable environments and make a separate migration plan for any data you need to keep. The checker fails when a migration already on the base ref is modified or removed (unless listed in `squashed.json`), when `contract.json` is malformed, or when a new migration is destructive without a contract entry. Files: [migrations](../apps/gateway/migrations), [migration checker](../scripts/check-migrations.mjs).
 
 ## Rollback
 
@@ -129,7 +129,7 @@ The export is **not a point-in-time snapshot**. Missing-parent rows are skipped 
    node scripts/verify-restore.mjs --prefix <backup-prefix> --config <restore-config>
    ```
 
-   The restore script rejects production targets, known staging targets without an explicit override, non-empty new targets, and mismatched migrations. A scratch drill needs no override. `--dry-run` generates SQL without applying. Interrupted imports resume using `applied.json` for the same database and file hashes; a partial import with uniqueness errors should be restarted in a fresh database. Review orphan counts; verification checks integrity, foreign keys, counts, BLOB totals, and migration parity. Do not proceed on failure.
+   The restore script rejects production targets, known staging targets without an explicit override, non-empty new targets, and mismatched migrations. A scratch drill needs no override. `--dry-run` generates SQL without applying. Interrupted imports resume using `applied.json` for the same database and file hashes (`--from NNNN` starts at a given file); a partial import with uniqueness errors should be restarted in a fresh database. Review orphan counts; verification checks integrity, foreign keys, counts, BLOB totals, and migration parity. Do not proceed on failure.
 4. Deploy the isolated scratch Worker and smoke against its own config: `node scripts/smoke.mjs --config <restore-config>`. Its URL variable derives from the Worker name (for example `HOOKFLARE_RESTORE_DRILL_URL`); set matching origin, API token, and sink URL. Do not use `pnpm smoke:staging` to claim the scratch Worker was tested.
 5. Cut over only after verification and traffic coordination. Retain rollback material until acceptance; remove scratch resources after the drill.
 
@@ -150,7 +150,7 @@ Neither restore path restores R2 payloads or Worker secrets. Missing payload obj
 | `POST /in/<canary-source>` with wrong HMAC | 401 | 5 minutes |
 | `GET /login` | 200 | 15 minutes |
 
-Use a dedicated HMAC canary source pointing to the sink; the invalid signature must not create an event. Notify after two consecutive failures, and record actual intervals if the monitor cannot meet the targets. `jobs_stale` means the reconciler heartbeat is stale; `d1_unavailable` means the D1 probe failed. A fresh `jobs_unknown` response is not proof that scheduled jobs have run. Health/login probes do not replace delivery smoke.
+Use a dedicated HMAC canary source pointing to the sink; the invalid signature must not create an event. Notify after two consecutive failures, and record actual intervals if the monitor cannot meet the targets. `/healthz` returns `503` with `status: degraded` and `reason: jobs_stale` when the reconcile heartbeat is more than five minutes old, or when no reconcile beat exists five minutes after the first heartbeat of any job, and `reason: d1_unavailable` when the D1 probe fails. A `200` with `reason: jobs_unknown` means no heartbeat has been written yet; it is not proof that scheduled jobs have run. Health/login probes do not replace delivery smoke.
 
 ## Incidents
 

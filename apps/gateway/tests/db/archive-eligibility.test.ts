@@ -26,7 +26,6 @@ async function isEligible(d: Deps, eventId: string) {
 	return rows.length === 1;
 }
 
-/** Seeds one event received `ageDays` ago with one delivery per status. */
 async function eventWith(ageDays: number, statuses: string[]) {
 	const p = await seedPipeline(deps);
 	const receivedAt = NOW - ageDays * DAY_MS;
@@ -73,7 +72,6 @@ describe("eligibility (spec §7.3)", () => {
 
 describe("markPart (M5-17)", () => {
 	beforeEach(async () => {
-		// Other files' old events must not leak into this day's marks.
 		await deps.db.run(
 			sql`UPDATE webhook_events SET archive_batch_id = 'other' WHERE archive_batch_id IS NULL`,
 		);
@@ -106,7 +104,7 @@ describe("markPart (M5-17)", () => {
 				partNo: 2,
 				maxRawBytes: 5,
 			}),
-		).toBe(1); // first row always fits
+		).toBe(1);
 		expect(
 			await markPart(deps.db, {
 				...base,
@@ -114,7 +112,7 @@ describe("markPart (M5-17)", () => {
 				partNo: 1,
 				maxRawBytes: 25,
 			}),
-		).toBe(0); // nothing left unmarked
+		).toBe(0);
 		expect(await countMarked(deps.db, "arb_a", 1)).toBe(2);
 	});
 

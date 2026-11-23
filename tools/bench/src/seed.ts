@@ -1,23 +1,3 @@
-/**
- * M6 dataset seeder: `node src/seed.ts --n 1000000 --project <id>
- * --source <id> --destination <id> [--big] [--days 30] [--seed <uint32>]
- * --config <staging config>`.
- *
- * Generates synthetic `webhook_events`, `deliveries`, and
- * `delivery_attempts` rows (payload mix 1 KB / 8 KB / 32 KB, or 10% at
- * 33–42 KB under `--big`; final statuses 96% delivered / 3% failed_final /
- * 1% dead; `created_at` spread over `--days`), and streams them as
- * multi-row `INSERT` files under `tools/bench/results/seed-NNN.sql`. Memory
- * stays bounded by one statement per table, independent of `--n`.
- *
- * Default is a dry run: files plus row count and estimated cost only. Pass
- * `--yes` to load each file with `wrangler d1 execute DB --remote`. A
- * config that names the production Worker or database is always refused.
- *
- * Node 24 runs this file directly through type stripping. The gateway never
- * imports it; row IDs use the gateway `<prefix>_<ULID>` format.
- */
-
 import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import {
@@ -44,35 +24,24 @@ export type SeedRow = {
 };
 
 export type SeedGenOptions = {
-	/** IDs the rows belong to. Generated in gateway format when omitted. */
 	projectId?: string;
 	sourceId?: string;
 	destinationId?: string;
-	/** How many trailing days `created_at` spreads over. Default 30. */
 	days?: number;
-	/** When true, 10% of payloads are 33–42 KB. Default false. */
 	big?: boolean;
 };
 
-/** Columns whose string values are BLOB hex rendered as `X'…'`. */
 const BLOB_COLUMNS: Record<string, Set<string>> = {
 	webhook_events: new Set(["body_inline"]),
 };
 
-/** Parent tables first so file order respects foreign keys. */
 const TABLE_ORDER = ["webhook_events", "deliveries", "delivery_attempts"];
 
-/** Every emitted INSERT stays strictly below this many bytes. */
 export const STATEMENT_LIMIT = 90_000;
 
-/**
- * The `--big` bucket: above 32 KB, but at most 42 KB so the hex literal
- * (2 chars per byte) plus the other columns stays under STATEMENT_LIMIT.
- */
 const BIG_MIN = 33 * 1024;
 const BIG_MAX = 42 * 1024;
 
-/** mulberry32: small, fast, seedable PRNG returning [0, 1). */
 export function mulberry32(seed: number): () => number {
 	let state = seed >>> 0;
 	return () => {
@@ -104,7 +73,6 @@ function hexByte(rand: () => number): string {
 
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
-/** Base32-encode a non-negative integer below 2^(5·chars), zero-padded. */
 function encodeBase32(value: number, chars: number): string {
 	let v = value;
 	let out = "";
@@ -117,12 +85,6 @@ function encodeBase32(value: number, chars: number): string {
 
 const SEQ_SPACE = 2 ** 40;
 
-/**
- * `<prefix>_<ULID>` whose time component is exactly `ms` (unlike the
- * gateway's monotonic `newId`, which holds the clock when timestamps go
- * backwards). The 80-bit random part is a 40-bit per-run nonce followed by
- * a 40-bit per-prefix sequence number, so IDs are unique within a run.
- */
 export function seedId(
 	prefix: string,
 	ms: number,
@@ -135,11 +97,6 @@ export function seedId(
 	return `${prefix}_${encodeBase32(ms, 10)}${encodeBase32(nonce, 8)}${encodeBase32(seq, 8)}`;
 }
 
-/**
- * One event, one delivery, and 1–3 attempts per event. `rng` drives every
- * mix decision (payload size, status, timestamps) and the ID nonce, so a
- * seed reproduces the dataset. `at` is the newest `created_at` in ms.
- */
 export function* seedRows(
 	n: number,
 	rng: () => number,
@@ -159,8 +116,6 @@ export function* seedRows(
 		const createdAt = at - Math.floor(rng() * spanMs);
 		const sizeBytes = pickSize(rng(), big, rng);
 
-		// A 64-byte random tile keeps large-scale generation fast while every
-		// row still carries exactly `sizeBytes` of payload.
 		let tile = "";
 		for (let t = 0; t < 64; t++) tile += hexByte(rng);
 		const bodyHex = tile
@@ -259,28 +214,19 @@ function sqlValue(table: string, column: string, value: unknown): string {
 }
 
 export type SqlFileOptions = {
-	/** Upper bound for one file in bytes. Default 50,000,000. */
 	maxBytes?: number;
-	/** Output directory (with trailing slash). Default `tools/bench/results/`. */
 	dir?: string;
 };
 
 export type SqlFileResult = {
-	/** Written file paths in load order (parents first). */
 	files: string[];
-	/** Rows written per table. */
 	rows: Record<string, number>;
-	/** Total bytes across all files. */
 	bytes: number;
 };
 
 const SEED_FILE = /^seed-\d{3,}\.sql$/;
 const PART_FILE = /^\.seed-part-.*\.sql$/;
 
-/**
- * One table's open statement and part files. Holds at most one statement
- * worth of tuples, so memory does not grow with the row count.
- */
 class TableWriter {
 	readonly parts: string[] = [];
 	rows = 0;
@@ -292,8 +238,6 @@ class TableWriter {
 	private statementBytes = 0;
 	private fd: number | null = null;
 	private fileBytes = 0;
-	// Plain fields, not parameter properties: Node's type stripping rejects
-	// those.
 	private readonly table: string;
 	private readonly dir: string;
 	private readonly tag: string;
@@ -318,7 +262,6 @@ class TableWriter {
 	add(row: Record<string, unknown>): void {
 		const tuple = `(${this.columns.map((c) => sqlValue(this.table, c, row[c])).join(", ")})`;
 		const tupleBytes = Buffer.byteLength(tuple, "utf8");
-		// Statement = prefix + tuples joined by ", " + ";".
 		if (
 			this.tuples.length > 0 &&
 			this.statementBytes + 2 + tupleBytes >= STATEMENT_LIMIT
@@ -379,12 +322,6 @@ function clearSeedFiles(dir: string): void {
 	}
 }
 
-/**
- * Stream rows into multi-row INSERT statements (each under 90 KB), one
- * part-file sequence per table, then rename the parts parents-first into
- * `seed-001.sql`, `seed-002.sql`, … with at most `maxBytes` per file. Old
- * `seed-NNN.sql` files in `dir` are removed first.
- */
 export function writeSqlFiles(
 	rows: Iterable<SeedRow>,
 	opts: SqlFileOptions = {},
@@ -438,10 +375,6 @@ export function writeSqlFiles(
 	return { files, rows: counts, bytes };
 }
 
-/**
- * `writeSqlFiles` into `tools/bench/results/` returning only the file
- * paths in load order.
- */
 export function toSqlFiles(
 	rows: Iterable<SeedRow>,
 	maxBytes: number = 50_000_000,
@@ -458,19 +391,16 @@ function has(argv: string[], name: string): boolean {
 	return argv.includes(`--${name}`);
 }
 
-/** A random uint32 for `--seed` when none is given. */
 export function randomSeed(): number {
 	return randomBytes(4).readUInt32BE(0);
 }
 
 export type SeedDeps = {
-	/** Runs one `wrangler` invocation. */
 	exec: (args: string[]) => void;
 	readConfig: (path: string) => string;
 	production: ProductionTarget;
 	log: (line: string) => void;
 	exit: (code: number) => never;
-	/** Output directory for seed files. */
 	dir?: string;
 	now?: () => number;
 };
@@ -485,12 +415,6 @@ function defaultSeedDeps(): SeedDeps {
 	};
 }
 
-/**
- * Writes the seed files, then prints file count, rows, and estimated cost.
- * Without `--yes` it stops there (dry run); with `--yes` it loads every
- * file into the `--config` database. A production config is refused
- * before anything is written.
- */
 export async function main(
 	argv: string[],
 	deps: SeedDeps = defaultSeedDeps(),

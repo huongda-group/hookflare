@@ -6,19 +6,16 @@ import { fileURLToPath } from "node:url";
 import {
 	deployPlan,
 	migrationsApplied,
+	NO_PREVIOUS_VERSION,
 	parseBookmark,
 	parseCurrentVersion,
 	rollbackCommands,
+	workerMissing,
 } from "../lib/deploy.mjs";
 import { smokeEnv } from "../lib/smoke.mjs";
 
 const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 
-/**
- * Read a JSON fixture by name.
- * @param {string} name
- * @returns {unknown}
- */
 function fixture(name) {
 	return JSON.parse(readFileSync(join(fixturesDir, name), "utf8"));
 }
@@ -355,6 +352,44 @@ describe("rollbackCommands without a previous version", () => {
 				"# DESTRUCTIVE: discards every D1 write (including accepted webhooks) since the restore point; only if the new migrations must be undone",
 				`wrangler d1 time-travel restore hookflare-staging --bookmark=bm --config ${config}`,
 			],
+		);
+	});
+});
+
+describe("first deploy", () => {
+	const missing =
+		"✘ [ERROR] A request to the Cloudflare API (/accounts/abc/workers/scripts/hookflare/deployments) failed.\n\n  This Worker does not exist on your account. [code: 10007]";
+
+	it("recognizes a deployments list failure for a Worker that does not exist", () => {
+		assert.equal(workerMissing({ code: 1, stdout: "", stderr: missing }), true);
+		assert.equal(workerMissing({ code: 1, stdout: missing, stderr: "" }), true);
+	});
+
+	it("does not treat other failures or a success as a missing Worker", () => {
+		assert.equal(
+			workerMissing({
+				code: 1,
+				stdout: "",
+				stderr: "Authentication error [code: 10000]",
+			}),
+			false,
+		);
+		assert.equal(
+			workerMissing({ code: 0, stdout: missing, stderr: "" }),
+			false,
+		);
+	});
+
+	it("has no Worker rollback when there was no previous version", () => {
+		const first = { ...record, previousVersion: NO_PREVIOUS_VERSION };
+		assert.deepEqual(rollbackCommands(first, config), [
+			"# first deploy: no previous Worker version to roll back to",
+			d1Warning,
+			d1Restore,
+		]);
+		assert.deepEqual(
+			rollbackCommands(first, config, ["build", "record", "migrate"]),
+			[d1Warning, d1Restore],
 		);
 	});
 });

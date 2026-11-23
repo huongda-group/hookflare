@@ -64,7 +64,6 @@ describe("summarize", () => {
 
 	it("reports scheduled vs actual rate and the lateness distribution", () => {
 		const results = Array.from({ length: 11 }, (_, i) =>
-			// scheduled every 100 ms, actually sent every 200 ms
 			http(202, 10, i * 200, i * 100),
 		);
 		const summary = summarize(results, 10);

@@ -1,23 +1,14 @@
-/** How a send ended: an HTTP response, a client timeout, or a network error. */
 export type SendKind = "http" | "timeout" | "network";
 
 export type SendResult = {
-	/** HTTP status, or 0 when no response arrived. */
 	status: number;
 	kind: SendKind;
-	/**
-	 * Latency from the scheduled send time (not the actual start), so a
-	 * stalled sender cannot hide queueing delay (coordinated omission).
-	 */
 	ms: number;
-	/** Actual send start minus scheduled time, in ms (>= 0 when late). */
 	late_ms: number;
-	/** Actual send start relative to the run's t0, in ms. */
 	sent_at: number;
 };
 
 export type Summary = {
-	/** Keyed by HTTP status, plus "timeout" and "network". */
 	by_status: Record<string, number>;
 	errors: {
 		timeout: number;
@@ -30,15 +21,10 @@ export type Summary = {
 	p99: number;
 	count: number;
 	scheduled_rate_per_s: number | null;
-	/** Sends per second actually achieved, from first to last send start. */
 	actual_rate_per_s: number | null;
 	lateness_ms: { p50: number; p99: number; max: number };
 };
 
-/**
- * Nearest-rank percentiles over the sorted latencies:
- * rank = ceil(p / 100 * n), clamped to [1, n].
- */
 export function percentiles(
 	latencies: number[],
 	ps: number[],
@@ -59,7 +45,6 @@ export function percentiles(
 	return out;
 }
 
-/** Achieved send rate: (count - 1) intervals over first-to-last start. */
 export function actualRate(sentAt: number[]): number | null {
 	if (sentAt.length < 2) return null;
 	let min = Number.POSITIVE_INFINITY;

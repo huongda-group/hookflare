@@ -1,24 +1,3 @@
-/**
- * Open-loop load runner: `node src/run.ts <scenario.json> [--yes | --estimate]`.
- *
- * Without `--yes` (or with `--estimate`) it only prints the offline cost
- * estimate for the scenario and exits; nothing is sent. With `--yes` it
- * reads HOOKFLARE_URL, HOOKFLARE_API_TOKEN, and
- * SINK_URL from the environment, refuses a production URL, provisions one
- * project, one destination, and N hmac sources through the admin API the
- * smoke test uses, fires the arrival schedule without awaiting earlier
- * requests (PATCHing the destination URL at step boundaries when a step
- * has its own sink spec), waits for the project's backlog to drain, then
- * writes `results/<name>-<iso>.json`.
- *
- * Latency is measured from each request's scheduled send time, so a
- * stalled sender shows up as latency instead of hiding it (coordinated
- * omission); per step the achieved send rate and lateness are reported.
- *
- * Node 24 runs this file directly through type stripping. Never imported
- * by the gateway.
- */
-
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { pollUntil, runId, smokeEnv } from "../../../scripts/lib/smoke.mjs";
 import { estimateScenario, formatEstimate } from "./cost.ts";
@@ -48,16 +27,10 @@ export type SinkStats = {
 };
 
 export type DeliveryAccounting = {
-	/** Sends that got a 202. */
 	accepted: number;
 	sink_unique: number;
 	sink_received: number;
-	/**
-	 * Positive when sends that were not 202 (e.g. a 503 after the D1 write)
-	 * were delivered anyway, for example by the reconciler.
-	 */
 	unique_minus_accepted: number;
-	/** max(0, accepted - sink_unique) once drained; null if the drain timed out. */
 	lost: number | null;
 	lost_note: string | null;
 };
@@ -78,15 +51,12 @@ type Source = {
 	secret: string;
 };
 
-/** Every live status counted by the admin overview (LIVE_STATUSES). */
 const LIVE_KEYS = ["pending", "queued", "in_flight", "retrying", "paused"];
 
-/** True once the overview reports no backlog left to drain. */
 export function isDrained(live: Record<string, number>): boolean {
 	return LIVE_KEYS.every((key) => (live[key] ?? 0) === 0);
 }
 
-/** Overview scoped to the bench project, so other traffic cannot block drain. */
 export function overviewUrl(base: string, projectId: string): string {
 	return `${base}/api/admin/v1/overview?project_id=${encodeURIComponent(projectId)}`;
 }
@@ -103,12 +73,6 @@ export function sinkQuery(sink: SinkSpec): string {
 	return query === "" ? "" : `?${query}`;
 }
 
-/**
- * Loss accounting. `lost` is only meaningful after the drain finished.
- * Sink uniqueness counts every delivered event, including sends that were
- * not answered with 202 but were stored and delivered later, so when
- * `unique_minus_accepted` > 0 the loss figure is only a lower bound.
- */
 export function accountDelivery(
 	accepted: number,
 	sink: SinkStats,
@@ -214,9 +178,7 @@ async function provision(
 }
 
 export type SendTiming = {
-	/** Scheduled send time on the `now` clock. */
 	scheduledAt: number;
-	/** Run start on the `now` clock; `sent_at` is relative to it. */
 	t0: number;
 	now: () => number;
 	fetch: typeof fetch;
@@ -389,7 +351,6 @@ export async function main(
 			const before = sinkQuery(stepSink(scenario, step - 1));
 			const after = sinkQuery(stepSink(scenario, step));
 			if (after !== before) {
-				// Fire and forget: awaiting would delay the schedule.
 				const index = step;
 				patches.push(
 					fetchFn(`${base}/api/admin/v1/destinations/${destinationId}`, {

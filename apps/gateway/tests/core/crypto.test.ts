@@ -78,7 +78,6 @@ describe("crypto", () => {
 		const fresh = await encryptSecret(rotated, "s3cr3t", "ctx");
 		expect(fresh.split(".")[1]).not.toBe(stored.split(".")[1]);
 		await expect(decryptSecret(rotated, fresh, "ctx")).resolves.toBe("s3cr3t");
-		// Old env alone cannot read the new ciphertext.
 		await expect(
 			decryptSecret({ SECRETS_KEY: oldKey }, fresh, "ctx"),
 		).rejects.toThrow(/unknown key id/);
@@ -94,7 +93,6 @@ describe("crypto", () => {
 				"ctx",
 			),
 		).resolves.toBe("s3cr3t");
-		// A previous-key ciphertext still surfaces the bad config loudly.
 		const other = await encryptSecret(
 			{ SECRETS_KEY: randomKeyB64() },
 			"s3cr3t",
@@ -162,7 +160,6 @@ describe("crypto", () => {
 		await expect(
 			encryptSecret({ SECRETS_KEY: "!!!not-base64!!!" }, "x", "ctx"),
 		).rejects.toThrow(/SECRETS_KEY.*(base64|openssl)/);
-		// Valid base64 but only 16 bytes.
 		const short = btoa("0123456789abcdef");
 		await expect(
 			encryptSecret({ SECRETS_KEY: short }, "x", "ctx"),
@@ -208,7 +205,6 @@ describe("crypto", () => {
 			`${v}.${kid}.${iv}.${ct.slice(0, 4)}`,
 			`${v}.${kid}.${iv.slice(0, 2)}.${ct}`,
 			`${v}.${kid}.@@@@.${ct}`,
-			// 4n+1 base64url characters can never encode whole bytes.
 			`${v}.${kid}.${iv}.${ct.slice(0, 4 * Math.floor(ct.length / 4) - 3)}`,
 			`${v}.${kid}.${iv}.${ct}x`,
 		]) {

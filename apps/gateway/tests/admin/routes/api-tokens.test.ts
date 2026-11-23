@@ -22,7 +22,6 @@ const ADMIN_API = `${ORIGIN}/api/admin/v1`;
 const DAY_MS = 86_400_000;
 const PASSWORD = "correct-horse-battery";
 
-/** A bare request carrying a created Bearer token. */
 function withBearer(deps: Deps, token: string, path = "/me") {
 	return createApp({ createDeps: () => deps }).request(
 		`${ADMIN_API}${path}`,
@@ -33,7 +32,6 @@ function withBearer(deps: Deps, token: string, path = "/me") {
 	);
 }
 
-/** Creates a user and returns the admin app plus the new username. */
 async function withUser(deps: Deps, role: "viewer" | "operator" = "viewer") {
 	const api = await adminApp(deps, { role: "admin" });
 	const username = uniqueUsername("tok");
@@ -62,7 +60,6 @@ describe("/users/:username/tokens", () => {
 		expect(body.token).toMatch(/^hf_/);
 		expect(body.expires_at).toBe(body.created_at + 30 * DAY_MS);
 
-		// Only the SHA-256 hex is stored, never the plaintext.
 		const [row] = await deps.db
 			.select()
 			.from(apiTokens)
@@ -70,10 +67,8 @@ describe("/users/:username/tokens", () => {
 		expect(row.tokenHash).toBe(await sha256Hex(body.token));
 		expect(row.tokenHash).not.toBe(body.token);
 
-		// The token authenticates as its user.
 		expect((await withBearer(deps, body.token)).status).toBe(200);
 
-		// The list keeps the metadata but never the secret or its hash.
 		const list = await api.request("GET", `/users/${username}/tokens`);
 		expect(list.status).toBe(200);
 		const text = await list.text();
@@ -83,7 +78,6 @@ describe("/users/:username/tokens", () => {
 		expect(page.data).toHaveLength(1);
 		expect(page.data[0]).toMatchObject({ id: body.id, name: "ci" });
 
-		// The create is audited without the secret.
 		const createAudit = (await auditRows(deps, body.id)).find(
 			(a) => a.action === "api_token.created",
 		);
@@ -164,7 +158,6 @@ describe("/users/:username/tokens", () => {
 			`/users/${other}/tokens/${id}/revoke`,
 		);
 		expect(res.status).toBe(404);
-		// Still active: the wrong-owner revoke changed nothing.
 		expect((await withBearer(deps, token)).status).toBe(200);
 	});
 
@@ -190,8 +183,6 @@ describe("/users/:username/tokens", () => {
 		const { token } = await (
 			await api.request("POST", `/users/${username}/tokens`, { name: "ci" })
 		).json<CreatedApiToken>();
-		// Disable directly, so the token row stays unrevoked: the per-request
-		// user read alone must reject it.
 		await deps.db
 			.update(users)
 			.set({ disabledAt: deps.now() })
@@ -231,7 +222,6 @@ describe("/users/:username/tokens", () => {
 			.where(eq(apiTokens.username, username));
 		expect(rows.every((r) => r.revokedAt !== null)).toBe(true);
 
-		// Re-enabling does not resurrect the revoked tokens.
 		await api.request("PATCH", `/users/${username}`, { disabled: false });
 		expect((await withBearer(deps, a.token)).status).toBe(401);
 		expect((await withBearer(deps, b.token)).status).toBe(401);
@@ -273,8 +263,6 @@ describe("/users/:username/tokens", () => {
 		await (
 			await api.request("POST", `/users/${target}/tokens`, { name: "ci" })
 		).json<CreatedApiToken>();
-		// Every other admin is disabled after the handler's read, so the
-		// conditional update loses and the disable is rejected.
 		beforeNextBatch(deps, () =>
 			deps.db
 				.update(users)
@@ -294,6 +282,17 @@ describe("/users/:username/tokens", () => {
 		expect((await auditRows(deps, target)).map((r) => r.action)).not.toContain(
 			"api_token.revoked",
 		);
+	});
+
+	it("answers 404 when listing tokens of an unknown user", async () => {
+		const deps = testDeps();
+		const api = await adminApp(deps, { role: "admin" });
+		const res = await api.request(
+			"GET",
+			`/users/${uniqueUsername("ghost")}/tokens`,
+		);
+		expect(res.status).toBe(404);
+		expect(await res.json()).toEqual({ error: "not_found" });
 	});
 
 	it("answers 404 when creating a token for an unknown user", async () => {
@@ -358,7 +357,7 @@ describe("/users/:username/tokens", () => {
 			})
 			.route("/tokens", apiTokenRoutes());
 		const list = await app.request("/tokens");
-		expect(await list.json()).toEqual({ data: [] });
+		expect(list.status).toBe(404);
 		const created = await app.request("/tokens", {
 			method: "POST",
 			headers: { "content-type": "application/json" },

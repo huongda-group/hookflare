@@ -71,7 +71,6 @@ export const DEFAULT_SETTINGS: Settings = {
 
 const empty = { data: [], next_cursor: null };
 
-/** Every list answers empty unless a test overrides it with server.use(...). */
 export const server = setupServer(
 	http.get(apiUrl("/me"), () => HttpResponse.json(meFor("admin"))),
 	http.get(apiUrl("/auth/state"), () => HttpResponse.json(DEFAULT_AUTH_STATE)),

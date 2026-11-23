@@ -23,7 +23,6 @@ export type ReplayTarget =
 	| {
 			kind: "bulk";
 			deliveryIds: string[];
-			/** Original failure → event, so new deliveries link to their event. */
 			eventsByDelivery?: Record<string, string>;
 	  };
 type OutcomeEntry = {
@@ -38,21 +37,8 @@ type Outcome = {
 	skipped: { delivery_id: string; reason: string }[];
 };
 
-/**
- * Immutable snapshot of what the user submitted. The live target prop may
- * change — page filters can clear the caller's selection — while the POST is
- * in flight, so the mutation and the result view only read this snapshot.
- */
 type Submission = { target: ReplayTarget; reason: string; projectId: string };
 
-/**
- * The bulk endpoint returns one row per replayed delivery. The shared
- * `BulkReplayResult` row carries `delivery_id`/`new_delivery_id`/`enqueued`;
- * a row may additionally carry the new delivery's `status` (same field name
- * as `ReplayResult.status`), which the outcome view needs for the
- * paused/not-enqueued branch. Read it defensively so older responses without
- * the field keep rendering the generic reconciler note.
- */
 type BulkReplayResponse = {
 	replayed: (BulkReplayResult["replayed"][number] & { status?: string })[];
 	skipped: BulkReplayResult["skipped"];
@@ -157,8 +143,6 @@ export function ReplayDialog({
 	const [reason, setReason] = useState("");
 	const [invalid, setInvalid] = useState<string | null>(null);
 	const selected = target.kind === "event" ? 1 : target.deliveryIds.length;
-	// The submitted snapshot survives the caller clearing its selection in
-	// onDone; the result view still names what was sent.
 	const m = useMutation({
 		mutationFn: (s: Submission) => replay(s),
 		onSuccess: (_, submission) => {
@@ -177,10 +161,8 @@ export function ReplayDialog({
 	const awaiting = data?.replayed.filter((r) => !r.enqueued) ?? [];
 	const skipped = data?.skipped ?? [];
 	const close = (o: boolean) => {
-		// A pending replay cannot be dismissed: Escape, an outside click, and
-		// Cancel all wait until the request settles and its outcome is shown.
 		if (m.isPending) return;
-		/* istanbul ignore else -- @preserve unreachable: Radix calls onOpenChange(true) only from a Trigger, and this dialog has none, and the buttons only close */
+		/* istanbul ignore else -- @preserve */
 		if (!o) {
 			m.reset();
 			setReason("");
@@ -190,9 +172,6 @@ export function ReplayDialog({
 	};
 	const onReasonChange = (value: string) => {
 		setReason(value);
-		// Live 1–500 validation: no maxLength cap, so over-length input stays
-		// editable and surfaces the inline error immediately instead of being
-		// silently truncated by the browser.
 		if (value.trim().length > 500) {
 			setInvalid("Reason must be 1–500 characters.");
 		} else if (invalid !== null && value.trim().length > 0) {
@@ -246,7 +225,7 @@ export function ReplayDialog({
 											entry={r}
 											projectId={
 												submitted?.projectId ??
-												/* istanbul ignore next -- @preserve unreachable: result data implies the submitted variables */ projectId
+												/* istanbul ignore next -- @preserve */ projectId
 											}
 										/>
 									))}
@@ -265,7 +244,7 @@ export function ReplayDialog({
 											entry={r}
 											projectId={
 												submitted?.projectId ??
-												/* istanbul ignore next -- @preserve unreachable: result data implies the submitted variables */ projectId
+												/* istanbul ignore next -- @preserve */ projectId
 											}
 										/>
 									))}

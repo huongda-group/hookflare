@@ -1,21 +1,8 @@
-/**
- * Offline cost estimator for bench scenarios and seeding. Every price and
- * per-operation constant lives in this file. Prices are list prices for
- * the Workers Paid plan as of 2026-10 and estimates are GROSS: they ignore
- * the monthly included quotas. Verify against current pricing
- * (https://developers.cloudflare.com/workers/platform/pricing/,
- * /d1/platform/pricing/, /queues/platform/pricing/,
- * /durable-objects/platform/pricing/, /r2/pricing/) before asking for run
- * approval.
- */
-
 import { type Scenario, stepSink } from "./scenario.ts";
 import { arrivals } from "./schedule.ts";
 
-/** USD list prices. Verify against current pricing before relying on them. */
 export const PRICING = {
 	workersPerMillionRequests: 0.3,
-	/** One message = write + read + delete = 3 operations. */
 	queuesPerMillionOps: 0.4,
 	d1PerMillionRowsWritten: 1.0,
 	d1PerMillionRowsRead: 0.001,
@@ -24,39 +11,24 @@ export const PRICING = {
 	r2ClassBPerMillion: 0.36,
 } as const;
 
-/**
- * D1 bills every index entry as a written row: one table row plus one per
- * index (webhook_events and deliveries have 5 indexes, delivery_attempts 2;
- * see apps/gateway/migrations).
- */
 export const D1_ROWS_PER_INSERT = {
 	webhook_events: 6,
 	deliveries: 6,
 	delivery_attempts: 3,
 } as const;
 
-/** Approximate per-operation counts of the pipeline. */
 export const PIPELINE = {
-	/** Ingress: event insert + delivery insert. */
 	ingressRowsWritten:
 		D1_ROWS_PER_INSERT.webhook_events + D1_ROWS_PER_INSERT.deliveries,
-	/** Per attempt: lease update (~3) + attempt insert (3) + record update (~3). */
 	attemptRowsWritten: 9,
-	/** Ingress: source + destination lookups and the dedup probe. */
 	ingressRowsRead: 3,
-	/** Per attempt: delivery, event, destination, settings and the lease. */
 	attemptRowsRead: 5,
-	/** Per attempt: limiter acquire + release. */
 	attemptDoRequests: 2,
-	/** Each queue message is written, read, and deleted. */
 	queueOpsPerMessage: 3,
-	/** Payloads above this go to R2 (ingress INLINE_BODY_LIMIT). */
 	inlineLimitBytes: 64 * 1024,
-	/** Default destination max_attempts (apps/gateway/src/core/policy.ts). */
 	maxAttempts: 20,
 } as const;
 
-/** Expected attempts per delivery when each attempt fails with `f`. */
 export function expectedAttempts(
 	failFraction: number,
 	maxAttempts: number = PIPELINE.maxAttempts,
@@ -89,12 +61,6 @@ export type CostEstimate = {
 
 const perMillion = (count: number, price: number) => (count / 1e6) * price;
 
-/**
- * Estimate one run of `scenario`. Each request costs an ingress Worker
- * request; each attempt costs a consumer invocation (conservative: batching
- * only lowers it), a sink request, one queue message, limiter DO calls,
- * and D1 rows. Attempts per request follow each step's sink `fail_pct`.
- */
 export function estimateScenario(
 	scenario: Scenario,
 	opts: { maxAttempts?: number } = {},
@@ -154,7 +120,6 @@ export function estimateScenario(
 	};
 }
 
-/** D1 rows written (with index entries) and USD for a seed load. */
 export function estimateSeed(rows: Record<string, number>): {
 	d1_rows_written: number;
 	usd: number;

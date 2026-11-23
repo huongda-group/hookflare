@@ -11,7 +11,6 @@ const PRESETS = [
 
 type Range = { from?: number; to?: number };
 
-/** `from`/`to` in epoch ms, bound to the URL by the caller. Presets set `from` and leave `to` open. */
 export function TimeRangeFilter({
 	from,
 	to,
@@ -23,7 +22,6 @@ export function TimeRangeFilter({
 			<legend className="sr-only">Time range</legend>
 			<FormField htmlFor="range-from" label="From">
 				<Input
-					// Remount on URL changes (presets, clear) so the uncontrolled input follows.
 					key={`from-${from ?? ""}`}
 					id="range-from"
 					type="datetime-local"

@@ -108,10 +108,8 @@ describe("planRun", () => {
 
 	it("stops planning new days at the step budget (M5-22)", async () => {
 		expect(estimateSteps("events", 0)).toBeGreaterThan(0);
-		// A 500k-event day is 100 parts; a batch is capped so the budget always
-		// fits at least one full-size batch.
 		expect(partsFor(500_000)).toBe(100);
-		expect(partsFor(10, 100 * 1024 * 1024)).toBe(4); // bytes cap counts too
+		expect(partsFor(10, 100 * 1024 * 1024)).toBe(4);
 		const perDay = estimateSteps("events", partsFor(500_000));
 		expect(Math.floor(STEP_BUDGET / perDay)).toBeLessThan(5);
 		expect(estimateSteps("events", MAX_PARTS_PER_BATCH)).toBeLessThan(
@@ -184,7 +182,6 @@ describe("planRun", () => {
 			deps,
 			"inst-slow",
 			async (id) => {
-				// A concurrent plan adopts it between the liveness check and ours.
 				await deps.db
 					.update(archiveBatches)
 					.set({ workflowInstanceId: "inst-fast" })
@@ -214,7 +211,6 @@ describe("planRun", () => {
 				at: NOW - (400 + i) * DAY_MS,
 			});
 		try {
-			// 15 - 10 fixed = 5 steps: below one batch (4) plus one audit part (2).
 			const plan = await planRun(deps, "inst-poor", never, logger, {
 				stepBudget: 15,
 				maxPartsPerBatch: MAX_PARTS_PER_BATCH,
@@ -268,7 +264,7 @@ describe("expireArchives", () => {
 			)[0].status,
 		).toBe("expired");
 		expect(await expireArchives(deps, storage, NOW)).toBe(0);
-		expect(await expireArchives(deps, DEFAULT_STORAGE_SETTINGS, NOW)).toBe(0); // null = forever
+		expect(await expireArchives(deps, DEFAULT_STORAGE_SETTINGS, NOW)).toBe(0);
 	});
 
 	it("removes a failed batch's files across list pages and keeps its row", async () => {

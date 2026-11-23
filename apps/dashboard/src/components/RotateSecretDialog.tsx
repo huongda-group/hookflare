@@ -22,16 +22,13 @@ type Props = {
 	resource: "source" | "destination";
 	id: string;
 	projectId: string;
-	/** Shown in the title so rotation confirms what it revokes. */
 	name?: string;
-	/** The generated secret, or null when the caller supplied one (sources). */
 	onRotated: (secret: string | null) => void;
 };
 
 export function RotateSecretDialog({ open, onOpenChange, ...rest }: Props) {
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			{/* DialogContent unmounts when closed, so the form state below resets on every close path. */}
 			<DialogContent>
 				<RotateSecretForm onOpenChange={onOpenChange} {...rest} />
 			</DialogContent>

@@ -2,11 +2,6 @@ import type { QueryClient } from "@tanstack/react-query";
 import { matchesProjectScope } from "./invalidate-endpoint-views";
 import { qk } from "./keys";
 
-/**
- * Refresh every view a replay or destination operation can change: the event
- * and failure lists, the overview aggregates, and the destination stats
- * (spec §9.2). Prefix keys so current and future list shapes invalidate.
- */
 export async function invalidateDeliveryViews(
 	qc: QueryClient,
 	projectId?: string,

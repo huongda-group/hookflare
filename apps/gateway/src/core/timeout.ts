@@ -1,4 +1,3 @@
-/** Rejects when `p` has not settled within `ms`; the timer never outlives the race. */
 export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	const timeout = new Promise<never>((_, reject) => {

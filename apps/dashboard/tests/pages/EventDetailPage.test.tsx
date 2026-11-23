@@ -226,7 +226,6 @@ describe("Event Detail", () => {
 
 	it("shows a binary payload as a notice and downloads the original bytes", async () => {
 		const blobs: Blob[] = [];
-		// jsdom has no object URLs; capture the Blob handed to Download.
 		Object.assign(URL, {
 			createObjectURL: (b: Blob) => {
 				blobs.push(b);
@@ -350,8 +349,6 @@ describe("Event Detail", () => {
 		);
 		const { user } = renderApp("/events/evt_1", { role: "operator" });
 		await screen.findByText("dlv_2");
-		// Newest delivery's attempts are visible; older delivery keeps its
-		// header in the DOM but hides its attempts until expanded.
 		expect(screen.getByText("Attempt #1")).toBeInTheDocument();
 		const older = screen.getByRole("region", { name: /dlv_1/i });
 		expect(within(older).queryByText("Attempt #1")).not.toBeInTheDocument();

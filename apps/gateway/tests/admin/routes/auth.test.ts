@@ -14,13 +14,6 @@ import type { Deps } from "../../../src/deps";
 import { testDeps } from "../../helpers/deps";
 import { denyAllLimiter, testEnv } from "../../helpers/env";
 
-/**
- * The route imports `verifyPassword` directly, and `vi.mock` does not intercept
- * that import under the Cloudflare pool, so count PBKDF2 passes at the global
- * `crypto.subtle` seam instead: every `hashPassword`/`verifyPassword` call runs
- * exactly one `deriveBits`. This is what keeps the "one PBKDF2 pass per login
- * attempt" guarantee honest.
- */
 const deriveSpy = vi.spyOn(crypto.subtle, "deriveBits");
 
 const ORIGIN = "https://hookflare.example.com";
@@ -28,7 +21,6 @@ const LOCALHOST = "http://localhost:8787";
 const ADMIN_API = (host: string) => `${host}/api/admin/v1`;
 const PASSWORD = "correct-horse-battery";
 
-/** Shared storage across the file, so each test starts from an empty DB. */
 const shared = testDeps();
 beforeEach(async () => {
 	deriveSpy.mockClear();
@@ -42,7 +34,6 @@ type RequestOpts = {
 	body?: unknown;
 	rawBody?: string;
 	headers?: Record<string, string>;
-	/** `null` omits the Origin header; undefined defaults to the host origin. */
 	origin?: string | null;
 	host?: string;
 };
@@ -581,7 +572,6 @@ describe("POST /auth/logout", () => {
 		const logout = await request(deps, "POST", "/auth/logout");
 		expect(logout.status).toBe(204);
 		expect(logout.headers.get("set-cookie")).toMatch(/Max-Age=0/i);
-		// The other browser's session survives.
 		const me = await request(deps, "GET", "/me", { headers: { cookie } });
 		expect(me.status).toBe(200);
 	});

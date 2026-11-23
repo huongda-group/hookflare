@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import { readConfig, runWrangler } from "../lib/wrangler.mjs";
 
-/** Puts a fake `pnpm` first on PATH; it prints its args and obeys FAKE_* env. */
 function withFakePnpm() {
 	const dir = mkdtempSync(join(tmpdir(), "fake-pnpm-"));
 	const bin = join(dir, "pnpm");

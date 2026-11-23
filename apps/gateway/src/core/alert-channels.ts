@@ -27,7 +27,6 @@ const HEADLINE: Record<AlertMessageInput["kind"], string> = {
 	test: "🔔 Hookflare test message",
 };
 
-/** M5-15: plain text, no per-platform escaping, at most 1,800 characters with the link kept. */
 export function formatAlertMessage(m: AlertMessageInput): string {
 	const lines = [
 		m.rule ? `${HEADLINE[m.kind]}: ${m.rule}` : HEADLINE[m.kind],
@@ -64,7 +63,6 @@ export function channelRequest(
 	}
 }
 
-/** Defence in depth: the schema already checked this when the channel was saved (M5-10). */
 function allowed(config: AlertChannelConfig): boolean {
 	return config.type === "telegram"
 		? TELEGRAM_TOKEN_RE.test(config.bot_token)
@@ -76,7 +74,6 @@ function scrub(config: AlertChannelConfig, message: string): string {
 	return message.split(secret).join("[redacted]").slice(0, ERROR_MAX);
 }
 
-/** Any 2xx is success; everything else (3xx included, never followed) is a failed try. */
 export async function sendAlert(
 	fetcher: typeof fetch,
 	config: AlertChannelConfig,
@@ -92,7 +89,6 @@ export async function sendAlert(
 			redirect: "manual",
 			signal: AbortSignal.timeout(ALERT_SEND_TIMEOUT_MS),
 		});
-		// Response bodies are never stored (spec §6.4).
 		await res.body?.cancel();
 		return res.status >= 200 && res.status < 300
 			? { ok: true }
@@ -106,7 +102,6 @@ export function channelAad(channelId: string): string {
 	return `alert_channels.config_enc:${channelId}`;
 }
 
-/** M5-9: the whole config is a credential. chat_id is kept in plaintext for display. */
 export async function sealChannelConfig(
 	env: AppEnv,
 	channelId: string,

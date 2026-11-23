@@ -129,14 +129,12 @@ describe("alerts API", () => {
 			id,
 			rule,
 			resourceType: "destination" as const,
-			// One open incident per (rule, resource): give each its own.
 			resourceId: `${p.destination.id}-${id}`,
 			projectId: p.project.id,
 			status: "open" as const,
 			openedAt,
 			detailsJson: "{}",
 		});
-		// alr_p2 and alr_p3 tie on opened_at: the id breaks the tie.
 		await deps.db
 			.insert(alerts)
 			.values([

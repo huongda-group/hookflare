@@ -33,7 +33,6 @@ export const archivesSearch = z.object({
 });
 export type ArchivesSearch = z.infer<typeof archivesSearch>;
 
-/** Cold storage: list and download only (DEC-12). Batches are grouped by day. */
 export function ArchivesPage({ search }: { search: ArchivesSearch }) {
 	const { projectId } = useActiveProject();
 	const projectSearch = { project_id: projectId };
@@ -51,8 +50,6 @@ export function ArchivesPage({ search }: { search: ArchivesSearch }) {
 	});
 	const rows = query.data?.pages.flatMap((p) => p.data) ?? [];
 	const hasLoaded = query.data !== undefined;
-	// A failed next page keeps the loaded day groups and rows and retries only
-	// that page; only a failure with nothing loaded is a fatal load error.
 	const nextPageError = query.isFetchNextPageError && hasLoaded;
 	const error = query.isError && !nextPageError ? query.error : null;
 	const days = new Map<string, ArchiveBatch[]>();
@@ -182,7 +179,6 @@ export function ArchivesPage({ search }: { search: ArchivesSearch }) {
 																<TableCell>
 																	{p.downloadable ? (
 																		<Can permission="payload.read">
-																			{/* Plain link (not api.ts fetch): the browser must stream the file to disk same-origin with the Access cookie. */}
 																			<a
 																				className="underline"
 																				href={`/api/admin/v1/archives/${b.id}/parts/${p.part_no}`}

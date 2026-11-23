@@ -5,13 +5,6 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { parseJsonc } from "../lib/jsonc.mjs";
 
-/**
- * Environment-specific values, as paths: `.` separates keys and `[]` stands
- * for every element of an array. Only resource names, IDs, and
- * per-deployment vars/routes are ignored; binding names (`binding`, a DO
- * binding's or a rate limiter's `name`) are still compared.
- * @type {string[]}
- */
 export const PARITY_IGNORED_PATHS = [
 	"name",
 	"vars",
@@ -24,7 +17,6 @@ export const PARITY_IGNORED_PATHS = [
 	"queues.consumers[].dead_letter_queue",
 	"r2_buckets[].bucket_name",
 	"workflows[].name",
-	// Account-unique per Worker: staging must not share production's counters.
 	"ratelimits[].namespace_id",
 ];
 
@@ -36,9 +28,6 @@ const dir = join(
 	"gateway",
 );
 
-/**
- * @returns {{ prod: any, staging: any }}
- */
 function loadConfigs() {
 	const prod = parseJsonc(readFileSync(join(dir, "wrangler.jsonc"), "utf8"));
 	const staging = parseJsonc(
@@ -47,19 +36,11 @@ function loadConfigs() {
 	return { prod, staging };
 }
 
-/**
- * Copy of `value` without the ignored paths.
- * @param {unknown} value
- * @param {Set<string>} paths
- * @param {string} [at] Path of `value` itself ("" at the root).
- * @returns {unknown}
- */
 export function stripIgnoredPaths(value, paths, at = "") {
 	if (Array.isArray(value)) {
 		return value.map((item) => stripIgnoredPaths(item, paths, `${at}[]`));
 	}
 	if (value !== null && typeof value === "object") {
-		/** @type {Record<string, unknown>} */
 		const out = {};
 		for (const [k, v] of Object.entries(value)) {
 			const path = at === "" ? k : `${at}.${k}`;
@@ -128,7 +109,6 @@ describe("config parity", () => {
 
 	it("every staging resource name ends with -staging", () => {
 		const { staging: config } = loadConfigs();
-		/** @type {string[]} */
 		const names = [config.name];
 		for (const db of config.d1_databases ?? []) {
 			names.push(db.database_name);

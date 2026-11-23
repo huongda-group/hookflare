@@ -17,14 +17,9 @@ import type { Deps } from "../../deps";
 import { dayStartOf } from "./keys";
 
 export const PURGE_CHUNK = 500;
-/**
- * IN-list slice: 90 IDs + 2 mark + 2 cut-off + 1 verified guard = 95 params,
- * under D1's 100-param cap.
- */
 const ID_SLICE = 90;
 
 export type PurgeRow = { id: string; r2Key: string | null };
-/** At most PURGE_CHUNK rows (~60 KB), well under the 1 MiB step output limit. */
 export type PurgeSelection = { rows: PurgeRow[]; done: boolean };
 
 async function requireVerified(deps: Deps, batchId: string) {
@@ -48,20 +43,9 @@ function slices<T>(items: T[]): T[][] {
 const markSql = (batchId: string, partNo: number): SQL =>
 	sql`e.archive_batch_id = ${batchId} AND e.archive_part = ${partNo}`;
 
-/**
- * Repeats requireVerified inside the delete's own transaction: a batch that
- * leaves `verified` between the check and the delete deletes nothing.
- */
 const verifiedSql = (batchId: string): SQL =>
 	sql`EXISTS (SELECT 1 FROM archive_batches WHERE id = ${batchId} AND status = 'verified')`;
 
-/**
- * Spec §7.4 `purge`, step 1 of 3. Lists the next chunk of events of the part
- * that are still marked and eligible, with their R2 keys. The list is the
- * step's persisted result, so a crash after the D1 delete still knows which
- * payload objects to remove (M5-20). `after` is the last ID of the previous
- * chunk, so the loop always advances.
- */
 export async function selectPurgeChunk(
 	deps: Deps,
 	batchId: string,
@@ -80,13 +64,6 @@ export async function selectPurgeChunk(
 	};
 }
 
-/**
- * Step 2 of 3, D1. Deletes only the selected IDs, and every statement repeats
- * the mark and eligibility, so an event that was unmarked (replay) or got a
- * live delivery after the part was built survives (M5-17), and the batch
- * status, so a batch that left `verified` deletes nothing. One db.batch is
- * one transaction; a retry matches no rows.
- */
 export async function deletePurgeChunk(
 	deps: Deps,
 	batchId: string,
@@ -122,12 +99,6 @@ export async function deletePurgeChunk(
 	return deleted;
 }
 
-/**
- * Step 3 of 3, R2. Recomputes which of the selected events are gone from D1
- * and deletes only their payload objects: the key of an event the delete
- * skipped is never touched. Deleting a missing key is a no-op, so a retry
- * (or a retry of step 2 that deleted nothing new) is safe.
- */
 export async function deleteGonePayloads(
 	deps: Deps,
 	rows: PurgeRow[],
@@ -176,7 +147,6 @@ export async function purgeAuditPart(
 	return deleted.length;
 }
 
-/** Every part the batch has a row for; verify covered exactly these. */
 export async function listParts(
 	deps: Deps,
 	batchId: string,
@@ -189,13 +159,6 @@ export async function listParts(
 	return rows.map((r) => r.n);
 }
 
-/**
- * Sets `purged` and, in the same batch, clears the marks of every event the
- * purge left in D1 (it became ineligible, or was marked for a part that was
- * never built), so no event stays marked forever; a later batch archives it.
- * Events parked under MISSING_PART keep their mark, so no later run builds
- * an empty batch for them again.
- */
 export async function finishBatch(deps: Deps, batchId: string): Promise<void> {
 	await deps.db.batch([
 		deps.db

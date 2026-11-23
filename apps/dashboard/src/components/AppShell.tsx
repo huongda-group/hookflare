@@ -38,10 +38,6 @@ import { logout } from "@/lib/queries/auth";
 import { useMeQuery } from "@/lib/queries/me";
 import { LoadError } from "./LoadError";
 
-/**
- * Breadcrumb labels for the shell's known route segments (spec §6). The values
- * double as the `to` targets, so a crumb only links to a route that exists.
- */
 const KNOWN_SEGMENTS = {
 	projects: { label: "Projects", to: "/projects" },
 	endpoints: { label: "Endpoints", to: "/endpoints" },
@@ -53,7 +49,6 @@ const KNOWN_SEGMENTS = {
 	settings: { label: "Settings", to: "/settings" },
 } as const;
 
-/** Segments that are not routes of their own, shown as text only. */
 const NESTED_SEGMENT_LABELS: Record<string, string> = {
 	sources: "Sources",
 	destinations: "Destinations",
@@ -62,10 +57,6 @@ const NESTED_SEGMENT_LABELS: Record<string, string> = {
 type KnownRoute = (typeof KNOWN_SEGMENTS)[keyof typeof KNOWN_SEGMENTS]["to"];
 type Crumb = { key: string; label: string; to?: KnownRoute };
 
-/**
- * Breadcrumbs derived from the pathname: known parents link to their route and
- * a trailing detail id is shown as text (spec §6). No new route or context.
- */
 function Breadcrumbs({ pathname }: { pathname: string }): JSX.Element {
 	const { projectId } = useActiveProject();
 	const segments = pathname.split("/").filter(Boolean);
@@ -128,7 +119,6 @@ export function AppShell() {
 	const selection = useProjectSelection(
 		Boolean(me.data && !me.data.project_required),
 	);
-	// Spec §6.7: any 401 from the API sends the user to `/login?next=<here>`.
 	useEffect(
 		() =>
 			subscribeUnauthorized(() => {
@@ -156,16 +146,11 @@ export function AppShell() {
 	) {
 		return <Navigate to="/projects" replace />;
 	}
-	// The location may update before the previous route stops rendering.
 	if (projectRequired && !onProjectsIndex) return null;
-	// Logout is idempotent: even if the session is already gone, or the request
-	// itself fails, the user meant to leave, so clear every cached query and
-	// land on /login either way.
 	const doLogout = async () => {
 		try {
 			await logout();
 		} catch {
-			// A failed logout must not trap the user inside the app.
 		} finally {
 			qc.clear();
 			await navigate({ to: "/login" });
@@ -192,9 +177,6 @@ export function AppShell() {
 				Skip to content
 			</a>
 			<div className="flex min-h-screen bg-canvas">
-				{/* Two copies of the links exist only while the drawer is open: the
-				    sidebar is CSS-hidden below 1024px and the dialog is unmounted
-				    when closed (loaded while open by `Open navigation`). */}
 				<aside className="hidden w-[222px] shrink-0 flex-col border-r border-border bg-sidebar px-3.5 pt-6 pb-4 lg:flex">
 					<Link
 						to={projectRequired ? "/projects" : "/"}
@@ -265,8 +247,7 @@ export function AppShell() {
 											className="wrap-anywhere"
 										>
 											{(nameCounts.get(p.name) ??
-												/* istanbul ignore next -- @preserve unreachable: nameCounts is built from this same list */ 0) >
-											1
+												/* istanbul ignore next -- @preserve */ 0) > 1
 												? `${p.name} (${p.id})`
 												: p.name}
 										</SelectItem>

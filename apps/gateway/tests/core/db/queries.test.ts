@@ -98,7 +98,6 @@ describe("transitionDestination", () => {
 			T0,
 		);
 		expect(paused).toMatchObject({ status: "paused", updatedAt: T0 });
-		// Already paused: a second active→paused is a no-op.
 		expect(
 			await transitionDestination(
 				deps.db,

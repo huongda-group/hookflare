@@ -8,10 +8,6 @@ export const denyAllLimiter = {
 	limit: async () => ({ success: false }),
 } as unknown as RateLimit;
 
-/**
- * The test worker env plus every var the app reads. wrangler.jsonc `vars`
- * never reach tests (see vitest.config.ts), so they are set here.
- */
 export function testEnv(overrides: Partial<AppEnv> = {}): AppEnv {
 	return {
 		...(env as unknown as AppEnv),

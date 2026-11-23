@@ -361,7 +361,6 @@ describe("Failures", () => {
 			expect(dialog.getByText("Paused")).toBeInTheDocument();
 			expect(dialog.getByText(/destination is paused/i)).toBeInTheDocument();
 			expect(dialog.queryByText(/delivered/i)).not.toBeInTheDocument();
-			// Original rows stay listed; the completed replay cleared the selection.
 			await user.keyboard("{Escape}");
 			expect(await screen.findByLabelText("Select dlv_1")).toBeInTheDocument();
 			expect(screen.getByLabelText("Select dlv_2")).toBeInTheDocument();

@@ -1,11 +1,4 @@
 #!/usr/bin/env node
-/**
- * Block destructive migrations outside the contract list. Compares the
- * migration files in the working tree against the base ref and fails when
- * `contract.json` is malformed, when a migration already on the base ref was
- * modified or removed (unless `squashed.json` lists it), or when a new
- * migration is destructive without a contract entry.
- */
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -22,11 +15,6 @@ const migrationsDir = join(repoRoot, "apps", "gateway", "migrations");
 const contractPath = join(migrationsDir, "contract.json");
 const squashedPath = join(migrationsDir, "squashed.json");
 
-/**
- * Parse `--base <ref>` from argv.
- * @param {string[]} argv
- * @returns {string}
- */
 function parseBase(argv) {
 	const index = argv.indexOf("--base");
 	if (index !== -1 && index + 1 < argv.length) {
@@ -35,11 +23,6 @@ function parseBase(argv) {
 	return "origin/main";
 }
 
-/**
- * List migration paths tracked at a base ref.
- * @param {string} base
- * @returns {string[]}
- */
 function listBaseFiles(base) {
 	try {
 		const out = execFileSync(
@@ -73,7 +56,6 @@ if (invalid.length > 0) {
 	}
 	process.exit(1);
 }
-/** @type {Record<string, string>} */
 const baseSql = {};
 for (const path of baseFiles.filter((file) => file.endsWith(".sql"))) {
 	const name = path.slice(path.lastIndexOf("/") + 1);
@@ -82,7 +64,6 @@ for (const path of baseFiles.filter((file) => file.endsWith(".sql"))) {
 		encoding: "utf8",
 	});
 }
-/** @type {Record<string, string>} */
 const headSql = {};
 for (const name of headFiles) {
 	headSql[name] = readFileSync(join(migrationsDir, name), "utf8");

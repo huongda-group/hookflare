@@ -94,9 +94,8 @@ describe("planRun follow-ups", () => {
 	});
 
 	it("plans an audit day only once the whole UTC day is past the cut-off (Minor 7)", async () => {
-		const cutoff = NOW - 365 * DAY_MS; // 12:00 UTC
+		const cutoff = NOW - 365 * DAY_MS;
 		const dayStart = Math.floor(cutoff / DAY_MS) * DAY_MS;
-		// Older than the cut-off, but the rest of its UTC day is not.
 		await insertAudit("aud_partial_day", dayStart + 1_000);
 		try {
 			const plan = await planRun(deps, "inst-audit-day", never, logger);
@@ -145,7 +144,6 @@ describe("planRun budget (re-review)", () => {
 			});
 		await insertAudit("aud_starved", Date.UTC(2025, 5, 3));
 		try {
-			// Room for one events batch and one audit batch, not two events batches.
 			const stepBudget =
 				10 + estimateSteps("events", 1) + estimateSteps("audit", 1);
 			const plan = await planRun(deps, "inst-starve", never, logger, {

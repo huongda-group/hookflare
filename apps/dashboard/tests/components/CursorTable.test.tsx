@@ -30,10 +30,6 @@ const ROWS: Row[] = [
 	{ id: "dlv_1", label: "two" },
 ];
 
-/**
- * Drives a real infinite query through CursorTable so the loading, refresh, and
- * next-page failure paths come from TanStack Query's real flags, not mocks.
- */
 function Probe({
 	withSelection = false,
 	withHref = true,
@@ -85,7 +81,6 @@ function Probe({
 	);
 }
 
-/** Renders the probe inside a real router so `getRowHref` becomes a Router link. */
 function renderProbe(node: ReactNode) {
 	const queryClient = createQueryClient();
 	const rootRoute = createRootRoute({ component: () => <Outlet /> });
@@ -125,7 +120,6 @@ describe("CursorTable data states", () => {
 		);
 		renderProbe(<Probe empty="No rows match." />);
 
-		// The router mounts asynchronously, so wait for the skeleton before asserting.
 		const status = await screen.findByRole("status");
 		expect(status).toHaveAccessibleName(/loading/i);
 		expect(screen.queryByRole("table")).not.toBeInTheDocument();
@@ -212,13 +206,11 @@ describe("CursorTable data states", () => {
 		expect(
 			await screen.findByRole("button", { name: "Retry loading more" }),
 		).toBeEnabled();
-		// The failed next page never replaced the loaded page.
 		expect(screen.getByRole("link", { name: /evt_1/ })).toBeVisible();
 		expect(
 			screen.getByRole("checkbox", { name: "Select dlv_1" }),
 		).toBeChecked();
 		expect(screen.getByText("two")).toBeInTheDocument();
-		// The next-page warning is a non-fatal status, not the initial-failure alert.
 		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
 		failNext = false;
@@ -229,7 +221,6 @@ describe("CursorTable data states", () => {
 		expect(
 			screen.queryByRole("button", { name: "Retry loading more" }),
 		).not.toBeInTheDocument();
-		// The retry appended the next page without clearing the selection.
 		expect(
 			screen.getByRole("checkbox", { name: "Select dlv_1" }),
 		).toBeChecked();
@@ -302,7 +293,6 @@ describe("CursorTable data states", () => {
 		expect(onRowClick).not.toHaveBeenCalled();
 		expect(router.state.location.pathname).toBe("/");
 
-		// A pointer click on the row still works (it is not the only path).
 		await user.click(screen.getByText("one"));
 		expect(onRowClick).toHaveBeenCalledTimes(1);
 

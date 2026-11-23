@@ -62,7 +62,6 @@ function Tile({
 const pct = (r: number | null) =>
 	r === null ? "—" : `${(r * 100).toFixed(1)}%`;
 
-/** Shared by `/` and the project detail page (DESIGN.md §4.2). */
 export function OverviewContent({
 	projectId,
 	range,
@@ -85,7 +84,7 @@ export function OverviewContent({
 	});
 	const [refreshing, setRefreshing] = useState(false);
 	const refresh = async () => {
-		/* istanbul ignore if -- @preserve unreachable: the Refresh button is disabled while refreshing, so it cannot call refresh() again */
+		/* istanbul ignore if -- @preserve */
 		if (refreshing) return;
 		setRefreshing(true);
 		try {

@@ -26,13 +26,10 @@ import { classifyAttempt, type SendResult } from "./classify";
 import type { AcquireResult, LimiterStub } from "./limiter";
 
 export { readSnippet, SNIPPET_BYTES };
-/** The lease outlives the request timeout by this much (spec §7 step 7). */
 export const LEASE_GRACE_MS = 30_000;
 
-/** M5-7: a limiter that does not answer in time is an infra error. */
 export const LIMITER_TIMEOUT_MS = 2_000;
 
-/** Spec §5.3: retryAfter plus 0–3 s of jitter, so rejected messages do not return together. */
 export function limitedDelaySeconds(
 	retryAfterMs: number,
 	random: () => number,
@@ -95,7 +92,6 @@ async function send(
 	return { result, snippet };
 }
 
-/** Spec §7 steps 1–10. Infra errors never count as attempts (msg.retry instead). */
 export async function processDelivery(
 	deps: Deps,
 	deliveryId: string,
@@ -114,7 +110,6 @@ export async function processDelivery(
 		return { action: "retry", delaySeconds };
 	};
 
-	// 1–2. Load; skip anything another worker owns or already finished.
 	let ctx: DeliveryContext | null;
 	let defaults: Policy;
 	try {
@@ -134,9 +129,6 @@ export async function processDelivery(
 		});
 		return ACK;
 	}
-	// A duplicate message must not cut the backoff short; the due one still arrives
-	// (it is sent after next_attempt_at is recorded), and the reconciler resends it if
-	// lost. Ack instead of re-delaying: native retries would carry it to the DLQ.
 	const { nextAttemptAt } = ctx.delivery;
 	if (
 		ctx.delivery.status === "retrying" &&
@@ -159,7 +151,6 @@ export async function processDelivery(
 		return ACK;
 	};
 
-	// 3–4. Destination state (spec M2-2): none of the pre-lease exits counts as an attempt.
 	try {
 		if (ctx.destination.status === "paused") {
 			await holdDelivery(deps, deliveryId);
@@ -173,8 +164,6 @@ export async function processDelivery(
 		return infra("d1", err);
 	}
 
-	// 4a. Limiter (spec §5.3), before the R2 read, DoH lookup, and signing, so a
-	// rejection repeats none of them. A rejection changes only enqueued_at, so no attempt counts.
 	const { maxInFlight, rateLimitPerS } = ctx.destination;
 	if (maxInFlight === null && rateLimitPerS === null) {
 		return prepareAndSend(deps, deliveryId, ctx, policy, logger, infra, finish);
@@ -191,7 +180,6 @@ export async function processDelivery(
 		try {
 			slot = await withTimeout(acquiring, LIMITER_TIMEOUT_MS);
 		} catch (err) {
-			// A slot granted after we gave up would stay taken until its lease expired.
 			acquiring.then(
 				(late) => {
 					if (late.ok) void release(stub, late.slotId, deliveryId, logger);
@@ -211,7 +199,6 @@ export async function processDelivery(
 			reason: slot.reason,
 			delay_s: delaySeconds,
 		});
-		// M5-5: msg.retry() would burn msg.attempts toward the DLQ without a real attempt.
 		try {
 			await deps.queue.send({ deliveryId }, { delaySeconds });
 		} catch (err) {
@@ -221,8 +208,6 @@ export async function processDelivery(
 			});
 			return { action: "retry", delaySeconds };
 		}
-		// The message is in flight again: without this, reconcile rules (c) and (d)
-		// would resend a delivery that stays limited for long, one copy per run.
 		try {
 			await deps.db
 				.update(deliveries)
@@ -256,7 +241,6 @@ export async function processDelivery(
 	}
 }
 
-/** A lost release expires with the lease (M5-3), so failures are only logged. */
 async function release(
 	stub: LimiterStub,
 	slotId: string,
@@ -273,7 +257,6 @@ async function release(
 	}
 }
 
-/** Steps 5–6 (payload, SSRF check, signing), then the lease and send. */
 async function prepareAndSend(
 	deps: Deps,
 	deliveryId: string,
@@ -305,8 +288,6 @@ async function prepareAndSend(
 		try {
 			request = await sign(deps, ctx, body);
 		} catch (err) {
-			// A missing or malformed SECRETS_KEY is a deployment problem, not a
-			// property of this delivery: retry instead of failing it for good.
 			if (err instanceof SecretKeyError) {
 				return infra("secrets", err);
 			}
@@ -322,7 +303,6 @@ async function prepareAndSend(
 	return leaseAndSend(deps, deliveryId, ctx, request, policy, logger, infra);
 }
 
-/** Steps 7–10: lease, send, record, reschedule. */
 async function leaseAndSend(
 	deps: Deps,
 	deliveryId: string,
@@ -332,7 +312,6 @@ async function leaseAndSend(
 	logger: Logger,
 	infra: (stage: string, err: unknown) => Disposition,
 ): Promise<Disposition> {
-	// 7. Lease.
 	const leaseUntil = deps.now() + policy.timeoutMs + LEASE_GRACE_MS;
 	let attemptCount: number | null;
 	try {
@@ -348,7 +327,6 @@ async function leaseAndSend(
 		return ACK;
 	}
 
-	// 8. Send.
 	const attemptNo = attemptCount + 1;
 	const startedAt = deps.now();
 	const { result, snippet } = await send(deps, ctx, request, policy.timeoutMs);
@@ -360,7 +338,6 @@ async function leaseAndSend(
 		random: Math.random,
 	});
 
-	// 9. Record, fenced by the lease.
 	let recorded: boolean;
 	try {
 		recorded = await recordLeasedAttempt(deps, deliveryId, {
@@ -400,7 +377,6 @@ async function leaseAndSend(
 		return ACK;
 	}
 
-	// 10. Reschedule as a new message (spec M2-1).
 	const { delaySeconds } = outcome;
 	try {
 		await deps.queue.send({ deliveryId }, { delaySeconds });
@@ -433,7 +409,6 @@ export async function handleDeliveryBatch(
 		batch.messages.map(async (msg) => {
 			const deliveryId = deliveryIdOf(msg.body);
 			if (deliveryId === null) {
-				// Retrying cannot fix a bad payload; drop it instead of burning retries.
 				logger.error("delivery.malformed_message", { message_id: msg.id });
 				msg.ack();
 				return;
@@ -442,7 +417,6 @@ export async function handleDeliveryBatch(
 			try {
 				d = await processDelivery(deps, deliveryId, logger, msg.attempts);
 			} catch (err) {
-				// A bug in one message must not retry the rest of the batch.
 				const delaySeconds = infraDelaySeconds(msg.attempts);
 				logger.error("delivery.infra_retry", {
 					delivery_id: deliveryId,

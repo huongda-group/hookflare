@@ -263,9 +263,6 @@ describe("main", () => {
 			}
 			throw new Error("boom");
 		}) as typeof fetch;
-		// Provision succeeds, then the first send's fetch throws "boom":
-		// sendOne records it as a network error, the drain polls fail
-		// closed, and the sink stats fetch lets "boom" escape.
 		await expect(main(["s.json", "--yes"], h.deps)).rejects.toThrow("boom");
 		expect(seen.length).toBeGreaterThan(0);
 		for (const headers of seen) {

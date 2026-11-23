@@ -22,11 +22,6 @@ export async function listUsers(
 		.all();
 }
 
-/**
- * Spec M3-9: the UPDATE matches no row if, afterwards, no active admin
- * would remain. Only an admin who can log in (has a password) counts, so a
- * migrated password-less admin row cannot mask a lockout. One statement, so two concurrent demotions cannot both pass.
- */
 export function updateUserStmt(
 	db: Db,
 	username: string,

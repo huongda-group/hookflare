@@ -6,7 +6,7 @@ describe("admin router", () => {
 	it("declares a permission on every route except /me and the public auth routes", () => {
 		const guarded = new Map<string, boolean>();
 		for (const r of adminRoutes().routes) {
-			if (r.method === "ALL") continue; // middleware (authMiddleware)
+			if (r.method === "ALL") continue;
 			const key = `${r.method} ${r.path.replace(/\/$/, "")}`;
 			guarded.set(
 				key,
@@ -15,8 +15,6 @@ describe("admin router", () => {
 		}
 		const unguarded = [...guarded]
 			.filter(([key, ok]) => {
-				// /auth/* is deliberately public (onboarding, login, logout);
-				// /me and /me/password are any-authenticated-user (spec §6.6).
 				const path = key.slice(key.indexOf(" ") + 1);
 				return (
 					!ok &&

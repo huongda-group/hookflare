@@ -29,7 +29,6 @@ export const eventsSearch = z.object({
 });
 export type EventsSearch = z.infer<typeof eventsSearch>;
 
-/** Project-preserving defaults: Clear never drops the project scope. */
 const CLEARED: Partial<EventsSearch> = {
 	source_id: undefined,
 	destination_id: undefined,

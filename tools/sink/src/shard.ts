@@ -12,17 +12,10 @@ export type ShardStats = {
 	last_at: number | null;
 };
 
-/** Stored data expires after 7 days through the DO alarm (spec §5.2). */
 const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const ALARM_INTERVAL_MS = 24 * 60 * 60 * 1000;
-/** Cap for `ids()`: it is for smoke-sized runs, not load runs. */
 const MAX_IDS = 1000;
 
-/**
- * One of 16 SQLite-backed shards. Webhook IDs hash to a shard with
- * `shardFor`, so each ID lives on exactly one shard and the per-shard
- * `COUNT(DISTINCT webhook_id)` values sum to the exact unique count.
- */
 export class SinkShard extends DurableObject<SinkEnv> {
 	private readonly sql: SqlStorage;
 
@@ -91,7 +84,6 @@ export class SinkShard extends DurableObject<SinkEnv> {
 		};
 	}
 
-	/** Distinct webhook IDs of a run on this shard, at most MAX_IDS. */
 	async ids(run: string): Promise<string[]> {
 		return this.sql
 			.exec<{ webhook_id: string }>(

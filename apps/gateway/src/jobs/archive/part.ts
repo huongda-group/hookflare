@@ -20,9 +20,8 @@ import { groupBy } from "./ndjson";
 export const PART_MAX_EVENTS = 5_000;
 export const PART_MAX_RAW_BYTES = 32 * 1024 * 1024;
 const PAGE = 90;
-/** Spec §7.5: the `event` object of a line holds every webhook_events column but these. */
 export const EVENT_LINE_EXCLUDED = [
-	"body_inline", // sent as payload_b64
+	"body_inline",
 	"archive_batch_id",
 	"archive_part",
 ] as const;
@@ -42,11 +41,6 @@ const EVENT_COLUMNS = sql.raw(
 	EVENT_LINE_COLUMNS.map((c) => `e.${c}`).join(", "),
 );
 
-/**
- * `parked`: set when the part wrote nothing because every marked event's
- * payload was gone; those events moved to MISSING_PART, so the run loop goes
- * on to the next part instead of stopping.
- */
 export type PartResult = { itemCount: number; bytes: number; parked?: number };
 type Batch = typeof archiveBatches.$inferSelect;
 
@@ -60,7 +54,6 @@ async function loadBatch(deps: Deps, batchId: string): Promise<Batch> {
 	return b;
 }
 
-/** What eventLines actually wrote, and the events it left out. */
 type LineTally = {
 	written: number;
 	first: string | null;
@@ -68,13 +61,6 @@ type LineTally = {
 	missing: string[];
 };
 
-/**
- * Spec §7.4 `part`. Reuses an existing mark, otherwise marks the next slice;
- * the R2 key is deterministic and the put overwrites, so a retry is safe.
- * An event whose R2 payload is gone is left out of the file and parked under
- * MISSING_PART, so it stays in D1 instead of being purged without its body,
- * and no later part or run marks it again.
- */
 export async function buildEventPart(
 	deps: Deps,
 	batchId: string,
@@ -83,7 +69,6 @@ export async function buildEventPart(
 	logger: Logger = createLogger(deps.env),
 ): Promise<PartResult> {
 	const batch = await loadBatch(deps, batchId);
-	// A verified batch must not change under its manifest.
 	if (batch.status !== "building") return { itemCount: 0, bytes: 0 };
 	let n = await countMarked(deps.db, batchId, partNo);
 	if (n === 0) {
@@ -110,7 +95,6 @@ export async function buildEventPart(
 			missing: [],
 		};
 		const gz = await gzipLines(eventLines(deps, batchId, partNo, tally));
-		// Park before the put: a retry then rebuilds the same file without them.
 		await parkMissing(deps, batchId, partNo, tally.missing);
 		for (const id of tally.missing)
 			logger.error("archive.payload_missing", {
@@ -118,8 +102,6 @@ export async function buildEventPart(
 				part_no: partNo,
 				event_id: id,
 			});
-		// Verify needs no row for an empty part. The run loop stops at one
-		// unless it parked events: the day may go on past them.
 		const { first, last, written } = tally;
 		if (written === 0 || first === null || last === null)
 			return { itemCount: 0, bytes: 0, parked: tally.missing.length };
@@ -157,7 +139,6 @@ export async function buildEventPart(
 	return { itemCount: range.n, bytes };
 }
 
-/** Moves the given events of this part to MISSING_PART; 90 IDs + 3 = 93 params. */
 async function parkMissing(
 	deps: Deps,
 	batchId: string,
@@ -183,11 +164,6 @@ async function parkMissing(
 	await deps.db.batch(stmts as [(typeof stmts)[0], ...typeof stmts]);
 }
 
-/**
- * One line per marked event, built page by page so memory stays bounded.
- * An event whose R2 payload is gone gets no line; it is listed in
- * `tally.missing` instead.
- */
 async function* eventLines(
 	deps: Deps,
 	batchId: string,
@@ -225,8 +201,7 @@ async function* eventLines(
 				SELECT a.* FROM delivery_attempts a JOIN deliveries d ON d.id = a.delivery_id
 				JOIN webhook_events e ON e.id = d.event_id WHERE ${scope} ORDER BY a.delivery_id, a.attempt_no`),
 		]);
-		// esbuild drops expression-level comments, so the hint covers the statement.
-		/* istanbul ignore next -- @preserve unreachable: body_inline is NOT NULL in the schema, so the null branch never runs */
+		/* istanbul ignore next */
 		const bodyOf = new Map(
 			bodies.map((b) => [
 				b.id,
@@ -262,7 +237,6 @@ async function* eventLines(
 	}
 }
 
-/** Audit rows never change, so parts are ID ranges within the day (spec §7.4). */
 export async function buildAuditPart(
 	deps: Deps,
 	batchId: string,

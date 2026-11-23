@@ -19,8 +19,6 @@ const buttonVariants = cva(
           "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
         link: "text-action underline-offset-4 hover:underline",
       },
-      // Spec §5: inputs/buttons are 40–44px high and touch actions at least
-      // 44px, so the size variants differ in padding and type, not height.
       size: {
         default: "h-10 px-4 py-2 has-[>svg]:px-3",
         xs: "h-10 gap-1 rounded-md px-2 text-xs has-[>svg]:px-1.5 [&_svg:not([class*='size-'])]:size-3",

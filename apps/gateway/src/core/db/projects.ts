@@ -16,7 +16,6 @@ export async function getProject(
 	return db.select().from(projects).where(eq(projects.id, id)).get();
 }
 
-/** Returns up to limit + 1 rows so the caller can tell whether a next page exists. */
 export async function listProjects(
 	db: Db,
 	q: { limit: number; cursor?: string },

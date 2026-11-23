@@ -5,7 +5,6 @@ export const PROJECT_STATUSES = ["active", "disabled"] as const;
 export const SOURCE_STATUSES = ["active", "disabled"] as const;
 export const AUTH_TYPES = ["none", "hmac", "token"] as const;
 export const EVENT_ID_FROM = ["none", "header", "json_path"] as const;
-/** `paused` is set only by `POST /destinations/:id/pause`. */
 const DESTINATION_PATCH_STATUSES = ["active", "disabled"] as const;
 
 const HEADER_NAME = /^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,100}$/;
@@ -21,10 +20,8 @@ const url = z.url().max(2048);
 const timeoutMs = z.number().int().min(1000).max(30000);
 const maxAttempts = z.number().int().min(1).max(50);
 const backoffBaseS = z.number().int().min(1).max(3600);
-/** Queues cap delaySeconds at 12 h. ≥ backoff_base_s is checked by the route after defaults. */
 const backoffMaxS = z.number().int().min(1).max(43_200);
 const maxBodyBytes = z.number().int().min(1).max(10_485_760);
-/** M5a: NULL = unlimited. Not part of retry_defaults (limits describe one backend). */
 export const destinationLimit = z.number().int().min(1).max(1000);
 const secret = z.string().min(16).max(512);
 
@@ -42,7 +39,6 @@ export const tokenAuthConfig = z
 		in: z.enum(["header", "query"]),
 		name: z.string().min(1).max(100),
 	})
-	// An invalid header name would make Headers.get() throw on every request.
 	.refine((cfg) => cfg.in !== "header" || HEADER_NAME.test(cfg.name), {
 		path: ["name"],
 		message: "name must be a valid header name when in is header",
@@ -66,7 +62,6 @@ export function authConfigSchemaFor(
 			: noneAuthConfig;
 }
 
-/** null when the pair is valid, otherwise a human-readable reason (§6.2). */
 export function eventIdConfigError(
 	from: string,
 	selector: string | null | undefined,
@@ -180,10 +175,6 @@ export const createSourceRequest = z
 	])
 	.superRefine((v, ctx) => refineEventId(v, ctx));
 
-/**
- * auth_config is checked against the stored auth_type, and event_id_* against
- * the merged row, in the route (both need the existing source).
- */
 export const patchSourceRequest = z.strictObject({
 	name: name.optional(),
 	status: z.enum(SOURCE_STATUSES).optional(),
@@ -198,7 +189,6 @@ export const patchSourceRequest = z.strictObject({
 export type CreateSourceRequest = z.infer<typeof createSourceRequest>;
 export type PatchSourceRequest = z.infer<typeof patchSourceRequest>;
 
-// Response shapes (§9.2). The gateway builds them; the dashboard (M4) reads them.
 export type Page<T> = { data: T[]; next_cursor: string | null };
 export type Project = {
 	id: string;
@@ -281,8 +271,6 @@ export type WebhookEvent = {
 	deliveries: Delivery[];
 };
 
-// ---- M3: roles, permissions, and the new endpoints (spec §6–§12) ----
-
 export const ROLES = ["admin", "operator", "viewer"] as const;
 export type Role = (typeof ROLES)[number];
 export const PERMISSIONS = [
@@ -314,24 +302,17 @@ const deliveryId = z.string().startsWith("dlv_").max(64);
 const epochMs = z.coerce.number().int().min(0);
 const pageLimit = z.coerce.number().int().min(1).max(100).default(50);
 const cursor = z.string().max(512).optional();
-/** Query flags arrive as strings. */
 const queryBool = z.enum(["true", "false"]).transform((v) => v === "true");
-/**
- * M7: usernames replace the M3 identity union (an email or a `svc:` service
- * identity). `@` stays allowed so migrated email identities are valid.
- */
 export const USERNAME_PATTERN = /^[a-z0-9][a-z0-9._@+-]{2,63}$/;
 export const username = z.string().trim().toLowerCase().regex(USERNAME_PATTERN);
 export const PASSWORD_MIN_LENGTH = 6;
 export const PASSWORD_MAX_LENGTH = 256;
-/** No composition rules, and never trimmed. */
 export const password = z
 	.string()
 	.min(PASSWORD_MIN_LENGTH)
 	.max(PASSWORD_MAX_LENGTH);
 
 export const loginRequest = z.strictObject({
-	/** Free-form, not `username`: legacy keys like `svc:legacy` can still log in. */
 	username: z.string().trim().toLowerCase().min(1).max(254),
 	password: z.string().min(1).max(256),
 	turnstile_token: z.string().max(2048).optional(),
@@ -341,13 +322,11 @@ export const setupRequest = z.strictObject({
 	password,
 	turnstile_token: z.string().max(2048).optional(),
 });
-/** `GET /auth/state` (spec M7). */
 export type AuthState = {
 	setup_required: boolean;
 	turnstile_site_key: string | null;
 };
 const graceHours = z.number().int().min(0).max(168).default(24);
-/** `status` and `destination_id`-style filters may repeat (`?status=a&status=b`). */
 export const eventSearchQuery = z
 	.object({
 		project_id: projectId.optional(),
@@ -401,7 +380,6 @@ export const bulkReplayRequest = z.strictObject({
 });
 
 export const testDeliveryRequest = z.strictObject({
-	/** Any JSON; the 64 KiB admin body cap bounds its serialized size. */
 	payload: z.unknown().optional(),
 	...optionalReason,
 });
@@ -416,7 +394,6 @@ export const rotateDestinationSecretRequest = z.strictObject({
 	...optionalReason,
 });
 
-/** Pause/Resume take an optional body. */
 export const operateRequest = z.strictObject({ ...optionalReason });
 
 export const createUserRequest = z.strictObject({
@@ -434,17 +411,14 @@ export const patchUserRequest = z
 	.refine((v) => v.role !== undefined || v.disabled !== undefined, {
 		message: "role or disabled is required",
 	});
-/** `POST /users/:username/password` (spec M7). */
 export const resetPasswordRequest = z.strictObject({
 	password,
 	...optionalReason,
 });
-/** `POST /me/password` (spec M7). */
 export const changePasswordRequest = z.strictObject({
 	current_password: z.string().min(1).max(256),
 	new_password: password,
 });
-/** `POST /users/:username/tokens` (spec M7). */
 export const createApiTokenRequest = z.strictObject({
 	name,
 	expires_in_days: z.number().int().min(1).max(365).optional(),
@@ -524,7 +498,6 @@ export type ApiToken = {
 	last_used_at: number | null;
 	revoked_at: number | null;
 };
-/** The one response that carries the secret; list responses never do. */
 export type CreatedApiToken = ApiToken & { token: string };
 export type AuditLog = {
 	id: string;
@@ -537,8 +510,6 @@ export type AuditLog = {
 	at: number;
 };
 
-// ---- M4: overview, destination stats, and settings (spec §7) ----
-
 export const STATS_RANGES = ["24h", "7d", "30d"] as const;
 export type StatsRange = (typeof STATS_RANGES)[number];
 export const RANGE_HOURS: Record<StatsRange, number> = {
@@ -547,7 +518,6 @@ export const RANGE_HOURS: Record<StatsRange, number> = {
 	"30d": 720,
 };
 
-/** For GET /overview and GET /destinations/stats. */
 export const statsQuery = z.object({
 	project_id: projectId.optional(),
 	range: z.enum(STATS_RANGES).default("24h"),
@@ -560,7 +530,6 @@ export const overviewQuery = statsQuery
 		message: "Project alert scope requires a project",
 	});
 
-/** Same bounds as the destination policy fields (spec §7.3). */
 export const retryDefaultsSchema = z
 	.strictObject({
 		timeout_ms: timeoutMs,
@@ -584,7 +553,6 @@ export const ALERT_RULES = [
 ] as const;
 export type AlertRule = (typeof ALERT_RULES)[number];
 
-/** Spec §6.2. reminder_s = 0 means "never remind". */
 export const alertRulesSchema = z.strictObject({
 	failure_threshold: z.number().int().min(2).max(100),
 	stuck_after_s: z.number().int().min(60).max(86_400),
@@ -609,7 +577,6 @@ export const DEFAULT_ALERT_RULES: AlertRules = {
 export const ALERT_CHANNEL_TYPES = ["discord", "slack", "telegram"] as const;
 export type AlertChannelType = (typeof ALERT_CHANNEL_TYPES)[number];
 
-/** M5-10: alerts only ever go to these endpoints. */
 interface ParsedAlertUrl {
 	protocol: string;
 	username: string;
@@ -618,7 +585,6 @@ interface ParsedAlertUrl {
 	hostname: string;
 	pathname: string;
 }
-/** The shared package typechecks without the DOM lib; at runtime this is the global URL. */
 declare const URL: new (url: string) => ParsedAlertUrl;
 export function isAllowedAlertUrl(
 	type: "discord" | "slack",
@@ -685,7 +651,6 @@ export const createAlertChannelRequest = z.strictObject({
 	project_ids: channelRoutes.project_ids.default([]),
 	...optionalReason,
 });
-/** `config` replaces the stored one; its type must match the channel's. */
 export const patchAlertChannelRequest = z.strictObject({
 	name: name.optional(),
 	enabled: z.boolean().optional(),
@@ -732,7 +697,6 @@ export type Alert = {
 	rule: AlertRule;
 	resource_type: "destination" | "system";
 	resource_id: string;
-	/** Destination name, or null for system incidents and deleted destinations. */
 	resource_name: string | null;
 	project_id: string | null;
 	status: "open" | "resolved";
@@ -755,7 +719,6 @@ export type AlertNotification = {
 export type AlertDetail = Alert & { notifications: AlertNotification[] };
 export type ChannelTestResult = { ok: boolean; error: string | null };
 
-/** Spec §7.2. */
 export const storageSettingsSchema = z
 	.strictObject({
 		archive_enabled: z.boolean(),
@@ -836,7 +799,6 @@ export type ArchiveLastRun = {
 	started_at: number;
 };
 
-/** `expiring`: retention started deleting its objects; never restorable again. */
 export const BACKUP_STATUSES = [
 	"running",
 	"verified",
@@ -874,7 +836,6 @@ export const patchSettingsRequest = z
 	);
 export type Settings = {
 	retry_defaults: RetryDefaults;
-	/** retry_defaults' version (kept for M4 clients). */
 	updated_at: number | null;
 	alert_rules: AlertRules;
 	alert_rules_updated_at: number | null;
@@ -883,7 +844,6 @@ export type Settings = {
 	archive_last_run: ArchiveLastRun | null;
 };
 
-/** Non-terminal statuses counted live by the Overview. */
 export const LIVE_STATUSES = [
 	"pending",
 	"queued",

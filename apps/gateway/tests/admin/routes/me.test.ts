@@ -24,7 +24,6 @@ const ADMIN_API = `${ORIGIN}/api/admin/v1`;
 const PASSWORD = "correct-horse-battery";
 const NEW_PASSWORD = "rotated-horse-battery";
 
-/** Replaces the dummy hash `adminApp` seeds with a real one we can type. */
 async function setPassword(deps: Deps, username: string, password: string) {
 	await deps.db
 		.update(users)
@@ -32,7 +31,6 @@ async function setPassword(deps: Deps, username: string, password: string) {
 		.where(eq(users.username, username));
 }
 
-/** A bare request carrying a raw session cookie, bypassing `adminApp`. */
 function withCookie(deps: Deps, token: string, method = "GET", path = "/me") {
 	return createApp({ createDeps: () => deps }).request(
 		`${ADMIN_API}${path}`,
@@ -90,7 +88,6 @@ describe("POST /me/password", () => {
 	it("keeps the current session and drops the callers other sessions", async () => {
 		const deps = testDeps();
 		const username = uniqueUsername("pw");
-		// Two live sessions for the same user, both cookie-authenticated.
 		const a = await adminApp(deps, { username, role: "admin" });
 		const b = await adminApp(deps, { username, role: "admin" });
 		await setPassword(deps, username, PASSWORD);
@@ -103,7 +100,6 @@ describe("POST /me/password", () => {
 		});
 		expect(res.status).toBe(204);
 
-		// The session that made the change survives; the other one is gone.
 		expect((await a.request("GET", "/me")).status).toBe(200);
 		expect((await b.request("GET", "/me")).status).toBe(401);
 
@@ -135,8 +131,6 @@ describe("POST /me/password", () => {
 		const tokenApi = await adminApp(deps, { username, via: "token" });
 		await setPassword(deps, username, PASSWORD);
 
-		// A live cookie session for the same user must be dropped: a token
-		// caller has no `sessionIdHash`, so the delete has no exception.
 		const sessionToken = randomToken();
 		await insertSessionStmt(deps.db, {
 			idHash: await sha256Hex(sessionToken),

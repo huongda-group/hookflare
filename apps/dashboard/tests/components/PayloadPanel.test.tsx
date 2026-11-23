@@ -10,8 +10,6 @@ function renderPanel(props?: {
 	onMissing?: () => void;
 	contentType?: string | null;
 }) {
-	// Plain client: framework defaults apply, so the component itself must
-	// disable background retries for the audited payload read.
 	const queryClient = new QueryClient();
 	const user = userEvent.setup();
 	render(
@@ -74,7 +72,6 @@ describe("PayloadPanel request lifecycle", () => {
 		const { user } = renderPanel();
 		await user.click(screen.getByRole("button", { name: "Show payload" }));
 		expect(await screen.findByText(/could not load/i)).toBeInTheDocument();
-		// No background retries: exactly one read for one user action.
 		expect(loads).toBe(1);
 	});
 

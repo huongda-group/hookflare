@@ -65,7 +65,6 @@ describe("archives API (spec §7.6)", () => {
 		) => seedBatch(deps, { day, status, createdAt });
 		const jan1 = await mk("2026-01-01", "verified", 100);
 		const jan2 = await mk("2026-01-02", "verified", 200);
-		// Same created_at as jan2: the id breaks the tie.
 		const jan3 = await mk("2026-01-03", "verified", 200);
 		await mk("2026-01-02", "failed", 300);
 		const app = await adminApp(deps, { role: "viewer" });

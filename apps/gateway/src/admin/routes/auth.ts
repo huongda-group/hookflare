@@ -47,11 +47,6 @@ function issuesOf(error: ZodError) {
 
 type RawBody = { ok: true; raw: unknown } | { ok: false; response: Response };
 
-/**
- * R11: the public auth endpoints return `400 invalid_request` for a malformed
- * or oversized body, unlike the shared `readJson` (413). The limiter has
- * already run by the time this is called, so a bad body still counts.
- */
 async function readBody(c: Context<AppBindings>): Promise<RawBody> {
 	const bytes = await readCappedBody(c.req.raw, MAX_ADMIN_BODY_BYTES);
 	if (!bytes) {
@@ -78,18 +73,12 @@ async function readBody(c: Context<AppBindings>): Promise<RawBody> {
 	}
 }
 
-/** A top-level string field of a parsed JSON body, or undefined. */
 function stringField(raw: unknown, key: string): string | undefined {
 	if (raw === null || typeof raw !== "object") return undefined;
 	const value = (raw as Record<string, unknown>)[key];
 	return typeof value === "string" ? value : undefined;
 }
 
-/**
- * Per-attempt order (spec §6.5.1): the limiter and body read have already run,
- * so this is Turnstile. Turnstile never fails open: a misconfigured pair is a
- * 500, a rejected token a 403, and an unreachable siteverify a 503.
- */
 async function guardTurnstile(
 	c: Context<AppBindings>,
 	action: TurnstileAction,
@@ -114,7 +103,6 @@ async function guardTurnstile(
 		: c.json({ error: "turnstile_failed" }, 403);
 }
 
-/** The rate-limit key is the IP only, never the username (spec §6.5). */
 function limiterKey(c: Context<AppBindings>): string {
 	return `ip:${c.req.header("cf-connecting-ip") ?? "unknown"}`;
 }
@@ -124,13 +112,6 @@ async function underLimit(c: Context<AppBindings>): Promise<boolean> {
 	return success;
 }
 
-/**
- * Statement 1 is a conditional upsert: it inserts only while no loginable
- * account exists, and otherwise promotes a password-less row of the same
- * username. The audit row and the session insert are each guarded by
- * `changes() > 0`, which D1 evaluates against the statement just before them
- * on the batch's single connection — so a lost race (0 rows) writes neither.
- */
 export function setupStatements(
 	db: Db,
 	a: { username: string; passwordHash: string; now: number; idHash: string },
@@ -139,8 +120,6 @@ export function setupStatements(
 		a.now + SESSION_ABSOLUTE_MS,
 		a.now + SESSION_IDLE_MS,
 	);
-	// `insert().select()` requires the selected keys to match the table's
-	// columns exactly, in declaration order (drizzle 0.45).
 	return [
 		db
 			.insert(users)
@@ -194,7 +173,6 @@ export function setupStatements(
 	] as const;
 }
 
-/** The public onboarding, login, and logout routes (spec §6.3–§6.5). */
 export function authRoutes() {
 	const routes = new Hono<AppBindings>();
 
@@ -241,10 +219,9 @@ export function authRoutes() {
 		const results = await db.batch(
 			setupStatements(db, { username, passwordHash, now: at, idHash }),
 		);
-		// Statement 1 changed no rows: onboarding is already closed (spec §6.3).
 		const changes =
 			(results[0] as { meta?: { changes?: number } })?.meta?.changes ??
-			/* istanbul ignore next -- @preserve unreachable: D1 always reports meta.changes for a write */ 0;
+			/* istanbul ignore next */ 0;
 		if (changes === 0) return c.json({ error: "setup_closed" }, 409);
 		setSessionCookie(c, token);
 		return c.json({ username, role: "admin" }, 201);
@@ -269,8 +246,6 @@ export function authRoutes() {
 		const { username, password } = body.data;
 		const { db, now } = c.var.deps;
 		const user = await getUser(db, username);
-		// Exactly one PBKDF2 pass per attempt, including an unknown username
-		// (the dummy-hash path), so timing cannot reveal which users exist.
 		const ok = await verifyPassword(password, user?.passwordHash ?? null);
 		if (
 			!user ||
@@ -297,8 +272,6 @@ export function authRoutes() {
 			username,
 			now: now(),
 		});
-		// The cookie is replaced below, so a session it pointed to would only
-		// linger in D1 until expiry: end it in the same batch.
 		const previous = getCookie(c, SESSION_COOKIE);
 		if (previous) {
 			await db.batch([
@@ -314,8 +287,6 @@ export function authRoutes() {
 	});
 
 	routes.post("/logout", async (c) => {
-		// Logout is a public auth endpoint, so it enforces the same origin
-		// before touching the session (spec §6.5, ruling R12).
 		if (!isSameOrigin(c)) return c.json({ error: "bad_origin" }, 403);
 		const token = getCookie(c, SESSION_COOKIE);
 		if (token) {

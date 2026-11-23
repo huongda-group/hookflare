@@ -9,7 +9,6 @@ type PasswordInputProps = Omit<ComponentProps<"input">, "type"> & {
 };
 
 export type PasswordFieldProps = Omit<PasswordInputProps, "shown" | "id"> & {
-	/** Visible label text; also the accessible name for the show/hide toggle. */
 	label: string;
 	id: string;
 	children?: ReactNode;
@@ -62,14 +61,6 @@ export function PasswordVisibilityButton({
 	);
 }
 
-/**
- * A password input with a deliberate show/hide toggle (spec §8.1–8.2).
- *
- * Toggling only flips the input `type`, so the value, autocomplete, pasted
- * content, and the forwarded ref (react-hook-form) all survive the switch.
- * The toggle is `type="button"` so it never submits the surrounding form,
- * and both states have an explicit accessible name.
- */
 export function PasswordField({
 	label,
 	id,

@@ -6,12 +6,6 @@ import { errorText } from "@/lib/forms";
 import { formatBytes } from "@/lib/time";
 import { downloadBlob, JsonViewer } from "./JsonViewer";
 
-/**
- * Spec M4-10: one click = one fetch = one `event.payload_viewed` audit row.
- * The query never retries in the background and never refetches on mount or
- * tab switches: `retry: false`, `gcTime: 0`, `staleTime: Infinity`, fetched
- * only after an explicit Show click, retried only by an explicit Retry click.
- */
 export function PayloadPanel({
 	eventId,
 	projectId,
@@ -23,7 +17,6 @@ export function PayloadPanel({
 	projectId: string;
 	contentType: string | null;
 	size: number;
-	/** Called once when the backend confirms the payload is gone. */
 	onMissing?: () => void;
 }) {
 	const [open, setOpen] = useState(false);
@@ -40,8 +33,6 @@ export function PayloadPanel({
 			const res = await apiRaw(
 				projectScopedPath(`/events/${eventId}/payload`, projectId),
 			);
-			// Bytes, not text(): text() replaces invalid UTF-8, which would also
-			// corrupt Download for binary bodies.
 			const bytes = await res.arrayBuffer();
 			const blob = new Blob([bytes], {
 				type: res.headers.get("content-type") ?? contentType ?? "",
@@ -50,7 +41,7 @@ export function PayloadPanel({
 			try {
 				text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 			} catch {
-				text = null; // not UTF-8: treat as binary
+				text = null;
 			}
 			return { blob, text };
 		},

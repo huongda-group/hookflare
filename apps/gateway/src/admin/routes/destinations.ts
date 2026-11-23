@@ -81,27 +81,18 @@ import {
 } from "../http";
 import { successRate } from "./overview";
 
-/** Standard Webhooks secret: whsec_ + base64(32 random bytes). */
 function generateSigningSecret(): string {
 	const bytes = crypto.getRandomValues(new Uint8Array(32));
 	return `whsec_${btoa(String.fromCharCode(...bytes))}`;
 }
 
-/**
- * Destination URLs often carry credentials in the path or query, so only
- * actors that may edit them see them in full: everyone else gets the origin,
- * plus "/…" when anything follows it.
- */
 export function maskUrl(url: string): string {
 	const u = new URL(url);
 	return u.pathname !== "/" || u.search || u.hash ? `${u.origin}/…` : u.origin;
 }
 
-/** config.write: full destination URLs and custom test payloads. */
 function canWriteConfig(c: Context<AppBindings>): boolean {
-	const role =
-		c.var.actor?.role ??
-		/* istanbul ignore next -- @preserve unreachable: requirePermission already rejected a request without an actor */ "viewer";
+	const role = c.var.actor?.role ?? /* istanbul ignore next */ "viewer";
 	return can(role, "config.write");
 }
 
@@ -145,7 +136,6 @@ export async function toDestination(
 	};
 }
 
-/** backoff_max_s must not be below backoff_base_s once defaults apply (spec §8.4). */
 function backoffConflict(
 	c: Context<AppBindings>,
 	row: PolicyFields,
@@ -170,7 +160,6 @@ function backoffConflict(
 		: null;
 }
 
-/** Re-reads after a lost conditional update: the row may be missing or disabled. */
 async function settled(
 	c: Context<AppBindings>,
 	id: string,
@@ -352,14 +341,11 @@ export function destinationRoutes() {
 			...(v.rate_limit_per_s !== undefined
 				? { rateLimitPerS: v.rate_limit_per_s }
 				: {}),
-			// A new URL or a resume starts the failure streak over.
 			...((v.url !== undefined && v.url !== existing.url) ||
 			(v.status === "active" && existing.status !== "active")
 				? { consecutiveFailures: 0 }
 				: {}),
 		};
-		// Only a patch that touches backoff is validated: raised defaults must not
-		// block unrelated edits (the delivery path clamps via resolvePolicy).
 		const touchesBackoff =
 			v.backoff_base_s !== undefined || v.backoff_max_s !== undefined;
 		const conflict = touchesBackoff
@@ -422,7 +408,6 @@ export function destinationRoutes() {
 				now: ts,
 			});
 			const fingerprint = await secretFingerprint(secret);
-			// Fenced on the ciphertext we read: a concurrent rotation makes this a no-op.
 			const [[row]] = await db.batch([
 				db
 					.update(destinations)
@@ -440,9 +425,7 @@ export function destinationRoutes() {
 					)
 					.returning(),
 				auditInsertIfChanged(db, {
-					actor:
-						c.var.actor?.username ??
-						/* istanbul ignore next -- @preserve unreachable: requirePermission already rejected a request without an actor */ "",
+					actor: c.var.actor?.username ?? /* istanbul ignore next */ "",
 					at: ts,
 					action: "destination.secret_rotated",
 					resourceType: "destination",
@@ -474,15 +457,12 @@ export function destinationRoutes() {
 			const found = await readProjectResource(c, () => getDestination(db, id));
 			if (!found.ok) return found.response;
 			const existing = found.value;
-			// Only an actual transition is audited; a repeat Pause is a no-op.
 			if (existing.status === "active") {
 				const ts = now();
 				const [[row]] = await db.batch([
 					transitionDestinationStmt(db, id, "active", "paused", ts),
 					auditInsertIfChanged(db, {
-						actor:
-							c.var.actor?.username ??
-							/* istanbul ignore next -- @preserve unreachable: requirePermission already rejected a request without an actor */ "",
+						actor: c.var.actor?.username ?? /* istanbul ignore next */ "",
 						at: ts,
 						action: "destination.paused",
 						resourceType: "destination",
@@ -512,13 +492,10 @@ export function destinationRoutes() {
 			);
 			if (!found.ok) return found.response;
 			const existing = found.value;
-			// Only an actual transition is audited; a repeat Resume is a no-op.
 			let row: DestinationRow | undefined;
 			if (existing.status === "paused") {
 				const ts = deps.now();
 				const [[transitioned]] = await deps.db.batch([
-					// A fresh start: failures from before the pause must not re-trigger
-					// consecutive_failures on the first post-resume error.
 					deps.db
 						.update(destinations)
 						.set({ status: "active", consecutiveFailures: 0, updatedAt: ts })
@@ -527,9 +504,7 @@ export function destinationRoutes() {
 						)
 						.returning(),
 					auditInsertIfChanged(deps.db, {
-						actor:
-							c.var.actor?.username ??
-							/* istanbul ignore next -- @preserve unreachable: requirePermission already rejected a request without an actor */ "",
+						actor: c.var.actor?.username ?? /* istanbul ignore next */ "",
 						at: ts,
 						action: "destination.resumed",
 						resourceType: "destination",
@@ -544,7 +519,6 @@ export function destinationRoutes() {
 				if (s.response) return s.response;
 				row = s.row;
 			}
-			// The rest is picked up by reconcile rule (e); a failed send by rule (a).
 			const moved = await releasePausedDeliveries(deps, id, RESUME_BATCH);
 			await enqueueThenMark(deps, moved, (chunk) =>
 				markQueuedMany(deps, chunk),
@@ -567,9 +541,6 @@ export function destinationRoutes() {
 		async (c) => {
 			const body = await readOptionalJson(c, testDeliveryRequest);
 			if (!body.ok) return body.response;
-			// A custom payload is signed with the real secret, so the backend
-			// cannot tell it from a real event: only config writers may send one.
-			// Operators can still send the default test envelope.
 			if (body.value.payload !== undefined && !canWriteConfig(c)) {
 				return c.json({ error: "forbidden", required: "config.write" }, 403);
 			}
@@ -647,7 +618,6 @@ export function destinationRoutes() {
 					timestampSec,
 					signature,
 				});
-				// Set after the builder, so no stored-header denylist applies.
 				headers.set("x-hookflare-test", "1");
 				const sent = await sendSigned(deps, {
 					url: destination.url,
@@ -670,9 +640,7 @@ export function destinationRoutes() {
 				id: testId,
 				destinationId: id,
 				projectId: destination.projectId,
-				actor:
-					c.var.actor?.username ??
-					/* istanbul ignore next -- @preserve unreachable: requirePermission already rejected a request without an actor */ "",
+				actor: c.var.actor?.username ?? /* istanbul ignore next */ "",
 				startedAt,
 				durationMs: outcome.durationMs,
 				httpStatus: outcome.httpStatus,
@@ -691,7 +659,6 @@ export function destinationRoutes() {
 						test_delivery_id: testId,
 						http_status: outcome.httpStatus,
 						error_kind: outcome.errorKind,
-						// The hash identifies what was signed without storing it.
 						payload_sha256: await sha256Hex(payloadText),
 					},
 				}),

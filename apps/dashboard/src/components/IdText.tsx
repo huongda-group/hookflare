@@ -3,11 +3,6 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
-/**
- * A copyable identifier. The value is always on screen and selectable, so the
- * identifier stays usable without the clipboard API (spec §7: a rejected
- * clipboard write produces an actionable explanation, never a false “Copied”).
- */
 export function IdText({ id, className }: { id: string; className?: string }) {
 	const [copyFailed, setCopyFailed] = useState(false);
 

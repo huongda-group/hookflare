@@ -7,12 +7,6 @@ import { Dialog as DialogPrimitive } from "radix-ui"
 
 import { Button } from "@/components/ui/button"
 
-// The element that had focus before a dialog took over. Tracked globally
-// (not per-dialog) because `DialogContent` only mounts on open — after the
-// opening click's `focusin` has already fired. Focus inside a dialog is
-// ignored so the opener survives the dialog's own focus trap. Radix
-// restores trigger-associated dialogs itself; this only matters for
-// state-driven dialogs with no `DialogTrigger`.
 let lastDialogOpener: HTMLElement | null = null
 let dialogOpenerTrackingInstalled = false
 
@@ -96,10 +90,6 @@ function DialogContent({
         )}
         onCloseAutoFocus={(event) => {
           onCloseAutoFocus?.(event)
-          // State-driven dialogs (`open`/`onOpenChange` with no
-          // `DialogTrigger`) have no Radix trigger association, so the
-          // default `onCloseAutoFocus` falls back to `document.body`.
-          // Return focus to whatever opened the dialog instead.
           if (event.defaultPrevented) return
           const opener = lastDialogOpener
           if (opener && document.contains(opener)) {

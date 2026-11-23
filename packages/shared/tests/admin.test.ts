@@ -147,7 +147,6 @@ describe("createSourceRequest", () => {
 		expect(token({ in: "header", name: "X-Token" })).toBe(true);
 		expect(token({ in: "header", name: "x token" })).toBe(false);
 		expect(token({ in: "header", name: "x:token" })).toBe(false);
-		// Query parameter names are not header names.
 		expect(token({ in: "query", name: "api key" })).toBe(true);
 	});
 

@@ -1,20 +1,7 @@
 @import "tailwindcss";
 
-/*
- * Hookflare dashboard — semantic light theme (spec §5, direction B).
- *
- * This iteration is a fixed light theme: there is no dark palette, no theme
- * switch, and no dark-mode-dependent styling. The `dark:` variant is kept
- * compiling (existing components still use it) but is scoped to a `.dark`
- * class that is never applied, so `prefers-color-scheme: dark` cannot flip
- * individual controls into a half-styled dark variant.
- */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/*
- * Typography: system UI stack for interface text; the system monospace stack
- * only for IDs, code, JSON, hashes, and measured values. No external fonts.
- */
 @theme {
 	--font-sans:
 		ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
@@ -25,12 +12,7 @@
 		monospace;
 }
 
-/*
- * Reliability Console palette. Semantic foregrounds are deliberately darker
- * than decorative chart strokes so labels remain legible on tinted surfaces.
- */
 :root {
-	/* Surfaces */
 	--canvas: #f7f8fa;
 	--surface: #ffffff;
 	--sidebar: #f1f3f7;
@@ -38,24 +20,19 @@
 	--avatar: #dfe5ef;
 	--avatar-foreground: #4a5974;
 
-	/* Boundaries */
 	--border: #e3e7ed;
 	--input: #d4dce7;
 
-	/* Text */
 	--foreground: #202733;
 	--muted-foreground: #667080;
 
-	/* Action */
 	--action: #245bdb;
 	--action-hover: #1c4cbd;
 	--action-foreground: #ffffff;
 
-	/* Selected navigation */
 	--selected: #e1e9fb;
 	--selected-foreground: #244da7;
 
-	/* Status */
 	--success: #23704d;
 	--success-surface: #e9f5ed;
 	--warning: #805316;
@@ -68,22 +45,14 @@
 	--chart-delivered: #47a083;
 	--chart-failed: #d0847e;
 
-	/* Hover surface for ghost/outline controls and menu items */
 	--accent: #e8ecf3;
 
-	/* Focus indicator */
 	--focus: #245bdb;
 
-	/* Radii: 6–8px controls, 12px panels */
 	--radius-control: 0.5rem;
 	--radius-panel: 0.625rem;
 }
 
-/*
- * Tailwind aliases. Components consume these names and never a raw palette
- * value. The second group keeps the existing shadcn/ui component vocabulary
- * (bg-background, text-foreground, bg-primary, …) working on the same values.
- */
 @theme inline {
 	--color-canvas: var(--canvas);
 	--color-surface: var(--surface);
@@ -147,7 +116,6 @@
 		background-color: var(--canvas);
 		color: var(--foreground);
 		font-family: var(--font-sans);
-		/* Body 14px desktop / 15px mobile (spec §5). */
 		font-size: 0.875rem;
 		line-height: 1.5;
 		-webkit-font-smoothing: antialiased;
@@ -159,7 +127,6 @@
 		}
 	}
 
-	/* Baseline visible focus: 2px blue outline with a 2px offset. */
 	:focus-visible {
 		outline: 2px solid var(--focus);
 		outline-offset: 2px;
@@ -187,7 +154,6 @@
 	}
 }
 
-/* Only short focus/hover/disclosure transitions; honor reduced motion. */
 @media (prefers-reduced-motion: reduce) {
 	*,
 	::before,
@@ -201,14 +167,6 @@
 	}
 }
 
-/*
- * Touch targets (spec §5): desktop controls stay 40–44px high, but on a coarse
- * (touch) pointer every interactive control must offer at least a 44px target.
- * `min-height`/`min-width` clamp the utility height/width, so the desktop
- * sizing utilities are untouched and only touch devices grow. Checkboxes and
- * radios keep their small visible box and instead grow their invisible hit
- * area (20px box + 2×12px inset = 44px).
- */
 @media (pointer: coarse) {
 	[data-slot="button"],
 	[data-slot="input"],

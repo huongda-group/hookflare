@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { TimeText } from "@/components/TimeText";
 import { formatAbsolute } from "@/lib/time";
 
-/** One labelled value in a detail page's definition list. */
 export function Field({
 	label,
 	children,
@@ -42,7 +41,6 @@ export function Section({
 	);
 }
 
-/** Current fingerprint, plus the grace window while a rotated-out secret is still accepted. */
 export function SecretFingerprints({
 	fingerprint,
 	previous,

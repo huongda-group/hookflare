@@ -51,8 +51,7 @@ export function userRoutes() {
 			data: page.map(toUser),
 			next_cursor:
 				rows.length > q.value.limit
-					? (page.at(-1)?.username ??
-						/* istanbul ignore next -- @preserve unreachable: limit >= 1, so a page past the limit is never empty */ null)
+					? (page.at(-1)?.username ?? /* istanbul ignore next */ null)
 					: null,
 		} satisfies Page<User>);
 	});
@@ -105,7 +104,6 @@ export function userRoutes() {
 		if (disabled === true && username === c.var.actor?.username) {
 			return c.json({ error: "self_disable" }, 409);
 		}
-		// Like a repeat Pause: nothing changes, so nothing is written or audited.
 		const sameRole = role === undefined || role === existing.role;
 		const sameState =
 			disabled === undefined || disabled === (existing.disabledAt !== null);
@@ -123,9 +121,7 @@ export function userRoutes() {
 			updatedAt: ts,
 		};
 		const update = updateUserStmt(db, username, set);
-		const actor =
-			c.var.actor?.username ??
-			/* istanbul ignore next -- @preserve unreachable: requirePermission already rejected a request without an actor */ "";
+		const actor = c.var.actor?.username ?? /* istanbul ignore next */ "";
 		const audit = auditInsertIfChanged(db, {
 			actor,
 			action,
@@ -140,10 +136,6 @@ export function userRoutes() {
 			},
 			at: ts,
 		});
-		// Disabling revokes the user's API tokens in the same batch, fenced on
-		// the update having applied (a rejected update revokes nothing). The
-		// sessions are deleted only after the update is known to have applied,
-		// so that delete runs in a second batch.
 		const [[row]] = await db.batch([
 			update,
 			audit,
@@ -176,18 +168,13 @@ export function userRoutes() {
 		}
 		const ts = now();
 		const passwordHash = await hashPassword(password);
-		// Reset, session and API-token revocation are one atomic batch (spec §6.6):
-		// a reset assumes the account was compromised. The audit diff carries no
-		// password or hash.
 		await db.batch([
 			db
 				.update(users)
 				.set({ passwordHash, passwordChangedAt: ts, updatedAt: ts })
 				.where(eq(users.username, username)),
 			auditInsertIfChanged(db, {
-				actor:
-					c.var.actor?.username ??
-					/* istanbul ignore next -- @preserve unreachable: requirePermission already rejected a request without an actor */ "",
+				actor: c.var.actor?.username ?? /* istanbul ignore next */ "",
 				action: "user.password_reset",
 				resourceType: "user",
 				resourceId: username,

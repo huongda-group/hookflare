@@ -5,7 +5,10 @@ import { deliveryIdOf } from "./consumer";
 
 export const DLQ_QUEUE = "hookflare-deliveries-dlq";
 
-/** Messages land here after 20 consecutive infra failures (spec M2-6). Alerts are M5. */
+export function isDlqQueue(queue: string): boolean {
+	return queue === DLQ_QUEUE || queue.startsWith(`${DLQ_QUEUE}-`);
+}
+
 export async function handleDlqBatch(
 	batch: MessageBatch<DeliveryMessage>,
 	deps: Deps,

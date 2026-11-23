@@ -26,12 +26,10 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { formatAbsolute, formatRelative } from "@/lib/time";
 import { T } from "../helpers/fixtures";
 
-/** Escapes a literal string for use inside a RegExp matcher. */
 function escapeRe(value: string) {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Dispatches a cancelable unload event and reports whether it was blocked. */
 function unloadBlocked() {
 	const event = new Event("beforeunload", { cancelable: true });
 	window.dispatchEvent(event);
@@ -43,8 +41,6 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
-// Spec §4: the eight delivery statuses. `active`/`disabled` are resource
-// states that StatusBadge must keep supporting (spec §5).
 const DELIVERY_STATUSES = [
 	"pending",
 	"queued",
@@ -69,7 +65,6 @@ describe("StatusBadge", () => {
 		expect(badges).toHaveLength(DELIVERY_STATUSES.length);
 
 		const labels = badges.map((b) => b.textContent?.trim() ?? "");
-		// A raw token like "failed_final" is not a human label.
 		for (const label of labels) {
 			expect(label).not.toMatch(/_/);
 			expect(label).toMatch(/^[A-Z]/);
@@ -87,8 +82,6 @@ describe("StatusBadge", () => {
 		const [failedFinal, dead] = [
 			...container.querySelectorAll("[data-status]"),
 		];
-		// Distinct text and a distinct non-color signal (icon) even when the
-		// badge colors are identical.
 		expect(failedFinal.textContent?.trim()).not.toBe(dead.textContent?.trim());
 		expect(failedFinal.querySelector("svg")).not.toBeNull();
 		expect(dead.querySelector("svg")).not.toBeNull();
@@ -140,8 +133,6 @@ describe("IdText", () => {
 		).toBeInTheDocument();
 		expect(writeText).toHaveBeenCalledWith("dlv_1");
 		expect(success).not.toHaveBeenCalled();
-		// The value stays on screen and selectable, so the user can copy it
-		// without the clipboard API.
 		expect(screen.getByText("dlv_1")).toBeInTheDocument();
 	});
 
@@ -402,7 +393,6 @@ describe("DirtyFormGuard", () => {
 		expect(
 			screen.queryByText("Discard unsaved changes?"),
 		).not.toBeInTheDocument();
-		// Dirty is gone, so the unload guard is gone with it.
 		expect(unloadBlocked()).toBe(false);
 	});
 
@@ -456,14 +446,10 @@ describe("DirtyFormGuard", () => {
 			await screen.findByText("Discard unsaved changes?"),
 		).toBeInTheDocument();
 
-		// The save completes while the router blocker is parked. A modal prompt
-		// blocks interaction, so clear `dirty` through the harness control.
 		await act(async () => {
 			control.clearDirty();
 		});
 
-		// The navigation the user asked for proceeds and the prompt is gone, so
-		// the parked resolver promise is settled rather than dropped.
 		expect(await screen.findByText("Other page")).toBeInTheDocument();
 		expect(
 			screen.queryByText("Discard unsaved changes?"),
@@ -471,12 +457,9 @@ describe("DirtyFormGuard", () => {
 	});
 });
 
-/** Two routes with a guarded editor, so a real blocker can be exercised. */
 function renderNavHarness({ initialDirty }: { initialDirty: boolean }) {
 	const rootRoute = createRootRoute({ component: () => <Outlet /> });
 	const goOther = () => void router.navigate({ to: "/audit" });
-	// Lets a test clear `dirty` while the router blocker is parked, which a
-	// modal prompt would otherwise make impossible to trigger by interaction.
 	const control: { clearDirty: () => void } = { clearDirty: () => {} };
 	const indexRoute = createRoute({
 		getParentRoute: () => rootRoute,
@@ -562,8 +545,6 @@ describe("sonner Toaster", () => {
 			})),
 		);
 		render(<Toaster />);
-		// sonner only mounts the themed toast list once a toast exists, and adds
-		// it on a macrotask, so the theme is only observable after it settles.
 		await act(async () => {
 			toast.success("Saved");
 		});
@@ -576,8 +557,6 @@ describe("sonner Toaster", () => {
 });
 
 describe("touch targets", () => {
-	// jsdom cannot apply a `pointer: coarse` media query, so assert the shipped
-	// stylesheet carries the coarse-pointer contract instead of faking one.
 	const css = readFileSync(
 		join(dirname(fileURLToPath(import.meta.url)), "../../src/index.css"),
 		"utf8",
@@ -588,14 +567,11 @@ describe("touch targets", () => {
 		expect(start).toBeGreaterThanOrEqual(0);
 		const block = css.slice(start);
 
-		// A ≥44px minimum on the interactive control selectors, so touch grows
-		// past the 40–44px desktop sizing without changing the desktop classes.
 		expect(block).toMatch(/min-height:\s*44px/);
 		expect(block).toMatch(/min-width:\s*44px/);
 		expect(block).toMatch(/\[data-slot=["']?button["']?\]/);
 		expect(block).toMatch(/\[data-slot=["']?input["']?\]/);
 		expect(block).toMatch(/\[data-slot=["']?select-trigger["']?\]/);
-		// Checkboxes/radios grow their invisible hit area, not their visible box.
 		expect(block).toMatch(/\[data-slot=["']?checkbox["']?\]\s*::after/);
 	});
 });

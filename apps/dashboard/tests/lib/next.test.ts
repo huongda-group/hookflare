@@ -24,9 +24,7 @@ describe("safeNext", () => {
 		expect(safeNext("events")).toBe("/");
 	});
 	it("rejects a path that URL parsing turns into a host, or cannot parse at all", () => {
-		// URL parsing drops tabs, so "/\t/host" becomes protocol-relative.
 		expect(safeNext("/\t/evil.example")).toBe("/");
-		// ...and "/\t/[" becomes an invalid IPv6 host, which throws.
 		expect(safeNext("/\t/[")).toBe("/");
 		expect(safeNext("/login")).toBe("/");
 		expect(safeNext("/setup/")).toBe("/");

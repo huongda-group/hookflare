@@ -63,7 +63,6 @@ describe("consecutive_failures", () => {
 				[openCf("dst_gone", detailsJson)],
 				NOW,
 			);
-		// First run under the threshold: stamps cleared_at.
 		expect(await run('{"consecutive_failures":7}')).toEqual([
 			{
 				rule: "consecutive_failures",
@@ -75,17 +74,14 @@ describe("consecutive_failures", () => {
 				updateDetails: true,
 			},
 		]);
-		// Inside the quiet period: carried over, nothing to write.
 		const inside = JSON.stringify({ cleared_at: NOW - FAILURES_QUIET_MS + 1 });
 		expect(await run(inside)).toMatchObject([
 			{ resourceId: "dst_gone", carryOver: true },
 		]);
 		expect((await run(inside))[0]).not.toHaveProperty("updateDetails");
-		// Quiet period over: no longer active, so the job resolves it.
 		expect(
 			await run(JSON.stringify({ cleared_at: NOW - FAILURES_QUIET_MS })),
 		).toEqual([]);
-		// Corrupt or non-object details, or a non-numeric cleared_at, restart the clock.
 		for (const bad of ["{oops", "[1]", "null", '{"cleared_at":"x"}'])
 			expect((await run(bad))[0]?.details).toMatchObject({ cleared_at: NOW });
 	});
@@ -238,7 +234,7 @@ describe("new_dead scan bounds (Minor 6)", () => {
 		const { DEAD_MAX_DESTINATIONS, scanDead } = await import(
 			"../../src/jobs/alerts/rules"
 		);
-		const from = NOW + 50_000_000; // clear of rows other tests leave behind
+		const from = NOW + 50_000_000;
 		const until = from + 10_000;
 		const ids: string[] = [];
 		for (let i = 0; i <= DEAD_MAX_DESTINATIONS; i++) {
@@ -263,7 +259,7 @@ describe("new_dead scan with a tied boundary", () => {
 		const { DEAD_MAX_DESTINATIONS, scanDead } = await import(
 			"../../src/jobs/alerts/rules"
 		);
-		const from = NOW + 90_000_000; // clear of rows other tests leave behind
+		const from = NOW + 90_000_000;
 		const at = from + 5;
 		const ids: string[] = [];
 		for (let i = 0; i <= DEAD_MAX_DESTINATIONS; i++) {
@@ -275,8 +271,6 @@ describe("new_dead scan with a tied boundary", () => {
 			ids.push(deliveryId);
 		}
 		const r = await scanDead(deps.db, from, from + 10_000);
-		// More destinations than one run takes, all in one millisecond: the
-		// cursor cannot stop inside it, so the run takes all of them.
 		expect(r.rows).toHaveLength(DEAD_MAX_DESTINATIONS + 1);
 		expect(new Set(r.rows.map((x) => x.id))).toEqual(new Set(ids));
 		expect(r.to).toBe(at);
@@ -383,7 +377,6 @@ describe("backup_stale", () => {
 	});
 
 	it("opens without a grace period when backups ran but none ever verified", async () => {
-		// Fresh deployment by the wall clock, but a backup already failed.
 		const wallClock = { db: deps.db, now: () => Date.now() };
 		await seedBackup({ status: "failed", startedAt: Date.now() - 60_000 });
 		const [a] = await backupStale(wallClock, ENABLED);
@@ -394,8 +387,6 @@ describe("backup_stale", () => {
 	});
 
 	it("gives a fresh deployment a grace period when no backup row exists", async () => {
-		// The test D1 applied its migrations minutes ago, so against the wall
-		// clock (not the file's 2030 NOW) the grace holds.
 		const wallClock = { db: deps.db, now: () => Date.now() };
 		expect(await backupStale(wallClock, ENABLED)).toEqual([]);
 	});

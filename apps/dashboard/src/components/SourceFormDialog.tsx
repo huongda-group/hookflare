@@ -85,13 +85,6 @@ function SimpleSelect({
 	);
 }
 
-/**
- * Create: the whole discriminated body is validated by createSourceRequest.
- * Edit: auth_type is fixed (M3 stores it per source), and the strict patch
- * schema rejects project_id, auth_type, and secret, so they never appear in
- * the edit values. The project and destination pickers page past the old
- * single-page limit (spec §7); auth selects stay plain selects.
- */
 export function SourceFormDialog({
 	open,
 	onOpenChange,
@@ -105,7 +98,6 @@ export function SourceFormDialog({
 	source?: Source;
 	onCreated?: (secret: string | null) => void;
 }) {
-	// Unmount on close so every open starts from the current source.
 	if (!open) return null;
 	return (
 		<SourceForm
@@ -157,10 +149,6 @@ function SourceForm({
 
 	const setAuthType = (t: Values["auth_type"]) => {
 		form.setValue("auth_type", t);
-		// Hidden fields keep their values (shouldUnregister is off), and the strict
-		// create schema rejects a `secret` key (even an undefined one) for
-		// auth_type "none" with an error no visible field shows. Remove the key,
-		// and every auth-specific error, on each switch.
 		form.unregister("secret");
 		form.clearErrors(["secret", "auth_config"]);
 		form.setValue(

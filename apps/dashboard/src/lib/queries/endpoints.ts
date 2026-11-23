@@ -68,7 +68,6 @@ export function useDestination(id: string, projectId: string) {
 	});
 }
 
-/** Spec §11: the destination detail page lists its test deliveries. */
 export function useDestinationTests(id: string, projectId: string) {
 	return useInfiniteQuery({
 		queryKey: qk.destinations.tests(id, projectId),

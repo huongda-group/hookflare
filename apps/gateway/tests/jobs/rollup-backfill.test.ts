@@ -40,7 +40,6 @@ describe("rollup backfill", () => {
 			.from(statsHourly)
 			.where(eq(statsHourly.projectId, p.project.id));
 		expect(stats).toMatchObject([{ hour: T - 20 * HOUR_MS, received: 1 }]);
-		// A fourth run does no backfill work.
 		expect((await run()).backfill_before).toBe("done");
 	});
 
@@ -50,7 +49,6 @@ describe("rollup backfill", () => {
 		const deps = { ...testDeps(), now: () => T + 60_000 };
 		await setCursor(deps, JSON.stringify({ before: 1 }));
 		const report = await rollup(deps, logger);
-		// Recent hours are T, T-1h, T-2h; a restarted backfill starts below them.
 		expect(report.hours.slice(3)[0]).toBe(T - 3 * HOUR_MS);
 		expect(report.backfill_before).toBe(T - 8 * HOUR_MS);
 	});
@@ -59,7 +57,6 @@ describe("rollup backfill", () => {
 		const old = { ...testDeps(), now: () => T - 20 * HOUR_MS + 60_000 };
 		const p = await seedPipeline(old);
 		await seedDelivery(old, p);
-		// Two hours of backfill remain: T-19h and T-20h.
 		const deps = { ...testDeps(), now: () => T - 16 * HOUR_MS + 60_000 };
 		await setCursor(deps, JSON.stringify(T - 18 * HOUR_MS));
 		const report = await rollup(deps, logger);
@@ -73,7 +70,6 @@ describe("rollup backfill", () => {
 		await seedDelivery(old, p);
 		const base = { ...testDeps(), now: () => T + 60_000 };
 		await setCursor(base, JSON.stringify(T - 10 * HOUR_MS));
-		// The 3 recent hours succeed; the second backfill hour fails.
 		const deps = faultyDeps(base, {
 			d1: [{ match: /delete from "stats_hourly"/i, on: { nth: 5 } }],
 		});

@@ -10,12 +10,7 @@ import { readSetting, STORAGE_SETTING } from "./settings";
 export type BackupParams = {
 	backupId: string;
 	trigger: "cron" | "manual";
-	/**
-	 * Table names the first instance listed. A continuation backs up exactly
-	 * these, so a migration between instances cannot shift the resume point.
-	 */
 	tables?: string[];
-	/** Where a continuation picks up: the table by name, not by index. */
 	resume?: {
 		tableName: string;
 		cursor: string | number | null;
@@ -31,7 +26,6 @@ export type StartBackupOpts = {
 	resume?: BackupParams["resume"];
 };
 
-/** A fresh `running` row whose first instance ID is the backup ID. */
 export function newBackupRow(
 	now: number,
 	backupId: string,
@@ -60,12 +54,6 @@ async function moveInstance(
 		.where(eq(backups.id, backupId));
 }
 
-/**
- * Records the `backups` row (`running`, prefix `d1/YYYY/MM/DD/<id>/`), then
- * creates the backup Workflow instance. A continuation passes its
- * existing `backupId` plus `resume`: only the instance ID on the row moves.
- * A duplicate instance ID means this backup already started.
- */
 export async function startBackupRun(
 	deps: Deps,
 	opts: StartBackupOpts,
@@ -73,8 +61,6 @@ export async function startBackupRun(
 ): Promise<"started" | "duplicate"> {
 	const backupId = opts.backupId ?? opts.instanceId;
 	if (!opts.backupId) {
-		// Row first: its primary key and the one-running index decide whether
-		// this run may start before any Workflow instance exists.
 		try {
 			await deps.db
 				.insert(backups)
@@ -97,8 +83,6 @@ export async function startBackupRun(
 		});
 	} catch (err) {
 		if (/already.?exists|duplicate/i.test(String(err))) {
-			// A retried `continue` step: create landed last time but the step
-			// failed before the UPDATE did. Moving the instance ID is idempotent.
 			if (opts.backupId)
 				await moveInstance(deps, opts.backupId, opts.instanceId);
 			logger.info("backup.already_started", { instance_id: opts.instanceId });
@@ -124,13 +108,6 @@ export async function startBackupRun(
 	return "started";
 }
 
-/**
- * True while any `running` row's instance is still live (`ARCHIVE_RUNNING`
- * or `unknown`: adopting a live instance's backup would run it twice). A
- * row whose instance is gone from Workflows retention (`instance lost`) or
- * ended as errored, terminated, or complete (`instance <status>`) is marked
- * `failed`, so the next cron starts over.
- */
 export async function isBackupRunning(deps: Deps): Promise<boolean> {
 	const rows = await deps.db
 		.select()
@@ -150,17 +127,11 @@ export async function isBackupRunning(deps: Deps): Promise<boolean> {
 			(ARCHIVE_RUNNING as readonly string[]).includes(status)
 		)
 			return true;
-		// errored, terminated, or complete while the row still says running:
-		// the run ended without recording its outcome.
 		await failStale(deps, row, `instance ${status}`);
 	}
 	return false;
 }
 
-/**
- * Fails a stale `running` row, but only if it still points at the same
- * instance: a continuation may have moved it since it was read.
- */
 async function failStale(
 	deps: Deps,
 	row: { id: string; instanceId: string },
@@ -178,7 +149,6 @@ async function failStale(
 		);
 }
 
-/** The admin Overview's backup card: newest verified, failed, and running rows. */
 export async function readBackupSummary(deps: Deps): Promise<BackupSummary> {
 	const { value: storage } = await readSetting(deps.db, STORAGE_SETTING);
 	const rows = await deps.db

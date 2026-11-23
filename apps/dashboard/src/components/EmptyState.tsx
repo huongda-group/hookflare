@@ -2,10 +2,6 @@ import { Inbox } from "lucide-react";
 import type { JSX, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
-/**
- * An honest empty state: what is missing, why, and the next authorized action
- * (spec §7). Distinguished from a failed load, which never renders this.
- */
 export function EmptyState({
 	title,
 	description,

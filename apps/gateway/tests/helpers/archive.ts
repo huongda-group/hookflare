@@ -3,7 +3,6 @@ import { archiveBatches, archiveParts } from "../../src/core/db/schema";
 import { newId } from "../../src/core/ids";
 import type { Deps } from "../../src/deps";
 
-/** Archive tests own every event older than a year in the shared D1. */
 export async function isolateArchive(deps: Deps) {
 	await deps.db.delete(archiveParts);
 	await deps.db.delete(archiveBatches);

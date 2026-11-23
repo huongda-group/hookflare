@@ -31,7 +31,6 @@ export function TestDeliveryDialog({
 	projectId: string;
 }) {
 	const qc = useQueryClient();
-	// The gateway accepts a custom payload only from config.write holders.
 	const canCustomize = useCan("config.write");
 	const [text, setText] = useState("");
 	const [invalid, setInvalid] = useState<string | null>(null);
@@ -64,7 +63,7 @@ export function TestDeliveryDialog({
 		<Dialog
 			open={open}
 			onOpenChange={(o) => {
-				/* istanbul ignore else -- @preserve unreachable: Radix calls onOpenChange(true) only from a Trigger, and this dialog has none */
+				/* istanbul ignore else -- @preserve */
 				if (!o) m.reset();
 				onOpenChange(o);
 			}}

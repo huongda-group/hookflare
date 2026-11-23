@@ -16,15 +16,12 @@ import { faultyDeps } from "../helpers/faults";
 
 beforeEach(seedAdminProject);
 
-/** A valid initial password; POST /users requires one. */
 const PASSWORD = "correct-horse-battery";
 const NEW_PASSWORD = "rotated-horse-battery";
 const ORIGIN = "https://hookflare.example.com";
 
-/** Every test starts from migrations, so the only admin is whoever we create. */
 async function soleAdmin(deps: ReturnType<typeof testDeps>) {
 	const api = await adminApp(deps, { role: "admin" });
-	// Drop every other admin, keeping this app's row (and session) intact.
 	await deps.db
 		.delete(users)
 		.where(and(eq(users.role, "admin"), ne(users.username, api.username)));
@@ -90,13 +87,10 @@ describe("/users", () => {
 		await api.request("PATCH", `/users/${target.username}`, {
 			disabled: true,
 		});
-		// Disabling deletes the user's sessions in the same batch, so the next
-		// request is rejected (401).
 		expect((await target.request("GET", "/me")).status).toBe(401);
 		await api.request("PATCH", `/users/${target.username}`, {
 			disabled: false,
 		});
-		// Re-enabling does not resurrect a deleted session; the row is active.
 		const [row] = await deps.db
 			.select()
 			.from(users)
@@ -125,7 +119,6 @@ describe("/users", () => {
 	it("does not count a password-less legacy admin as an active admin", async () => {
 		const deps = testDeps();
 		const api = await soleAdmin(deps);
-		// A migrated Access identity: an admin row nobody can log in as.
 		await deps.db.insert(users).values({
 			username: uniqueUsername("legacy"),
 			role: "admin",
@@ -337,9 +330,7 @@ describe("/users", () => {
 			},
 		);
 		expect(res.status).toBe(204);
-		// The only reason this 401s is that the session row was deleted.
 		expect((await target.request("GET", "/me")).status).toBe(401);
-		// A reset assumes compromise, so tokens minted with the old password go too.
 		expect((await targetToken.request("GET", "/me")).status).toBe(401);
 
 		const [audit] = (await auditRows(deps, target.username)).filter(
@@ -389,7 +380,7 @@ describe("/users", () => {
 		expect(res.status).toBe(404);
 	});
 
-	it("deletes the user's session rows in the same batch as a disable", async () => {
+	it("deletes the user's session rows after a successful disable", async () => {
 		const deps = testDeps();
 		const api = await adminApp(deps, { role: "admin" });
 		const target = await adminApp(deps, { role: "viewer" });

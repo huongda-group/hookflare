@@ -6,7 +6,6 @@ import type { Manifest } from "./manifest";
 
 export type VerifyResult = { ok: true } | { ok: false; error: string };
 
-/** Stored R2 sha256 back to lowercase hex whatever its runtime shape. */
 function storedHex(v: unknown): string | null {
 	if (v == null) return null;
 	if (typeof v === "string") {
@@ -20,11 +19,6 @@ function storedHex(v: unknown): string | null {
 	return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/**
- * Re-reads the manifest and HEADs every part: size and sha256 must match
- * what the manifest records. The first mismatch fails the backup; a failed
- * backup keeps its R2 objects so the cause can be inspected.
- */
 export async function verifyBackup(
 	deps: Pick<Deps, "db" | "backups" | "now">,
 	backupId: string,

@@ -48,7 +48,6 @@ describe("query client 403 handling", () => {
 			}),
 		);
 		const client = createQueryClient();
-		// An active observer, as AppShell has: an invalidation would refetch it.
 		const observer = new QueryObserver(client, {
 			queryKey: qk.me,
 			queryFn: () => api.get("/me"),

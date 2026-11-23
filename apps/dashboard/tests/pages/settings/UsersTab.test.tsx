@@ -163,7 +163,6 @@ describe("Settings › Users", () => {
 		await user.click(
 			await screen.findByRole("button", { name: "API tokens for op" }),
 		);
-		// The list shows names, never secrets.
 		expect(await screen.findByText("smoke")).toBeInTheDocument();
 		expect(screen.queryByText(/hf_/)).not.toBeInTheDocument();
 		await user.type(await screen.findByLabelText("Token name"), "bench");
@@ -171,7 +170,6 @@ describe("Settings › Users", () => {
 		await waitFor(() =>
 			expect(created).toHaveBeenCalledWith({ name: "bench" }),
 		);
-		// The plaintext is shown once, gated like every secret reveal.
 		expect(await screen.findByText("hf_new-secret-value")).toBeInTheDocument();
 		expect(
 			screen.getByLabelText("I have stored this secret"),
@@ -198,7 +196,6 @@ describe("Settings › Users", () => {
 		);
 		expect(await screen.findByText("No API tokens yet.")).toBeInTheDocument();
 		expect(listCalls).toBe(1);
-		// A token created elsewhere appears after refetch; revoke confirms first.
 		server.use(
 			http.get(apiUrl("/users/op/tokens"), () => {
 				listCalls++;
@@ -260,8 +257,6 @@ describe("Settings › Users", () => {
 			await screen.findByRole("button", { name: "Revoke token smoke" }),
 		);
 		await user.click(await screen.findByRole("button", { name: "Revoke" }));
-		// The ConfirmDialog catches the onConfirm rejection, shows it inline,
-		// and stays open instead of closing or refetching.
 		expect(await screen.findByText("internal")).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Revoke" })).toBeInTheDocument();
 	});
@@ -352,7 +347,6 @@ describe("Settings › Users", () => {
 		await user.click(screen.getByRole("button", { name: "Reset password" }));
 		expect(await screen.findByText(/locked/)).toBeInTheDocument();
 		await user.click(screen.getByRole("button", { name: "Cancel" }));
-		// The discard guard prompts because the form is dirty.
 		await user.click(
 			await screen.findByRole("button", { name: "Discard changes" }),
 		);
@@ -368,7 +362,7 @@ describe("Settings › Users", () => {
 		expect(screen.queryByText(/locked/)).not.toBeInTheDocument();
 	});
 
-	it("shows Active and Disabled badges and hides self actions", async () => {
+	it("shows Active and Disabled badges and offers only API tokens on the own row", async () => {
 		server.use(
 			http.get(apiUrl("/users"), () =>
 				HttpResponse.json({
@@ -395,7 +389,6 @@ describe("Settings › Users", () => {
 		expect(await screen.findByText("gone")).toBeInTheDocument();
 		expect(screen.getByText("Active")).toBeInTheDocument();
 		expect(screen.getByText("Disabled")).toBeInTheDocument();
-		// The signed-in admin cannot disable, reset, or token-manage themselves.
 		expect(
 			screen.queryByRole("button", { name: "Disable admin@example.com" }),
 		).not.toBeInTheDocument();
@@ -405,10 +398,10 @@ describe("Settings › Users", () => {
 			}),
 		).not.toBeInTheDocument();
 		expect(
-			screen.queryByRole("button", {
+			screen.getByRole("button", {
 				name: "API tokens for admin@example.com",
 			}),
-		).not.toBeInTheDocument();
+		).toBeInTheDocument();
 	});
 
 	it("prompts before discarding a dirty create form on navigation", async () => {
@@ -512,7 +505,6 @@ describe("Settings › Users", () => {
 		expect(
 			await screen.findByText(/op was signed out everywhere/),
 		).toBeInTheDocument();
-		// The footer button precedes the dialog's corner X, also named "Close".
 		await user.click(screen.getAllByRole("button", { name: "Close" })[0]);
 		await waitFor(() =>
 			expect(

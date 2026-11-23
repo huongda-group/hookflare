@@ -1,11 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { errorText } from "@/lib/forms";
 
-/**
- * A failed load: a human-readable explanation, the technical error code, and a
- * Retry that refetches (instead of "Loading…" forever). It is the one
- * initial-failure panel, shared with `DataState` (spec §7).
- */
 export function LoadError({
 	what,
 	error,

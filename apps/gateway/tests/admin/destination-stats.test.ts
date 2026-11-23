@@ -41,7 +41,7 @@ describe("GET /destinations/stats", () => {
 				lastError: "gone",
 			},
 		});
-		await seedDelivery(deps, p, { status: "retrying" }); // newest, not terminal
+		await seedDelivery(deps, p, { status: "retrying" });
 
 		const api = await adminApp(deps, { role: "viewer" });
 		const res = await api.request(

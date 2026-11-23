@@ -18,7 +18,6 @@ describe("POST /destinations/:id/test", () => {
 	});
 
 	it("sends a signed default payload and records the result", async () => {
-		// 204 must carry no body (workerd rejects a body on null-body statuses).
 		const fetch = vi.fn(async () => new Response(null, { status: 204 }));
 		const deps = testDeps({
 			fetch: fetch as unknown as typeof globalThis.fetch,
@@ -66,7 +65,6 @@ describe("POST /destinations/:id/test", () => {
 				payload_sha256: await sha256Hex(new TextDecoder().decode(sent)),
 			},
 		});
-		// Tests never touch the delivery pipeline.
 		expect(
 			await deps.db
 				.select()
@@ -126,7 +124,6 @@ describe("POST /destinations/:id/test", () => {
 		);
 		expect(new Headers(init.headers).get("x-hookflare-test")).toBe("1");
 		const [audit] = await auditRows(deps, destination.id);
-		// Only the hash of the payload is audited, never the payload itself.
 		expect(audit.diffJson).toMatchObject({
 			payload_sha256: await sha256Hex('{"hello":"world"}'),
 		});

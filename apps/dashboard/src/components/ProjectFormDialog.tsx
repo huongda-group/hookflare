@@ -36,7 +36,6 @@ export function ProjectFormDialog({
 	onOpenChange: (o: boolean) => void;
 	project?: Project;
 }) {
-	// Unmount on close so every open starts from the current project.
 	if (!open) return null;
 	return <ProjectForm project={project} onDone={() => onOpenChange(false)} />;
 }
@@ -64,7 +63,6 @@ function ProjectForm({
 				await api.patch(`/projects/${project.id}`, { name: values.name });
 			else {
 				await api.post("/projects", values);
-				// A focus refetch started before creation could still return "required".
 				await qc.cancelQueries({ queryKey: qk.me });
 				qc.setQueryData<Me>(qk.me, (me) =>
 					me ? { ...me, project_required: false } : me,

@@ -1,9 +1,7 @@
 import { sql } from "drizzle-orm";
 import type { Db } from "../../deps";
 
-/** Rows per part for tables without BLOB columns. */
 export const PAGE_SIZE = 5000;
-/** Rows per part when any column is a BLOB: bodies can be 64 KiB each. */
 export const BLOB_PAGE_SIZE = 250;
 
 export type TableInfo = {
@@ -26,23 +24,14 @@ type PragmaFk = {
 	to: string;
 };
 
-/** Table names come from sqlite_schema, so quoting them back is safe. */
 function ident(name: string): string {
 	return `"${name.replace(/"/g, '""')}"`;
 }
 
-/** Pragma table functions take the table name as a string literal. */
 function literal(name: string): string {
 	return `'${name.replace(/'/g, "''")}'`;
 }
 
-/**
- * Parents before children (ties by name). The dump reads tables minutes
- * apart, so a row created between two reads is caught as an orphan child
- * (reported by the restore) instead of a parent silently missing its
- * children, e.g. an accepted event restored without its delivery.
- * Self references are ignored; a cycle keeps the remaining tables by name.
- */
 export function parentsFirst(tables: TableInfo[]): TableInfo[] {
 	const names = new Set(tables.map((t) => t.name));
 	const pending = [...tables].sort((a, b) => a.name.localeCompare(b.name));
@@ -62,12 +51,6 @@ export function parentsFirst(tables: TableInfo[]): TableInfo[] {
 	return order;
 }
 
-/**
- * Every user table in this D1, parents first (see `parentsFirst`): internal `sqlite_*` tables,
- * Cloudflare `_cf_*` bookkeeping, and the migration journal are skipped.
- * A table pages by its single-column primary key, or by rowid when it has
- * none (or a composite one, whose leading column alone is not unique).
- */
 export async function listTables(db: Db): Promise<TableInfo[]> {
 	const rows = await db.all<{ name: string }>(
 		sql`SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name`,

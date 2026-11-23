@@ -35,7 +35,6 @@ describe("sha256Hex", () => {
 	});
 
 	it("hashes UTF-8 bytes, not UTF-16 code units", async () => {
-		// SHA-256 of the UTF-8 bytes c3 a9 ("é").
 		await expect(sha256Hex("é")).resolves.toBe(
 			"4a99557e4033c3539de2eb65472017cad5f9557f7a0625a09f1c3f6e2ba69c4c",
 		);
@@ -63,7 +62,6 @@ describe("timingSafeEqual", () => {
 	it("compares UTF-8 bytes", () => {
 		expect(timingSafeEqual("pässwörd", "pässwörd")).toBe(true);
 		expect(timingSafeEqual("pässwörd", "passwörd")).toBe(false);
-		// Same code-point count, different UTF-8 length.
 		expect(timingSafeEqual("é", "e")).toBe(false);
 	});
 });

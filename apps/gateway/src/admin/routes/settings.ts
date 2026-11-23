@@ -45,7 +45,6 @@ function toSettings(s: Awaited<ReturnType<typeof readAll>>): Settings {
 	};
 }
 
-/** Spec §7.3 (M4) + §6.5 (M5b). Every role reads; only admins write. */
 export function settingsRoutes() {
 	const routes = new Hono<AppBindings>();
 
@@ -67,12 +66,8 @@ export function settingsRoutes() {
 		if (!body.ok) return body.response;
 		const { db, now } = c.var.deps;
 		const before = await readAll(db);
-		const actor =
-			c.var.actor?.username ??
-			/* istanbul ignore next -- @preserve unreachable: requirePermission already rejected a request without an actor */ "";
+		const actor = c.var.actor?.username ?? /* istanbul ignore next */ "";
 		const reason = body.value.reason;
-		// Each section is its own compare-and-swap row; updated_at must move even
-		// when two writes share a millisecond.
 		const sections: {
 			key: string;
 			before: unknown;
@@ -118,10 +113,6 @@ export function settingsRoutes() {
 				}),
 			];
 		});
-		// Another PATCH may land between our read and write, making `before` stale.
-		// An empty RETURNING does not roll back the batch, so a guard runs first:
-		// when any section moved, it inserts a NULL value_json, the NOT NULL
-		// constraint fails, and D1 rolls back every section and audit row.
 		const unchanged = sql.join(
 			sections.map(
 				(s) =>

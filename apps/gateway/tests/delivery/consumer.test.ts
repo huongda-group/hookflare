@@ -129,7 +129,6 @@ describe("processDelivery", () => {
 		expect(new Uint8Array(init.body as ArrayBuffer)).toEqual(bytes);
 		const headers = new Headers(init.headers);
 		expect(headers.get("content-type")).toBe("application/gzip");
-		// The signature covers the exact bytes, not a text re-encoding.
 		expect(headers.get("webhook-signature")).toBe(
 			await signWebhook({
 				id: deliveryId,
@@ -358,7 +357,6 @@ describe("readSnippet", () => {
 		const onCancel = vi.fn();
 		const snippet = await readSnippet(new Response(endlessBody(onCancel)));
 		expect(snippet).toHaveLength(2048);
-		// Stop pulling from the backend once the cap is reached.
 		await vi.waitFor(() => expect(onCancel).toHaveBeenCalled());
 	});
 
@@ -581,7 +579,6 @@ describe("processDelivery retries (M2)", () => {
 				nextAttemptAt: T0 + 29_500,
 			},
 		});
-		// Acked, not re-delayed: native retries would push the message toward the DLQ.
 		expect(await processDelivery(deps, deliveryId, logger)).toEqual({
 			action: "ack",
 		});
@@ -711,7 +708,6 @@ describe("processDelivery retries (M2)", () => {
 	);
 
 	it.each([
-		// The blocked verdict is settled inside the SSRF try block, so the log says "ssrf".
 		[
 			"an SSRF-blocked destination",
 			"ssrf",
@@ -832,7 +828,6 @@ describe("handleDeliveryBatch", () => {
 	it("retries only the message whose processing throws unexpectedly", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-		// A throw outside every guarded stage: the not-found log line itself.
 		vi.spyOn(console, "warn").mockImplementation((line: string) => {
 			if (JSON.parse(line).msg === "delivery.not_found")
 				throw new Error("boom");

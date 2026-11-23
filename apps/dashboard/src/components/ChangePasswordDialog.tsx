@@ -13,7 +13,6 @@ import { ApiError } from "@/lib/api";
 import { errorText } from "@/lib/forms";
 import { changePassword } from "@/lib/queries/auth";
 
-/** Spec M7 §6.6: any logged-in user changes their own password here. */
 export function ChangePasswordDialog({
 	open,
 	onOpenChange,
@@ -25,7 +24,6 @@ export function ChangePasswordDialog({
 }) {
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			{/* Unmounts on close, so every open starts with empty fields. */}
 			<DialogContent onCloseAutoFocus={onCloseAutoFocus}>
 				<ChangePasswordForm onOpenChange={onOpenChange} />
 			</DialogContent>
@@ -45,8 +43,6 @@ function ChangePasswordForm({
 	const [saved, setSaved] = useState(false);
 	const [busy, setBusy] = useState(false);
 
-	// Client-side only; the server re-checks length (never trimmed),
-	// equality with the username, and the current password.
 	const clientError =
 		next.length > 0 && next.length < PASSWORD_MIN_LENGTH
 			? `New password must be at least ${PASSWORD_MIN_LENGTH} characters`
@@ -58,7 +54,6 @@ function ChangePasswordForm({
 		setBusy(true);
 		setError(null);
 		try {
-			// Never trimmed: spaces are significant (spec M7 §6.2).
 			await changePassword({ current_password: current, new_password: next });
 			setSaved(true);
 		} catch (err) {

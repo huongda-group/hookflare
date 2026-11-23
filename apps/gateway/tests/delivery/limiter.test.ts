@@ -7,7 +7,6 @@ import type {
 } from "../../src/delivery/limiter";
 
 let n = 0;
-/** A fresh DO per test: the namespace is shared by the whole run. */
 function stub() {
 	return env.LIMITER.get(env.LIMITER.idFromName(`test-${Date.now()}-${n++}`));
 }
@@ -26,7 +25,6 @@ describe("DestinationLimiter", () => {
 		const b = await at(s, inFlight2, T0);
 		const c = await at(s, inFlight2, T0);
 		expect(a.ok && b.ok).toBe(true);
-		// The earliest slot expires 40 s away; waiting for it would idle the backend.
 		expect(c).toEqual({ ok: false, reason: "in_flight", retryAfterMs: 5_000 });
 		if (!a.ok) throw new Error("unreachable");
 		await rel(s, a.slotId);
@@ -47,7 +45,6 @@ describe("DestinationLimiter", () => {
 		await at(s, inFlight2, T0);
 		await at(s, inFlight2, T0 + 1_000);
 		const blocked = await at(s, inFlight2, T0 + 37_000);
-		// Earliest slot expires at T0 + 40 s: 3 s away.
 		expect(blocked).toEqual({
 			ok: false,
 			reason: "in_flight",
@@ -78,7 +75,6 @@ describe("DestinationLimiter", () => {
 			reason: "rate",
 			retryAfterMs: 200,
 		});
-		// 200 ms later exactly one token is back.
 		expect((await at(s, rate, T0 + 200)).ok).toBe(true);
 		expect((await at(s, rate, T0 + 200)).ok).toBe(false);
 	});
@@ -93,9 +89,7 @@ describe("DestinationLimiter", () => {
 			waits.push(r.ok ? 0 : r.retryAfterMs);
 		}
 		expect(waits).toEqual([200, 400, 600]);
-		// Rejections reserve nothing: a token is still back after 200 ms.
 		expect((await at(s, rate, T0 + 200)).ok).toBe(true);
-		// The next hint continues after the ones already given out.
 		expect(await at(s, rate, T0 + 200)).toEqual({
 			ok: false,
 			reason: "rate",

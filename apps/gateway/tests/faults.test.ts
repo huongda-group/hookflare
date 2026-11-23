@@ -30,7 +30,6 @@ describe("fault injection", () => {
 
 	it("works underneath drizzle", async () => {
 		const deps = faultyDeps(testDeps(), { d1: [{ match: /from "projects"/ }] });
-		// drizzle wraps driver errors in DrizzleQueryError; the fault surfaces as `cause`.
 		const err = await deps.db.query.projects.findFirst().then(
 			() => null,
 			(e: unknown) => e as Error & { cause?: unknown },
@@ -55,7 +54,7 @@ describe("fault injection", () => {
 
 	it("writes neither the mutation nor the audit row when the batch fails", async () => {
 		const base = testDeps();
-		await (await adminApp(base)).request("GET", "/me"); // bootstrap outside the fault
+		await (await adminApp(base)).request("GET", "/me");
 		const deps = faultyDeps(base, {
 			d1: [{ match: /insert into "audit_logs"/i }],
 		});

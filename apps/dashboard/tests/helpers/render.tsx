@@ -17,7 +17,6 @@ export async function chooseProject(
 	await user.click(await screen.findByRole("option", { name }));
 }
 
-/** Renders the real route tree at `path`, signed in as `role` (default admin). */
 export function renderApp(path: string, opts: { role?: Role } = {}) {
 	if (opts.role) {
 		const me = meFor(opts.role);

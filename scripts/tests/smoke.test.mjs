@@ -11,14 +11,6 @@ import {
 	smokeUrlVar,
 } from "../lib/smoke.mjs";
 
-/**
- * Build a fake SmokeApi whose deliveries turn delivered on the third poll
- * and whose replay delivery is delivered immediately. The sink reports the
- * initial delivery and the replay: two receives under two webhook IDs
- * (the gateway's webhook-id is the delivery ID, and a replay is a new
- * delivery of the same event).
- * @returns {{ api: object, calls: { deliveries: number, sleep: number } }}
- */
 function happyApi() {
 	const calls = { deliveries: 0, sleep: 0 };
 	let replayed = null;
@@ -119,22 +111,14 @@ const smokeTestEnv = {
 	sinkUrl: "https://sink.example.com",
 };
 
-/**
- * In-memory admin API for httpSmokeApi: pages lists at the requested
- * limit (rejecting limit > 100 like the shared pageLimit), and records
- * every mutating call.
- * @param {{ projects?: object[], destinations?: object[], sources?: object[] }} [seed]
- */
 function fakeAdmin(seed = {}) {
 	const store = {
 		projects: seed.projects ?? [],
 		destinations: seed.destinations ?? [],
 		sources: seed.sources ?? [],
 	};
-	/** @type {{ method: string, path: string, body: any }[]} */
 	const mutations = [];
 	const ingress = {};
-	/** Authorization headers seen on admin API calls. */
 	const headers = [];
 	let n = 0;
 	const json = (body, status = 200) =>
@@ -224,7 +208,6 @@ describe("httpSmokeApi", () => {
 		assert.ok(created.body.secret.length >= 16);
 		const eventId = await api.send();
 		assert.equal(eventId, "evt_smoke");
-		// The ingress signature must verify as HMAC-SHA256(secret, body).
 		const expected = createHmac("sha256", created.body.secret)
 			.update(admin.ingress.body)
 			.digest("hex");
@@ -714,12 +697,7 @@ describe("httpSmokeApi ordering guards", () => {
 });
 
 describe("httpSmokeApi requests", () => {
-	/**
-	 * Fetch fake that answers by `METHOD url` and records every call.
-	 * @param {Record<string, unknown>} routes
-	 */
 	function routed(routes) {
-		/** @type {{ key: string, init: any }[]} */
 		const calls = [];
 		const fetchFn = async (url, init = {}) => {
 			const key = `${init.method ?? "GET"} ${url}`;

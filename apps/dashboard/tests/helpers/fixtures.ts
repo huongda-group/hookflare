@@ -10,7 +10,7 @@ import type {
 	WebhookEvent,
 } from "@hookflare/shared";
 
-export const T = Date.UTC(2026, 9, 16, 3, 0, 0); // 10:00 in Asia/Ho_Chi_Minh
+export const T = Date.UTC(2026, 9, 16, 3, 0, 0);
 
 export const project = (o: Partial<Project> = {}): Project => ({
 	id: "prj_1",

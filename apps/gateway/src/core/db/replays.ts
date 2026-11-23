@@ -3,14 +3,7 @@ import type { Db } from "../../deps";
 import { TERMINAL } from "./deliveries";
 import { type DeliveryRow, deliveries } from "./schema";
 
-/**
- * Unexecuted conditional insert of one replay delivery: it inserts only while
- * no non-terminal replay of the same event and destination exists, checked
- * inside the statement, so two concurrent replays that both passed precheck
- * create one row. `.returning()` yields the row only when it was inserted.
- */
 export function insertReplayIfIdleStmt(db: Db, row: DeliveryRow) {
-	// `insert().select()` requires every column, in declaration order.
 	const fields = Object.fromEntries(
 		Object.entries(getTableColumns(deliveries)).map(([key, column]) => [
 			key,

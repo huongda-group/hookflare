@@ -36,7 +36,6 @@ export function useEventsPage(f: EventFilters) {
 	});
 }
 
-/** Polls only while something can still change (spec §9.2). */
 export function useEvent(id: string, projectId: string) {
 	return useQuery({
 		queryKey: qk.events.one(id, projectId),

@@ -16,7 +16,6 @@ import { createQueryClient } from "@/router";
 import { destination, source } from "../helpers/fixtures";
 import { apiUrl, server } from "../helpers/server";
 
-/** Applies each patch to URL-like state, the way EventsPage does. */
 function Harness({
 	initial,
 	onApply,
@@ -75,7 +74,6 @@ describe("EventFilters", () => {
 
 		await user.clear(httpInput);
 		await user.type(httpInput, "503");
-		// Any other key just edits the draft.
 		expect(onApply).not.toHaveBeenCalled();
 		await user.keyboard("{Enter}");
 		expect(onApply).toHaveBeenLastCalledWith({
@@ -163,7 +161,6 @@ describe("EventFilters", () => {
 		expect(onApply).not.toHaveBeenCalled();
 
 		await user.click(screen.getByRole("button", { name: "Apply filters" }));
-		// Local time in Asia/Ho_Chi_Minh (UTC+7).
 		expect(onApply).toHaveBeenLastCalledWith({
 			provider_event_id: undefined,
 			http_status: undefined,

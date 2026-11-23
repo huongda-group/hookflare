@@ -330,7 +330,6 @@ describe("Settings › Storage", () => {
 			},
 		]);
 
-		// Saved values are the new baseline: leaving the page must not prompt.
 		await user.click(screen.getByRole("link", { name: "Projects" }));
 		await waitFor(() =>
 			expect(router.state.location.pathname).toBe("/projects"),

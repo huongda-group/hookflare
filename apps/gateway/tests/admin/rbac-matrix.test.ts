@@ -31,7 +31,6 @@ type Case = {
 	body?: unknown;
 };
 
-/** One request per guarded endpoint (spec §6.3). IDs are filled per test. */
 function cases(ids: {
 	project: string;
 	source: string;

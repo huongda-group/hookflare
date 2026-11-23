@@ -1,4 +1,3 @@
-/** Reads at most `cap` bytes; null means the body is larger than `cap`. */
 export async function readCappedBody(
 	request: Request,
 	cap: number,

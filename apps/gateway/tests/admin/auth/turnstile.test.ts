@@ -18,7 +18,6 @@ const INPUT = {
 	hostname: "hooks.example.com",
 };
 
-/** A fetch stub returning a JSON body; the args are recorded for assertions. */
 function fetchStub(body: unknown, status = 200) {
 	return vi.fn(
 		async (_input: RequestInfo | URL, _init?: RequestInit) =>
@@ -44,7 +43,6 @@ describe("turnstileConfig", () => {
 
 	it("is off when neither key is set", () => {
 		expect(turnstileConfig(testEnv())).toEqual({ mode: "off" });
-		// Secrets are absent (not "") when never put.
 		expect(
 			turnstileConfig(
 				testEnv({

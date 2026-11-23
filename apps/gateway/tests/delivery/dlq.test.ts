@@ -32,7 +32,6 @@ describe("DLQ consumer", () => {
 			).map((status, i) =>
 				seedDelivery(deps, p, {
 					status,
-					// [2] lease expired, [3] lease still live.
 					delivery: {
 						leaseUntil:
 							status === "in_flight" ? (i === 2 ? T0 - 1 : T0 + 1) : null,

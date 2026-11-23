@@ -48,10 +48,6 @@ type Values = {
 	rate_limit_per_s?: number | null;
 };
 
-/**
- * Empty policy fields mean "use the default"; on edit, emptying sends null
- * (spec §10). Creation uses the active project; the patch body cannot change it.
- */
 export function DestinationFormDialog({
 	open,
 	onOpenChange,
@@ -65,7 +61,6 @@ export function DestinationFormDialog({
 	destination?: Destination;
 	onCreated?: (secret: string) => void;
 }) {
-	// Unmount on close so every open starts from the current destination.
 	if (!open) return null;
 	return (
 		<DestinationForm

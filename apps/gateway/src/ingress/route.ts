@@ -26,7 +26,6 @@ async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
 	return [...digest].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** Public ingress (spec §6). Must not import from admin/. */
 export function ingressRoutes() {
 	const routes = new Hono<AppBindings>();
 
@@ -47,7 +46,6 @@ export function ingressRoutes() {
 			return c.json({ error }, status);
 		};
 
-		// 1. Source bundle (cached 30 s, including not-found).
 		if (!isId(sourceId, "src")) {
 			return reject(404, "not_found");
 		}
@@ -75,12 +73,10 @@ export function ingressRoutes() {
 		}
 		const { source, secret } = bundle;
 
-		// 2. Rate limit per source.
 		let success: boolean;
 		try {
 			({ success } = await deps.env.INGRESS_LIMITER.limit({ key: sourceId }));
 		} catch (err) {
-			// A limiter outage is ours, not the sender's: 503 so the provider retries.
 			logger.error("ingress.limiter_failed", {
 				source_id: sourceId,
 				error: String(err),
@@ -91,12 +87,10 @@ export function ingressRoutes() {
 			return reject(429, "rate_limited");
 		}
 
-		// 3. Raw body, capped.
 		let body: Uint8Array<ArrayBuffer> | null;
 		try {
 			body = await readCappedBody(c.req.raw, bodyCap(source.maxBodyBytes));
 		} catch (err) {
-			// The client went away mid-upload: their fault, not ours.
 			return reject(400, "invalid_request", "body_read_failed", {
 				error: String(err),
 			});
@@ -105,7 +99,6 @@ export function ingressRoutes() {
 			return reject(413, "payload_too_large", "too_large");
 		}
 
-		// 4. Verify against the raw bytes: current secret, then the previous one in grace (spec §11.1).
 		const url = new URL(c.req.url);
 		const verify = (s: string | null) =>
 			verifiers[source.authType].verify({
@@ -137,7 +130,6 @@ export function ingressRoutes() {
 			});
 		}
 
-		// 5. Parse only after verification; a known provider event id is a duplicate.
 		const providerEventId = extractEventId(
 			source.eventIdFrom,
 			source.eventIdSelector,
@@ -166,7 +158,6 @@ export function ingressRoutes() {
 			return c.json({ error: "unavailable" }, 503);
 		}
 
-		// 6. Prepare; redact credentials before storage.
 		const now = deps.now();
 		const eventId = newId("evt", now);
 		const deliveryId = newId("dlv", now);
@@ -175,7 +166,6 @@ export function ingressRoutes() {
 		const contentType = c.req.header("content-type") ?? null;
 		const payloadSha256 = await sha256Hex(body);
 
-		// 6b. Large bodies go to R2 before D1 references them.
 		const r2Key =
 			body.byteLength > INLINE_BODY_LIMIT ? payloadKey(eventId, now) : null;
 		if (r2Key) {
@@ -193,7 +183,6 @@ export function ingressRoutes() {
 				return c.json({ error: "unavailable" }, 503);
 			}
 		}
-		// Best effort: an orphan object is harmless (spec §6.2).
 		const dropPayload = async () => {
 			if (!r2Key) return;
 			try {
@@ -206,7 +195,6 @@ export function ingressRoutes() {
 			}
 		};
 
-		// 7. Store event + delivery atomically; a paused destination holds the delivery.
 		const paused = bundle.destinationStatus === "paused";
 		try {
 			await insertEventWithDelivery(deps, {
@@ -235,22 +223,13 @@ export function ingressRoutes() {
 				},
 			});
 		} catch (err) {
-			// D1 can throw after the batch committed. Delete the payload only when
-			// the event is known to be absent; otherwise a stored event would lose
-			// its body (the reconciler still enqueues it). An orphan R2 object is
-			// harmless by comparison.
 			try {
 				if (!(await eventExists(deps.db, eventId))) await dropPayload();
-			} catch {
-				// Unknown: keep the payload.
-			}
-			// A concurrent request with the same provider event id won (spec §6.1).
+			} catch {}
 			try {
 				const existing = await findDuplicate();
 				if (existing) return duplicate(existing);
-			} catch {
-				// Fall through to 503 with the original error.
-			}
+			} catch {}
 			logger.error("ingress.store_failed", {
 				source_id: sourceId,
 				error: String(err),
@@ -268,10 +247,8 @@ export function ingressRoutes() {
 			});
 			return c.json({ event_id: eventId }, 202);
 		};
-		// Resume or reconcile rule (e) enqueues it later.
 		if (paused) return accepted();
 
-		// 8. Enqueue. On failure the delivery stays pending (reconcile rule a).
 		try {
 			await deps.queue.send({ deliveryId });
 		} catch (err) {
@@ -284,7 +261,6 @@ export function ingressRoutes() {
 			return c.json({ error: "unavailable" }, 503);
 		}
 
-		// 9. Best effort: the consumer also accepts pending deliveries.
 		try {
 			await markQueued(deps, deliveryId);
 		} catch (err) {

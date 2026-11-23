@@ -29,7 +29,6 @@ async function hmacHex(secret: string, body: string): Promise<string> {
 	return [...mac].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** Create project → destination → hmac source through the admin API. */
 async function setup(deps: Deps) {
 	const api = await adminApp(deps);
 	const project = await (
@@ -252,11 +251,11 @@ describe("reliability (M2 exit criteria)", () => {
 		expect(event.deliveries[0].attempts.map((a) => a.http_status)).toEqual([
 			503, 503, 200,
 		]);
-		expect(queue.sent).toHaveLength(3); // ingress + 2 reschedules
+		expect(queue.sent).toHaveLength(3);
 	});
 
 	it("still delivers to a backend that recovers after 48 h", async () => {
-		vi.spyOn(Math, "random").mockReturnValue(0); // shortest delays: worst case for the window
+		vi.spyOn(Math, "random").mockReturnValue(0);
 		let now = T0;
 		const { deps, queue, set } = clockedDeps(() =>
 			now < T0 + 48 * 3_600_000
@@ -295,7 +294,6 @@ describe("reliability (M2 exit criteria)", () => {
 			JSON.stringify({ id: "crash" }),
 		);
 		const id = queue.sent[0].deliveryId;
-		// The worker leased, then died before sending or recording.
 		await acquireLease(deps, id, T0 + 40_000);
 		set(T0 + 40_000 + 6 * 60_000);
 		await reconcile(deps);

@@ -4,7 +4,6 @@ import { DAY_MS } from "../../core/db/archive";
 import { backups } from "../../core/db/schema";
 import type { Deps } from "../../deps";
 
-/** R2 deletes land in chunks of 1,000 keys. */
 export const RETENTION_DELETE_BATCH = 1000;
 
 async function deletePrefix(
@@ -23,13 +22,6 @@ async function deletePrefix(
 	} while (cursor);
 }
 
-/**
- * Drops every backup older than `backup_retention_days` (by `started_at`),
- * except the newest `verified` one, which is always kept as the restore
- * fallback. The row is marked `expiring` before any object is deleted; a
- * backup whose R2 delete fails keeps that row so the next run retries it — the 7-day bucket lock makes recent deletes fail, which is
- * expected. Does nothing when `backup_enabled` is false.
- */
 export async function expireBackups(
 	deps: Pick<Deps, "db" | "backups">,
 	settings: StorageSettings,
@@ -47,8 +39,6 @@ export async function expireBackups(
 		if (row.startedAt >= cutoff) continue;
 		if (newestVerified && row.id === newestVerified.id) continue;
 		if (row.status === "running") continue;
-		// Leave `verified` first: a delete that fails halfway must not leave a
-		// row that still claims a complete, restorable backup.
 		if (row.status !== "expiring")
 			await deps.db
 				.update(backups)

@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import { readdirSync } from "node:fs";
 import { describe, it } from "node:test";
 
-// Node's coverage only reports files a test loads, so a lib module no test
-// imports would silently fall out of the 100% gate. Load all of them.
 describe("scripts/lib coverage completeness", () => {
 	it("imports every library module", async () => {
 		const dir = new URL("../lib/", import.meta.url);

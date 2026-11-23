@@ -21,12 +21,6 @@ const migrationsDir = join(
 	"migrations",
 );
 
-/**
- * List the migration files already on the base branch, or null when the
- * base ref is unavailable (fork or shallow checkout).
- * @param {string} base
- * @returns {Set<string> | null}
- */
 function baseFiles(base) {
 	try {
 		const out = execFileSync(
@@ -154,7 +148,6 @@ describe("checkMigrations", () => {
 				name,
 				sql: readFileSync(join(migrationsDir, name), "utf8"),
 			}));
-		// A file listed in contract.json is an accepted removal of an old shape.
 		const contract = JSON.parse(
 			readFileSync(join(migrationsDir, "contract.json"), "utf8"),
 		);

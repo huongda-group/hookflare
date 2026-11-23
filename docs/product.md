@@ -22,7 +22,7 @@ Payload transformation, fan-out, workflow editors, SaaS billing, and realtime We
 
 ## Source and verification entry points
 
-The files below define behavior and existing checks; listing a test does not mean it was run during this documentation change.
+The files below define this behavior and its tests.
 
 - [README.md](../README.md)
 - [apps/gateway/src/core/db/schema.ts](../apps/gateway/src/core/db/schema.ts)

@@ -1,10 +1,6 @@
 import type { AcquireRequest, AcquireResult } from "../../src/delivery/limiter";
 import type { Deps } from "../../src/deps";
 
-/**
- * Scripted limiter: each acquire returns the next scripted result (the last one
- * repeats); "throw" rejects and "hang" never settles. Records every call.
- */
 export function fakeLimiter(
 	script: AcquireResult[] | "throw" | "hang" = [{ ok: true, slotId: "slot-1" }],
 	options: { releaseFails?: boolean } = {},

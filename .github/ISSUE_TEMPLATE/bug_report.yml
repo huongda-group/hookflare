@@ -1,0 +1,45 @@
+name: Bug report
+description: Something in Hookflare does not work as documented.
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Hookflare version
+      description: Release tag or commit SHA.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Ingress
+        - Delivery / retries / replay
+        - Dashboard
+        - Login / API tokens / permissions
+        - Alerts
+        - Archival / backups
+        - Deploy / migrations
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Remove secrets, tokens, and payload contents first.
+      render: text

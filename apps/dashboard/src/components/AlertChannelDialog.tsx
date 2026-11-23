@@ -33,7 +33,6 @@ function serverMessage(err: unknown): string {
 	return String(err);
 }
 
-/** Config inputs are write-only: on edit, empty means "keep the current config" (spec §6.6). */
 export function AlertChannelDialog({
 	channel,
 	onOpenChange,
@@ -58,7 +57,6 @@ export function AlertChannelDialog({
 	);
 	const [error, setError] = useState<string | null>(null);
 	const [saving, setSaving] = useState(false);
-	// The ref blocks a second click that lands before the disabled state renders.
 	const inFlight = useRef(false);
 
 	const configTouched =
@@ -77,7 +75,7 @@ export function AlertChannelDialog({
 			setError("Enter the bot token again to change the chat ID");
 			return;
 		}
-		/* istanbul ignore if -- @preserve unreachable: React commits the disabled state synchronously after a discrete click, so a second click never reaches this handler; the ref is defense in depth */
+		/* istanbul ignore if -- @preserve */
 		if (inFlight.current) return;
 		inFlight.current = true;
 		setSaving(true);

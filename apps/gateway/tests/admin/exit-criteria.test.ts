@@ -23,7 +23,6 @@ describe("M3 exit criteria", () => {
 		const p = await seedPipeline(deps);
 		const logger = createLogger(deps.env, {});
 
-		// 1. Ingest one event; the backend answers 400 → failed_final.
 		const ingress = await createApp({ createDeps: () => deps }).request(
 			`/in/${p.source.id}`,
 			{
@@ -52,7 +51,6 @@ describe("M3 exit criteria", () => {
 		const before = await snapshot();
 		expect(before.delivery[0].status).toBe("failed_final");
 
-		// 2. Fix the backend, replay single and bulk.
 		status = 200;
 		const op = await adminApp(deps, { role: "operator" });
 		const single = await (
@@ -69,10 +67,8 @@ describe("M3 exit criteria", () => {
 		).json<{ replayed: { new_delivery_id: string }[] }>();
 		expect(bulk.replayed).toHaveLength(1);
 
-		// 3. The original delivery and its attempts are byte-for-byte unchanged.
 		expect(await snapshot()).toEqual(before);
 
-		// 4. Every replay delivery is named in exactly one delivery.replayed audit row.
 		const replays = await deps.db
 			.select({ id: deliveries.id })
 			.from(deliveries)

@@ -33,11 +33,6 @@ export function resourceLabel(a: Alert): string {
 
 const KNOWN_RULES: readonly string[] = ALERT_RULES;
 
-/**
- * A rule badge that survives a newer server: known rules render as-is, an
- * unknown rule string renders its raw value in a neutral badge with an
- * explicit "Unknown rule" note instead of breaking the row or the filter.
- */
 export function RuleBadge({ rule, open }: { rule: string; open: boolean }) {
 	if ((KNOWN_RULES as readonly string[]).includes(rule)) {
 		return <Badge variant={open ? "destructive" : "secondary"}>{rule}</Badge>;

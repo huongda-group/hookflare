@@ -17,11 +17,6 @@ import { verifyBatch } from "./verify";
 
 export type { StepFn };
 
-/**
- * Spec §7.4. Orchestration only: every step is a plain function over Deps.
- * Code outside a step must be deterministic (Workflows replays it), so time,
- * settings, and loop cursors come from persisted step results.
- */
 export async function runArchive(
 	step: StepFn,
 	deps: () => Deps,
@@ -48,7 +43,6 @@ export async function runArchive(
 						? buildEventPart(deps(), b.id, n, plan.cut, logger)
 						: buildAuditPart(deps(), b.id, n),
 				);
-				// A part of only lost payloads parked them; the day goes on.
 				if (r.itemCount === 0 && !r.parked) break;
 			}
 			const v = await step(`verify:${b.id}`, () => verifyBatch(deps(), b.id));
@@ -60,8 +54,6 @@ export async function runArchive(
 				continue;
 			}
 		}
-		// Every part verify covered, including parts an earlier attempt built
-		// past the point where this build loop stopped (Minor 5).
 		const parts = await step(`parts:${b.id}`, () => listParts(deps(), b.id));
 		for (const n of parts) {
 			if (b.kind === "audit") {

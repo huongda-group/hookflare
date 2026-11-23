@@ -43,7 +43,6 @@ describe("useEvent polling", () => {
 
 		await vi.advanceTimersByTimeAsync(15_000);
 		await waitFor(() => expect(calls).toBe(expected));
-		// Nothing extra fires on the next tick either.
 		await vi.advanceTimersByTimeAsync(1_000);
 		expect(calls).toBe(expected);
 	});

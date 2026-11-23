@@ -175,7 +175,6 @@ describe("recordLeasedAttempt", () => {
 		const p = await seedPipeline(deps);
 		const { deliveryId } = await seedDelivery(deps, p);
 		await acquireLease(deps, deliveryId, T0 + 1);
-		// Another worker re-leased after expiry.
 		await deps.db
 			.update(deliveries)
 			.set({ leaseUntil: T0 + 99 })

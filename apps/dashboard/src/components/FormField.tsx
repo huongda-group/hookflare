@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
-/** Layout for a stacked label, control, and optional help or validation. */
 export function FormField({
 	htmlFor,
 	label,

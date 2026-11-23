@@ -15,7 +15,6 @@ import {
 	valueLiteral,
 } from "../lib/restore-sql.mjs";
 
-/** Minimal manifest table: key, columns, and FKs only. */
 function table(
 	name,
 	{ key = { column: "id" }, columns = ["id"], fks = [] } = {},
@@ -270,7 +269,6 @@ describe("createOrphanFilter", () => {
 		};
 		const filter = createOrphanFilter(manifest);
 		filter.admit("projects", { id: "prj_1" });
-		// Children stream before their parents (forward references).
 		const rows = [
 			{ id: "n3", code: "c3", project_id: "prj_1", parent_code: "c2" },
 			{ id: "n2", code: "c2", project_id: "prj_1", parent_code: "c1" },
@@ -326,10 +324,6 @@ describe("createOrphanFilter", () => {
 	});
 });
 
-/**
- * Apply statements to an in-memory SQLite table shaped like `t` and
- * return the stored row with `typeof` per column.
- */
 function roundTrip(t, stmts) {
 	const db = new DatabaseSync(":memory:");
 	db.exec(
@@ -363,7 +357,6 @@ describe("rowStatements byte limits", () => {
 	const t = table("events", { columns: ["id", BODY, DATA] });
 
 	it("measures UTF-8 bytes, not UTF-16 units, and splits CJK text", () => {
-		// 40 000 CJK chars: 40 000 UTF-16 units, 120 000 UTF-8 bytes.
 		const body = "漢".repeat(40000);
 		const stmts = rowStatements(t, { id: "e1", body, data: null });
 		assert.ok(stmts.length > 1, "expected the TEXT to be split");
@@ -493,7 +486,6 @@ describe("SqlFileWriter", () => {
 	});
 });
 
-/** Manifest wrapper around a list of tables. */
 function manifestOf(tables) {
 	return {
 		version: 1,
@@ -750,8 +742,6 @@ describe("createOrphanFilter edge cases", () => {
 			rows.map((r) => filter.admit(nodes, r)),
 			[true, true, true],
 		);
-		// A row preload never saw falls back to the streaming self check:
-		// itself, an admitted row, or nothing.
 		assert.equal(filter.admit(nodes, { id: "n4", parent_code: "c3" }), true);
 		assert.equal(
 			filter.admit(nodes, { id: "n5", code: "c5", parent_code: "c5" }),

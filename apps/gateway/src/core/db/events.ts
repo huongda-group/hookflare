@@ -30,9 +30,6 @@ export type NewEvent = {
 	delivery: typeof deliveries.$inferInsert;
 };
 
-/** Event and its initial delivery commit together or not at all. A duplicate
- * provider event id makes the event insert a no-op, so the delivery insert
- * fails its FK and the batch rolls back (spec §6.1). */
 export async function insertEventWithDelivery(
 	deps: Deps,
 	input: NewEvent,
@@ -43,7 +40,6 @@ export async function insertEventWithDelivery(
 	]);
 }
 
-/** Whether an event row with this ID exists. */
 export async function eventExists(db: Db, eventId: string): Promise<boolean> {
 	const row = await db
 		.select({ id: webhookEvents.id })
@@ -88,7 +84,6 @@ export type EventDetail = {
 	deliveries: (DeliveryRow & { attempts: DeliveryAttemptRow[] })[];
 };
 
-/** Never selects body_inline: payload viewing is an Operator permission in M3. */
 export async function getEventDetail(
 	db: Db,
 	id: string,
@@ -151,11 +146,6 @@ export type EventFilter = {
 	limit: number;
 };
 
-/**
- * Spec §8.2. Event columns only; delivery filters are EXISTS subqueries so
- * an event with several matching deliveries appears once. Returns limit + 1
- * rows so the caller can tell whether a next page exists.
- */
 export async function searchEvents(db: Db, f: EventFilter) {
 	const where: (SQL | undefined)[] = [
 		f.projectId ? eq(webhookEvents.projectId, f.projectId) : undefined,
@@ -212,7 +202,6 @@ export async function searchEvents(db: Db, f: EventFilter) {
 		.all();
 }
 
-/** The highest-id (newest) delivery of each event (spec §8.2). */
 export async function latestDeliveries(
 	db: Db,
 	eventIds: string[],
@@ -225,12 +214,11 @@ export async function latestDeliveries(
 			.where(inArray(deliveries.eventId, chunk))
 			.orderBy(asc(deliveries.id))
 			.all();
-		for (const row of rows) out.set(row.eventId, row); // ascending: last wins
+		for (const row of rows) out.set(row.eventId, row);
 	}
 	return out;
 }
 
-/** The only reader of event bodies on the admin side (spec §8.3). */
 export async function getEventPayloadRef(
 	db: Db,
 	id: string,

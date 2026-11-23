@@ -1,5 +1,3 @@
-// wrangler fails when assets.directory is missing (spec §8). Dev and gateway
-// tests do not need a real dashboard build, so write a placeholder.
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";

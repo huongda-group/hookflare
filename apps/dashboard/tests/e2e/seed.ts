@@ -3,14 +3,6 @@ import { resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dirname, "../../../..");
 
-/**
- * The SSRF guard blocks every local backend, so a delivery cannot really die
- * in E2E. Write a dead delivery straight into the local D1 (spec M4-13).
- *
- * Column names follow `apps/gateway/src/core/db/schema.ts` (snake_case):
- * `webhook_events.body_inline` holds the payload bytes, and `deliveries`
- * requires `project_id` and `created_at` (NOT NULL, no default).
- */
 export function seedDeadDelivery(ids: {
 	projectId: string;
 	sourceId: string;

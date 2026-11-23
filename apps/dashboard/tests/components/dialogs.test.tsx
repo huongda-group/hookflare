@@ -49,7 +49,6 @@ const wrap = async (ui: ReactNode) => {
 	};
 };
 
-/** Outcome rows link to their event, so link-rendering tests mount inside a router. */
 const wrapWithRouter = (ui: ReactNode) => {
 	const qc = createQueryClient();
 	const rootRoute = createRootRoute({
@@ -473,8 +472,6 @@ describe("DestinationFormDialog limits", () => {
 		await screen.findByPlaceholderText("default: 10000");
 		await user.type(screen.getByLabelText("Max attempts"), "0");
 		await user.click(screen.getByRole("button", { name: /save/i }));
-		// The shared contract rejects 0, but the rejection lands on the field —
-		// the zero was never coerced to inherit (null) or sent at all.
 		expect(
 			await screen.findByText("Too small: expected number to be >=1"),
 		).toBeInTheDocument();
@@ -587,8 +584,6 @@ describe("ReplayDialog validation and outcomes (spec §8.8)", () => {
 				target={{ kind: "bulk", deliveryIds: ["dlv_1"] }}
 			/>,
 		);
-		// Typed keystrokes (not a programmatic change event), so a maxLength
-		// cap would silently truncate and no error could ever appear.
 		await userEvent.type(screen.getByLabelText("Reason"), "x".repeat(501));
 		expect(await screen.findByText(/1–500 characters/i)).toBeInTheDocument();
 		await userEvent.click(screen.getByRole("button", { name: "Replay 1" }));
@@ -713,7 +708,6 @@ describe("ReplayDialog validation and outcomes (spec §8.8)", () => {
 			await screen.findByText(/no new deliveries were created/i),
 		).toBeInTheDocument();
 		expect(posts).toBe(1);
-		// Once settled, the dialog closes normally again.
 		await user.keyboard("{Escape}");
 		expect(onOpenChange).toHaveBeenCalledWith(false);
 	});
@@ -967,8 +961,6 @@ describe("TestDeliveryDialog", () => {
 		await user.click(await screen.findByRole("button", { name: "Send" }));
 		expect(await screen.findByText(/test delivery/i)).toBeInTheDocument();
 		expect(screen.getByText(/HTTP 204/)).toBeInTheDocument();
-		// Wait until every request has settled, then count: the dialog shows
-		// the synchronous result and never polls the tests list.
 		await waitFor(() => expect(qc.isFetching() + qc.isMutating()).toBe(0));
 		expect(posts).toBe(1);
 		expect(polls).toBe(0);
@@ -1006,7 +998,6 @@ describe("AlertChannelDialog telegram and rule scoping", () => {
 		await user.type(screen.getByLabelText("Name"), "pager");
 		await user.type(screen.getByLabelText("Bot token"), "123:abc");
 		await user.type(screen.getByLabelText("Chat ID"), "-100123");
-		// Checking then unchecking a rule leaves it out of the scope.
 		await user.click(screen.getByLabelText("new_dead"));
 		await user.click(screen.getByLabelText("new_dead"));
 		await user.click(screen.getByLabelText("stuck_pending"));
@@ -1134,7 +1125,6 @@ describe("AlertChannelDialog telegram and rule scoping", () => {
 	});
 });
 
-/** Lets a test close and reopen the dialog like its page does. */
 function TestDeliveryHarness({
 	onOpenChange,
 }: {
@@ -1274,7 +1264,6 @@ describe("TestDeliveryDialog payload and outcomes", () => {
 	});
 });
 
-/** Lets a test close and reopen the dialog like its page does. */
 function ReplayHarness({
 	onOpenChange,
 }: {
@@ -1381,8 +1370,6 @@ describe("SecretRevealDialog copy and outside clicks", () => {
 			/>,
 		);
 		await screen.findByRole("dialog");
-		// Radix registers the outside listener on the next tick and treats a
-		// primary-button press as outside only once its click lands.
 		const clickOutside = async () => {
 			await new Promise((r) => setTimeout(r, 0));
 			fireEvent.pointerDown(document.body);

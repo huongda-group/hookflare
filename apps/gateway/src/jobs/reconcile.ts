@@ -21,7 +21,6 @@ export type ReconcileReport = {
 
 type DeliveryPatch = Partial<typeof deliveries.$inferInsert>;
 
-/** Recovers lost messages only; it never moves a next_attempt_at earlier (spec §8.1). */
 export async function reconcile(deps: Deps): Promise<ReconcileReport> {
 	const now = deps.now();
 	let budget = RECONCILE_LIMIT;
@@ -35,7 +34,6 @@ export async function reconcile(deps: Deps): Promise<ReconcileReport> {
 		send_failed: 0,
 	};
 
-	// Select, send, then update with the same condition so a row that moved meanwhile is left alone.
 	const resend = async (where: SQL, set: DeliveryPatch): Promise<number> => {
 		if (budget <= 0) return 0;
 		const rows = await deps.db
@@ -81,7 +79,6 @@ export async function reconcile(deps: Deps): Promise<ReconcileReport> {
 			.returning({ id: deliveries.id });
 	};
 
-	// (a) pending, never enqueued (ingress enqueue failed).
 	report.pending = await resend(
 		and(
 			eq(deliveries.status, "pending"),
@@ -90,7 +87,6 @@ export async function reconcile(deps: Deps): Promise<ReconcileReport> {
 		) as SQL,
 		{ status: "queued", enqueuedAt: now },
 	);
-	// (b) a worker died holding the lease; no attempt is counted.
 	report.expired_leases = await resend(
 		and(
 			eq(deliveries.status, "in_flight"),
@@ -103,7 +99,6 @@ export async function reconcile(deps: Deps): Promise<ReconcileReport> {
 			enqueuedAt: now,
 		},
 	);
-	// (c) the delayed retry message was lost.
 	report.overdue_retries = await resend(
 		and(
 			eq(deliveries.status, "retrying"),
@@ -115,7 +110,6 @@ export async function reconcile(deps: Deps): Promise<ReconcileReport> {
 		) as SQL,
 		{ enqueuedAt: now },
 	);
-	// (d) queued but never consumed.
 	report.stale_queued = await resend(
 		and(
 			eq(deliveries.status, "queued"),
@@ -123,14 +117,12 @@ export async function reconcile(deps: Deps): Promise<ReconcileReport> {
 		) as SQL,
 		{ enqueuedAt: now },
 	);
-	// (e) Resume moved only its first batch; rule (a) enqueues these next run.
 	const resumed = await pausedOf("active", {
 		status: "pending",
 		enqueuedAt: null,
 	});
 	report.resumed_paused = resumed.length;
 	budget -= resumed.length;
-	// (e′) destination disabled while deliveries were paused.
 	const failed = await pausedOf("disabled", {
 		status: "failed_final",
 		lastError: "destination_disabled",

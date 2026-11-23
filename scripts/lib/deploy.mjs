@@ -1,61 +1,24 @@
-/**
- * Deploy helpers: parse the wrangler JSON outputs captured before and after
- * a deploy, derive the ordered step list, and render the manual rollback
- * commands. This module never spawns anything; see `scripts/deploy.mjs`.
- */
-
-/**
- * A recorded deploy: the restore point plus the rollback target.
- * `d1Name` is the D1 database name for the time-travel restore; `worker`
- * is kept as the fallback for records written before `d1Name` existed
- * (both gateway configs name them identically today: `hookflare` and
- * `hookflare-staging`). `previousVersion` is the Worker version live before
- * the deploy (the rollback target) and `newVersion` the one it deployed;
- * older records only have `version`, which was the previous version.
- * `bookmarkAt` is when the bookmark was recorded (just before migrate).
- * `migrationsApplied` is whether the migrate step changed D1; it is absent
- * until migrate ran (and in older records), which counts as applied.
- * @typedef {{ at: string, config: string, worker: string, d1Name?: string, previousVersion?: string, newVersion?: string, version?: string, bookmark: string, bookmarkAt?: string, migrationsApplied?: boolean, smoke?: string, rollback?: string[] }} DeployRecord
- */
-
-/**
- * Pull a non-empty bookmark string out of a candidate object.
- * @param {unknown} candidate
- * @returns {string | null}
- */
 function bookmarkOf(candidate) {
 	if (typeof candidate !== "object" || candidate === null) {
 		return null;
 	}
-	const bookmark = /** @type {Record<string, unknown>} */ (candidate).bookmark;
+	const bookmark = candidate.bookmark;
 	return typeof bookmark === "string" && bookmark.length > 0 ? bookmark : null;
 }
 
-/**
- * Timestamp used to prefer the newest entry of a time-travel list.
- * @param {unknown} candidate
- * @returns {string}
- */
 function entryTime(candidate) {
 	if (typeof candidate !== "object" || candidate === null) {
 		return "";
 	}
-	const entry = /** @type {Record<string, unknown>} */ (candidate);
+	const entry = candidate;
 	for (const key of ["created_on", "created_at", "timestamp"]) {
 		if (typeof entry[key] === "string") {
-			return /** @type {string} */ (entry[key]);
+			return entry[key];
 		}
 	}
 	return "";
 }
 
-/**
- * Parse the bookmark out of `wrangler d1 time-travel info --json` output.
- * Current wrangler prints a single `{bookmark}` object; arrays are
- * accepted too and resolve to the newest entry.
- * @param {unknown} json
- * @returns {string}
- */
 export function parseBookmark(json) {
 	const direct = bookmarkOf(json);
 	if (direct !== null) {
@@ -75,27 +38,17 @@ export function parseBookmark(json) {
 	throw new Error("deploy: no bookmark in time-travel info output");
 }
 
-/**
- * Version ID of one entry of `wrangler deployments list --json` output.
- * @param {unknown} entry
- * @returns {string | null}
- */
 function entryVersion(entry) {
 	if (typeof entry !== "object" || entry === null) {
 		return null;
 	}
-	const versions = /** @type {Record<string, unknown>} */ (entry).versions;
+	const versions = entry.versions;
 	if (!Array.isArray(versions) || versions.length === 0) {
 		return null;
 	}
-	const entryVersions = /** @type {Record<string, unknown>[]} */ (
-		versions.filter(
-			(version) => typeof version === "object" && version !== null,
-		)
+	const entryVersions = versions.filter(
+		(version) => typeof version === "object" && version !== null,
 	);
-	// A single version carries all traffic even when wrangler omits the
-	// percentage. A gradual split has no rollback target the script can name,
-	// so it fails instead of guessing.
 	const full =
 		entryVersions.length === 1
 			? entryVersions[0]
@@ -111,37 +64,22 @@ function entryVersion(entry) {
 	return versionId(full);
 }
 
-/**
- * Version ID field of one `versions[]` entry.
- * @param {Record<string, unknown>} version
- * @returns {string | null}
- */
 function versionId(version) {
 	for (const key of ["version_id", "version", "id"]) {
 		if (typeof version[key] === "string" && version[key].length > 0) {
-			return /** @type {string} */ (version[key]);
+			return version[key];
 		}
 	}
 	return null;
 }
 
-/**
- * Parse the version ID of the newest deployment out of
- * `wrangler deployments list --json` output (an array, or an object with
- * a `deployments` array). Newest means the largest `created_on`. Throws
- * when the newest deployment is a gradual split (no version at 100%).
- * @param {unknown} json
- * @returns {string}
- */
 export function parseCurrentVersion(json) {
 	const list = Array.isArray(json)
 		? json
 		: typeof json === "object" &&
 				json !== null &&
-				Array.isArray(/** @type {Record<string, unknown>} */ (json).deployments)
-			? /** @type {unknown[]} */ (
-					/** @type {Record<string, unknown>} */ (json).deployments
-				)
+				Array.isArray(json.deployments)
+			? json.deployments
 			: null;
 	if (list === null) {
 		throw new Error("deploy: no deployments in deployments list output");
@@ -158,26 +96,18 @@ export function parseCurrentVersion(json) {
 	throw new Error("deploy: no version in deployments list output");
 }
 
-/**
- * Deploy options: the smoke env (null when it is missing) and whether
- * `--skip-smoke` was passed.
- * @typedef {{ smoke: { url: string, clientId: string, clientSecret: string, sinkUrl: string } | null, skipSmoke: boolean }} DeployOptions
- */
+export const NO_PREVIOUS_VERSION = "none";
 
-/**
- * Ordered step names. A missing smoke env is an error unless
- * `--skip-smoke` was passed; the CLI prints a loud notice when skipping.
- * @param {DeployOptions} options
- * @returns {string[]}
- */
+export function workerMissing({ code, stdout, stderr }) {
+	return code !== 0 && /\[code: 10007\]/.test(`${stdout}\n${stderr}`);
+}
+
 export function deployPlan({ smoke, skipSmoke }) {
 	if (smoke === null && !skipSmoke) {
 		throw new Error(
 			"deploy: smoke env missing; set it (see docs/runbook.md#deploy-and-smoke) or pass --skip-smoke",
 		);
 	}
-	// The restore point is recorded right before migrate, so a D1 restore
-	// discards as few accepted webhooks as possible.
 	const steps = ["build", "record", "migrate", "deploy"];
 	if (!skipSmoke) {
 		steps.push("smoke");
@@ -186,14 +116,6 @@ export function deployPlan({ smoke, skipSmoke }) {
 	return steps;
 }
 
-/**
- * Whether `wrangler d1 migrations apply` changed the database. Only an exit
- * code of 0 with wrangler's "No migrations to apply" message counts as
- * unchanged; a failed run (possibly partial) or unrecognized output counts
- * as applied, so the D1 restore is never hidden when it may be needed.
- * @param {{ code: number, stdout: string, stderr: string }} result
- * @returns {boolean}
- */
 export function migrationsApplied({ code, stdout, stderr }) {
 	if (code !== 0) {
 		return true;
@@ -201,28 +123,15 @@ export function migrationsApplied({ code, stdout, stderr }) {
 	return !/no migrations to apply/i.test(`${stdout}\n${stderr}`);
 }
 
-/** Every step that changes remote state, for a full rollback listing. */
 const ALL_STEPS = ["build", "record", "migrate", "deploy", "smoke", "report"];
 
-/**
- * Manual rollback commands. The CLI prints these (on failure, and in the
- * report on success) and never runs them. `started` lists the steps that
- * began: the Worker rollback is listed only once the deploy step started,
- * and the D1 restore only once the migrate step started and did not report
- * "no migrations to apply" (`migrationsApplied !== false`). The D1 restore
- * is preceded by a `# DESTRUCTIVE` comment line: it discards every write
- * since the bookmark, including accepted webhooks. The Worker rollback
- * always targets the version that was live before the deploy.
- * @param {DeployRecord} record
- * @param {string} config
- * @param {string[]} [started]
- * @returns {string[]}
- */
 export function rollbackCommands(record, config, started = ALL_STEPS) {
 	const d1Name = record.d1Name ?? record.worker;
 	const previous = record.previousVersion ?? record.version;
 	const commands = [];
-	if (started.includes("deploy") && previous !== undefined) {
+	if (started.includes("deploy") && previous === NO_PREVIOUS_VERSION) {
+		commands.push("# first deploy: no previous Worker version to roll back to");
+	} else if (started.includes("deploy") && previous !== undefined) {
 		commands.push(`wrangler rollback ${previous} --config ${config}`);
 	}
 	if (started.includes("migrate") && record.migrationsApplied !== false) {

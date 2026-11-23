@@ -1,11 +1,4 @@
 #!/usr/bin/env node
-/**
- * Post-deploy smoke test CLI. --config selects the gateway config; the
- * gateway URL comes from that Worker's variable (`smokeUrlVar`:
- * `HOOKFLARE_URL` for `hookflare`, `HOOKFLARE_STAGING_URL` for
- * `hookflare-staging`), and it must match the config (`checkSmokeTarget`).
- * HOOKFLARE_API_TOKEN and SINK_URL come from the env as well.
- */
 import {
 	checkSmokeTarget,
 	httpSmokeApi,
@@ -15,13 +8,6 @@ import {
 } from "./lib/smoke.mjs";
 import { readConfig } from "./lib/wrangler.mjs";
 
-/**
- * Value of a `--flag value` argv option.
- * @param {string[]} argv
- * @param {string} flag
- * @param {string} fallback
- * @returns {string}
- */
 function option(argv, flag, fallback) {
 	const index = argv.indexOf(flag);
 	return index !== -1 && index + 1 < argv.length ? argv[index + 1] : fallback;

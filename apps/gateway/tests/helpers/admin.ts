@@ -14,19 +14,13 @@ import { newId } from "../../src/core/ids";
 import type { Deps } from "../../src/deps";
 import { testDeps } from "./deps";
 
-/**
- * Only "IS NOT NULL" matters to the auth queries; the value is never parsed
- * by the middleware (same convention as the sessions/api-tokens unit tests).
- */
 const PASSWORD_HASH = "pbkdf2-sha256$100000$c2FsdA==$aGFzaA==";
 
 const ORIGIN = "https://hookflare.example.com";
 const ADMIN_API = `${ORIGIN}/api/admin/v1`;
 
-/** The default identity used when `adminApp` is called with no role. */
 export const DEFAULT_ADMIN = "admin@example.com";
 
-/** Only for suites that exercise routes after project onboarding. */
 export async function seedAdminProject() {
 	const { db, now } = testDeps();
 	const at = now();
@@ -46,8 +40,6 @@ export function uniqueUsername(prefix = "user"): string {
 	return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
-/** Audit rows for one resource, oldest first. */
-/** Runs `before` right ahead of the next db.batch, i.e. after the handler's read. */
 export function beforeNextBatch(deps: Deps, before: () => Promise<unknown>) {
 	const batch = deps.db.batch.bind(deps.db);
 	deps.db.batch = (async (queries: Parameters<typeof batch>[0]) => {
@@ -65,12 +57,6 @@ export async function auditRows(deps: Deps, resourceId: string) {
 		.orderBy(asc(auditLogs.id));
 }
 
-/**
- * Admin API client (M7). Upserts an enabled user that has a password, then
- * inserts a session (or an API token) directly and sends the matching
- * credential. With no options it authenticates as the default admin; with a
- * role it creates a fresh user under that role.
- */
 export async function adminApp(
 	deps: Deps,
 	opts: { role?: Role; username?: string; via?: "cookie" | "token" } = {},
@@ -91,8 +77,6 @@ export async function adminApp(
 		})
 		.onConflictDoUpdate({
 			target: users.username,
-			// An existing user keeps its role (the caller passed no role to change
-			// it); the row must stay enabled and password-bearing to authenticate.
 			set: {
 				...(opts.role ? { role: opts.role } : {}),
 				passwordHash: PASSWORD_HASH,

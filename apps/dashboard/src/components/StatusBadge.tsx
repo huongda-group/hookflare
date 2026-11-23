@@ -14,20 +14,11 @@ import {
 import { cn } from "@/lib/utils";
 
 type StatusMeta = {
-	/** Human label — never the raw stored value (spec §4). */
 	label: string;
-	/** Non-color signal: status never depends on color alone (spec §11). */
 	icon: LucideIcon;
 	surface: string;
 };
 
-/**
- * One label, icon, and color per status, everywhere (spec §4, §5).
- * `pending`/`queued`/`paused` are neutral, `in_flight` informational,
- * `retrying` amber, `delivered` green, `failed_final`/`dead` red with
- * distinct labels. `active`/`disabled` are resource states, not delivery
- * statuses, and keep working.
- */
 const STATUS: Record<string, StatusMeta> = {
 	pending: {
 		label: "Pending",
@@ -81,7 +72,6 @@ const STATUS: Record<string, StatusMeta> = {
 	},
 };
 
-/** Fallback for a status this iteration does not know about. */
 function humanize(status: string) {
 	const words = status.replaceAll("_", " ").trim();
 	return words ? words[0].toUpperCase() + words.slice(1) : "Unknown";

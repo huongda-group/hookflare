@@ -37,7 +37,6 @@ describe("Settings › Alerts", () => {
 		await waitFor(() => expect(bodies).toHaveLength(1));
 		expect(bodies[0]).toMatchObject({ alert_rules: { failure_threshold: 7 } });
 		expect(bodies[0]).not.toHaveProperty("retry_defaults");
-		// Saved values are the new baseline: leaving the page must not prompt.
 		await user.click(screen.getByRole("link", { name: "Projects" }));
 		await waitFor(() =>
 			expect(router.state.location.pathname).toBe("/projects"),
@@ -270,7 +269,6 @@ describe("Settings › Alerts", () => {
 		const user = userEvent.setup();
 		renderApp("/settings?tab=alerts");
 		const row = (await screen.findByText("ops")).closest("tr") as HTMLElement;
-		// No rule or project filter means every rule and every project.
 		expect(within(row).getAllByText("All")).toHaveLength(2);
 		await user.click(within(row).getByRole("button", { name: "Send test" }));
 		expect(await within(row).findByText("Sent")).toBeInTheDocument();

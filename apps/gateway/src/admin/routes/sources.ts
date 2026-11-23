@@ -136,8 +136,7 @@ export function sourceRoutes() {
 			eventIdSelector:
 				req.event_id_from === "none"
 					? null
-					: (req.event_id_selector ??
-						/* istanbul ignore next -- @preserve unreachable: createSourceRequest requires a selector unless event_id_from is none */ null),
+					: (req.event_id_selector ?? /* istanbul ignore next */ null),
 			maxBodyBytes: req.max_body_bytes ?? null,
 			createdAt: ts,
 			updatedAt: ts,
@@ -294,7 +293,6 @@ export function sourceRoutes() {
 				now: ts,
 			});
 			const fingerprint = await secretFingerprint(secret);
-			// Fenced on the ciphertext we read: a concurrent rotation makes this a no-op.
 			const [[row]] = await db.batch([
 				db
 					.update(sources)
@@ -309,9 +307,7 @@ export function sourceRoutes() {
 					)
 					.returning(),
 				auditInsertIfChanged(db, {
-					actor:
-						c.var.actor?.username ??
-						/* istanbul ignore next -- @preserve unreachable: requirePermission already rejected a request without an actor */ "",
+					actor: c.var.actor?.username ?? /* istanbul ignore next */ "",
 					at: ts,
 					action: "source.secret_rotated",
 					resourceType: "source",

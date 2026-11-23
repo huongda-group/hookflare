@@ -7,7 +7,6 @@ const CACHE_TTL_MS = 60_000;
 const CACHE_MAX_ENTRIES = 1000;
 const cache = new Map<string, { result: SsrfResult; expiresAt: number }>();
 
-/** Tests only. */
 export function clearSsrfCache(): void {
 	cache.clear();
 }
@@ -29,7 +28,7 @@ const V4_BLOCKED: Array<[string, number]> = [
 	["172.16.0.0", 12],
 	["192.0.0.0", 24],
 	["192.0.2.0", 24],
-	["192.88.99.0", 24], // 6to4 relay anycast (deprecated)
+	["192.88.99.0", 24],
 	["192.168.0.0", 16],
 	["198.18.0.0", 15],
 	["198.51.100.0", 24],
@@ -38,21 +37,19 @@ const V4_BLOCKED: Array<[string, number]> = [
 	["240.0.0.0", 4],
 ];
 const V6_BLOCKED: Array<[string, number]> = [
-	["::", 96], // unspecified, loopback, and deprecated IPv4-compatible
-	["64:ff9b:1::", 48], // local-use NAT64
-	["100::", 64], // discard
-	["2001::", 32], // Teredo: the client IPv4 is obfuscated, so block it all
-	["2001:db8::", 32], // documentation
+	["::", 96],
+	["64:ff9b:1::", 48],
+	["100::", 64],
+	["2001::", 32],
+	["2001:db8::", 32],
 	["fc00::", 7],
 	["fe80::", 10],
 	["ff00::", 8],
 ];
-/** 6to4 embeds its IPv4 address in bits 16..47, checked instead. */
 const V6_6TO4: [string, number] = ["2002::", 16];
-/** Prefixes whose last 32 bits embed an IPv4 address that is checked instead. */
 const V6_EMBEDDED_V4: Array<[string, number]> = [
 	["::ffff:0:0", 96],
-	["::ffff:0:0:0", 96], // IPv4-translated (RFC 2765)
+	["::ffff:0:0:0", 96],
 	["64:ff9b::", 96],
 ];
 
@@ -75,7 +72,6 @@ function parseIPv4(s: string): number | null {
 	return n;
 }
 
-/** Eight 16-bit groups, or null. Accepts `::` and a trailing dotted IPv4. */
 function parseIPv6(input: string): number[] | null {
 	let s = input.toLowerCase();
 	const zone = s.indexOf("%");
@@ -106,16 +102,10 @@ function parseIPv6(input: string): number[] | null {
 					.map((g) =>
 						/^[0-9a-f]{1,4}$/.test(g) ? Number.parseInt(g, 16) : Number.NaN,
 					);
-	const head = groups(
-		halves[0] ??
-			/* istanbul ignore next -- @preserve unreachable: String.split always returns at least one element */ "",
-	);
+	const head = groups(halves[0] ?? /* istanbul ignore next */ "");
 	const rest =
 		halves.length === 2
-			? groups(
-					halves[1] ??
-						/* istanbul ignore next -- @preserve unreachable: halves.length === 2 */ "",
-				)
+			? groups(halves[1] ?? /* istanbul ignore next */ "")
 			: [];
 	if ([...head, ...rest].some(Number.isNaN)) {
 		return null;
@@ -154,7 +144,6 @@ function isBlockedV4(addr: number): boolean {
 	return V4_BLOCKED.some(([base, bits]) => inV4(addr, base, bits));
 }
 
-/** True if the address is private/reserved, or cannot be parsed (fail closed). */
 export function isBlockedAddress(address: string): boolean {
 	const v4 = parseIPv4(address);
 	if (v4 !== null) {
@@ -175,10 +164,6 @@ export function isBlockedAddress(address: string): boolean {
 	return V6_BLOCKED.some(([base, bits]) => inV6(v6, base, bits));
 }
 
-/**
- * §8: static URL checks, then DoH (A + AAAA); blocked if any address is
- * private. Results are cached per hostname for 60 s; DnsError is not cached.
- */
 export async function checkUrl(
 	rawUrl: string,
 	deps: SsrfDeps,
@@ -195,7 +180,6 @@ export async function checkUrl(
 	if (url.username !== "" || url.password !== "") {
 		return blocked("userinfo_not_allowed");
 	}
-	// URL normalizes decimal/hex/short IPv4 forms into dotted quads.
 	const host = url.hostname.toLowerCase().replace(/\.$/, "");
 	if (host.startsWith("[") || parseIPv4(host) !== null) {
 		return blocked("ip_literal");

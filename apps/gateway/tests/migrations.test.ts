@@ -40,7 +40,6 @@ describe("baseline migration", () => {
 		const deps = testDeps();
 		const p = await seedPipeline(deps);
 		await seedDelivery(deps, p, { event: { providerEventId: "dup" } });
-		// Drizzle wraps the D1 error: UNIQUE is in cause.message.
 		const dupErr = await seedDelivery(deps, p, {
 			event: { providerEventId: "dup" },
 		}).then(

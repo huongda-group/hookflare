@@ -63,7 +63,6 @@ async function markOf(eventId: string) {
 	return { batch: ev.archiveBatchId, part: ev.archivePart };
 }
 
-/** A D1 that runs `before` once, right before the first query matching `match`. */
 function d1Before(match: RegExp, before: () => Promise<unknown>): D1Database {
 	const db = deps.env.DB;
 	let fired = false;
@@ -226,7 +225,6 @@ describe("buildEventPart", () => {
 				batch: batch.id,
 				part: MISSING_PART,
 			});
-			// Part 2 marks nothing: the parked event is never picked again.
 			expect(await buildEventPart(deps, batch.id, 2, cut)).toEqual({
 				itemCount: 0,
 				bytes: 0,
@@ -290,8 +288,6 @@ describe("buildEventPart", () => {
 			event: { receivedAt: DAY_START + 1 },
 		});
 		const batch = await seedBatch(deps, { day: DAY });
-		// The page's event list is read; then a replay clears the mark before
-		// the bodies are loaded, so the body query no longer sees the event.
 		const racing = {
 			...deps,
 			db: drizzle(
@@ -308,7 +304,6 @@ describe("buildEventPart", () => {
 		expect(lines).toHaveLength(1);
 		expect(lines[0].event.id).toBe(eventId);
 		expect(lines[0].payload_b64).toBeNull();
-		// Unmarked, so purge keeps it in D1.
 		expect(await markOf(eventId)).toEqual({ batch: null, part: null });
 	});
 });
@@ -339,7 +334,6 @@ describe("buildAuditPart", () => {
 	const AUDIT_ACTOR = "archive-parts@test";
 	const clearAudit = () =>
 		deps.db.delete(auditLogs).where(eq(auditLogs.actor, AUDIT_ACTOR));
-	// Other tests may leave audit rows on this day; keep this day ours.
 	const AUDIT_DAY = "2025-03-04";
 	const AUDIT_DAY_START = Date.UTC(2025, 2, 4);
 	async function seedDayAudit(ids: string[]) {
@@ -388,7 +382,6 @@ describe("buildAuditPart", () => {
 				day: AUDIT_DAY,
 				withFiles: false,
 			});
-			// Part 1 was built from the first row only (a smaller earlier cap).
 			await deps.db.insert(archiveParts).values({
 				batchId: batch.id,
 				partNo: 1,
@@ -399,7 +392,6 @@ describe("buildAuditPart", () => {
 				firstId: "aud_day_1",
 				lastId: "aud_day_1",
 			});
-			// A retry of part 1 stays within its recorded last ID.
 			expect(await buildAuditPart(deps, batch.id, 1)).toEqual({
 				itemCount: 1,
 				bytes: 0,

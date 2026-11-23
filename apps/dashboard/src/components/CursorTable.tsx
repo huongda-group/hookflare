@@ -36,21 +36,12 @@ type Props<T> = {
 		onChange: (next: Set<string>) => void;
 		max: number;
 	};
-	/** Accessible name for the table's own focusable, horizontally scrollable region. */
 	ariaLabel?: string;
-	/**
-	 * Makes the row's resource cell — its key — a real link, so every row has a
-	 * keyboard-accessible path to the resource. An in-app path (`/…`) becomes a
-	 * Router `Link`; anything else is a plain anchor. `onRowClick` may stay for
-	 * pointer clicks but is never the only path (spec §7).
-	 */
 	getRowHref?: (row: T) => string;
 	rowProjectId?: string;
-	/** Optional next authorized step shown with the empty message. */
 	emptyAction?: ReactNode;
 };
 
-/** Cursor lists only: "Load more", never page numbers (spec §7). */
 export function CursorTable<T>({
 	query,
 	columns,
@@ -65,15 +56,11 @@ export function CursorTable<T>({
 }: Props<T>) {
 	const rows = query.data?.pages.flatMap((p) => p.data) ?? [];
 	const hasLoaded = query.data !== undefined;
-	// Three distinct failure modes (spec §7): a failed next page keeps the
-	// loaded rows and retries only that page; a failed background refresh keeps
-	// the loaded rows with a warning; only a failure with nothing loaded is a
-	// fatal load error. Loaded pages are never replaced on an error.
 	const nextPageError = query.isFetchNextPageError && hasLoaded;
 	const error = query.isError && !nextPageError ? query.error : null;
 
 	const selectLoaded = () => {
-		/* istanbul ignore if -- @preserve unreachable: the controls calling this render only with a selection */
+		/* istanbul ignore if -- @preserve */
 		if (!selection) return;
 		const next = new Set<string>();
 		for (const row of rows) {
@@ -84,7 +71,7 @@ export function CursorTable<T>({
 	};
 
 	const toggle = (id: string) => {
-		/* istanbul ignore if -- @preserve unreachable: the controls calling this render only with a selection */
+		/* istanbul ignore if -- @preserve */
 		if (!selection) return;
 		const next = new Set(selection.selected);
 		if (next.has(id)) next.delete(id);
@@ -158,11 +145,7 @@ export function CursorTable<T>({
 										onClick={onRowClick ? () => onRowClick(row) : undefined}
 									>
 										{getRowHref && (
-											<TableCell
-												// A pointer click on the link navigates through the
-												// link, not the row handler, so it never double-fires.
-												onClick={(e) => e.stopPropagation()}
-											>
+											<TableCell onClick={(e) => e.stopPropagation()}>
 												<ResourceLink
 													href={getRowHref(row)}
 													projectId={rowProjectId}
@@ -224,7 +207,6 @@ export function CursorTable<T>({
 	);
 }
 
-/** A row's resource link: Router `Link` for in-app paths, a plain anchor otherwise. */
 function ResourceLink({
 	href,
 	projectId,

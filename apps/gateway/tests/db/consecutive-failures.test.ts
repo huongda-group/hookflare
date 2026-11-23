@@ -59,7 +59,7 @@ describe("destinations.consecutive_failures (M5-12)", () => {
 		const p = await seedPipeline(deps);
 		const { deliveryId } = await seedDelivery(deps, p, { status: "queued" });
 		await attempt(deps, deliveryId, failed, 1);
-		t += 30_000; // each retry is leased once it is due
+		t += 30_000;
 		await attempt(deps, deliveryId, failed, 2);
 		expect(await counter(deps, p.destination.id)).toBe(2);
 		t += 30_000;

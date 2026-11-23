@@ -62,17 +62,14 @@ describe("ApiTokensDialog", () => {
 		await user.type(await screen.findByLabelText("Token name"), "bench");
 		await user.click(screen.getByRole("button", { name: "Create token" }));
 		expect(await screen.findByText(secret)).toBeInTheDocument();
-		// The reveal is gated: acknowledging it closes the one-time disclosure.
 		await user.click(screen.getByLabelText("I have stored this secret"));
 		await user.click(screen.getByRole("button", { name: "Done" }));
 		await waitFor(() =>
 			expect(screen.queryByText(secret)).not.toBeInTheDocument(),
 		);
-		// The plaintext never lands in Query storage.
 		for (const q of queryClient.getQueryCache().getAll()) {
 			expect(JSON.stringify(q.state.data ?? null)).not.toContain(secret);
 		}
-		// Closing and remounting the dialog shows no raw token.
 		const dialog = screen.getByRole("dialog", { name: "API tokens for op" });
 		await user.click(within(dialog).getByRole("button", { name: "Close" }));
 		await waitFor(() =>
@@ -138,11 +135,8 @@ describe("ApiTokensDialog", () => {
 		const meCallsBefore = meCalls;
 		await openTokens(user);
 		expect(await screen.findByText(/forbidden/)).toBeInTheDocument();
-		// The 403 reloads /me; once that refetch and every other request has
-		// settled, the token list was requested exactly once.
 		await waitFor(() => expect(meCalls).toBeGreaterThan(meCallsBefore));
 		await waitFor(() => expect(queryClient.isFetching()).toBe(0));
-		// The dialog stays open on readable feedback and never retries.
 		expect(
 			screen.getByRole("dialog", { name: "API tokens for op" }),
 		).toBeInTheDocument();
@@ -178,12 +172,9 @@ describe("ApiTokensDialog", () => {
 				}),
 			);
 			const { queryClient } = renderApp("/settings?tab=users", { role });
-			// The Users tab itself is gated; retry settings render instead.
 			expect(
 				await screen.findByRole("tab", { name: "Retry defaults" }),
 			).toBeInTheDocument();
-			// The settings form has loaded and nothing else is in flight, so any
-			// users or token request would already have been sent.
 			await waitFor(() => expect(queryClient.isFetching()).toBe(0));
 			expect(
 				screen.queryByRole("tab", { name: "Users" }),
@@ -272,7 +263,6 @@ describe("ApiTokensDialog", () => {
 		expect(row("ci")).toHaveTextContent(/· expires/);
 		expect(row("bench")).not.toHaveTextContent(/expires|revoked/);
 		expect(row("old")).toHaveTextContent(/· revoked/);
-		// A revoked token cannot be revoked again.
 		expect(
 			within(dialog).queryByRole("button", { name: "Revoke token old" }),
 		).not.toBeInTheDocument();
@@ -280,7 +270,6 @@ describe("ApiTokensDialog", () => {
 		await user.click(
 			within(dialog).getByRole("button", { name: "Revoke token ci" }),
 		);
-		// The revoke route ignores a body, so the dialog does not ask for one.
 		await screen.findByRole("heading", { name: "Revoke token ci?" });
 		expect(
 			screen.queryByLabelText("Reason (optional)"),

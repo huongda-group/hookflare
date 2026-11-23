@@ -10,7 +10,6 @@ type AlertFilters = {
 	rule?: string;
 } & AlertScope;
 
-/** Incidents change every minute at most (the job's cadence). */
 export function useAlertsPage(f: AlertFilters) {
 	return useInfiniteQuery({
 		queryKey: qk.alerts.list(f),

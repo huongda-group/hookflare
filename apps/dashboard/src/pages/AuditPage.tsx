@@ -65,7 +65,6 @@ export function AuditPage({
 			<Input
 				id={`a-${key}`}
 				className="w-48"
-				// Keyed on the URL value so back/forward refreshes the uncontrolled input.
 				key={search[key] ?? ""}
 				defaultValue={search[key]}
 				onBlur={(e) => setSearch({ [key]: e.target.value || undefined })}

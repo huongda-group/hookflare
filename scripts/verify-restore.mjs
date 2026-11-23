@@ -1,25 +1,10 @@
 #!/usr/bin/env node
-/**
- * Verify a restored D1 database against the backup manifest in
- * `.restore/<backup_id>/`: the manifest's table rows equal the sum of its
- * part rows, integrity_check is ok, foreign_key_check is empty, every row
- * count matches the manifest minus orphans, every BLOB byte total matches
- * the manifest minus orphaned BLOBs, and the applied migrations match.
- * Prints a table and exits 1 on any difference.
- */
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { backupIdOf, verifyChecks } from "./lib/restore.mjs";
 import { wranglerBin } from "./lib/wrangler-bin.mjs";
 
-/**
- * Value of a `--flag value` argv option.
- * @param {string[]} argv
- * @param {string} flag
- * @param {string} fallback
- * @returns {string}
- */
 function option(argv, flag, fallback) {
 	const index = argv.indexOf(flag);
 	return index !== -1 && index + 1 < argv.length ? argv[index + 1] : fallback;
@@ -41,12 +26,6 @@ const orphans = existsSync(orphansPath)
 	: {};
 const wrangler = wranglerBin();
 
-/**
- * Run one read query against the restored database, parsed from
- * `wrangler d1 execute --json`.
- * @param {string} command
- * @returns {Promise<Record<string, unknown>[]>}
- */
 async function query(command) {
 	const out = execFileSync(
 		wrangler,

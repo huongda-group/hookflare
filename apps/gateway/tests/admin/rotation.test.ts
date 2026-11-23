@@ -175,7 +175,7 @@ describe("POST /sources/:id/rotate-secret", () => {
 
 	it("answers 409 no_secret for an auth_type none source", async () => {
 		const deps = testDeps();
-		const { source } = await seedPipeline(deps); // auth_type none by default
+		const { source } = await seedPipeline(deps);
 		const api = await adminApp(deps);
 		const res = await api.request(
 			"POST",
@@ -220,7 +220,6 @@ describe("rotation races", () => {
 			aad.destinationPrev(destination.id),
 		);
 		const freshUntil = deps.now() + HOUR;
-		// The SSRF check runs between the PATCH's read and its write: rotate there.
 		const resolve = deps.resolveDns;
 		deps.resolveDns = async (host) => {
 			await deps.db
@@ -248,7 +247,7 @@ describe("rotation races", () => {
 		const deps = testDeps();
 		const { destination } = await seedPipeline(deps);
 		const api = await adminApp(deps);
-		await api.request("GET", "/me"); // bootstrap batch happens here
+		await api.request("GET", "/me");
 		beforeNextBatch(deps, () =>
 			deps.db
 				.update(destinations)

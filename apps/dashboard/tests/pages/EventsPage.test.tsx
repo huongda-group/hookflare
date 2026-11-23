@@ -5,7 +5,6 @@ import { eventSummary, project, T, webhookEvent } from "../helpers/fixtures";
 import { chooseProject, renderApp } from "../helpers/render";
 import { apiUrl, server } from "../helpers/server";
 
-/** The cell of `row` under the column header named `header`. */
 function cellIn(row: HTMLElement, header: string) {
 	const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
 	return within(row).getAllByRole("cell")[headers.indexOf(header)];
@@ -105,7 +104,6 @@ describe("Events", () => {
 		const httpBox = screen.getByLabelText("HTTP status");
 		await user.type(box, "pi_draft");
 		await user.type(httpBox, "50");
-		// Unrelated commit: toggling a status must not drop uncommitted drafts.
 		await user.click(screen.getByRole("button", { name: "dead" }));
 		await waitFor(() =>
 			expect(router.state.location.search).toMatchObject({
@@ -117,7 +115,6 @@ describe("Events", () => {
 		expect(router.state.location.search).not.toMatchObject({
 			provider_event_id: "pi_draft",
 		});
-		// Navigation to a different committed value refreshes the drafts.
 		await router.navigate({
 			to: "/events",
 			search: {

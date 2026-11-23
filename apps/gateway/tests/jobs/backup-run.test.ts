@@ -28,7 +28,6 @@ import { seedDelivery, seedPipeline } from "../helpers/seed";
 const logger = createLogger({ LOG_LEVEL: "error" });
 const plain: StepFn = (_name, fn) => fn();
 
-/** Fake backup Workflow binding that also records create params. */
 function recordingBackup(status = "complete") {
 	const created: { id: string; params: unknown }[] = [];
 	const backup = {
@@ -88,7 +87,6 @@ async function readManifest(deps: Deps, backupId: string) {
 	};
 }
 
-/** `deps` with the backups bucket's methods replaced by `over`. */
 function bucketWith(
 	base: Deps,
 	over: (target: R2Bucket) => Partial<Record<keyof R2Bucket, unknown>>,
@@ -111,7 +109,6 @@ async function rowOf(deps: Deps, id: string) {
 	return row;
 }
 
-/** 251 BLOB rows: two pages of BLOB_PAGE_SIZE (250); "aaa_" sorts first. */
 async function createBlobPages() {
 	const d = testDeps();
 	await d.db.run(
@@ -162,7 +159,6 @@ describe("runBackup", () => {
 		expect(
 			Object.fromEntries(manifest.tables.map((t) => [t.name, t.rows])),
 		).toEqual(expected);
-		// Review Focus 3: an empty table is listed with rows 0 and no parts.
 		const empty = manifest.tables.find((t) => t.name === "test_deliveries");
 		expect(empty).toMatchObject({ rows: 0, parts: [] });
 		expect(expected.test_deliveries).toBe(0);
@@ -172,7 +168,6 @@ describe("runBackup", () => {
 		const p = await seedPipeline(deps);
 		await seedDelivery(deps, p, { status: "delivered" });
 
-		// Baseline: one uninterrupted run.
 		const solo = `bk-solo-${Date.now()}`;
 		await startBackupRun(deps, { instanceId: solo, trigger: "manual" }, logger);
 		await runBackup(
@@ -184,7 +179,6 @@ describe("runBackup", () => {
 		);
 		const soloRows = await readManifest(deps, solo);
 
-		// Split run with a tiny budget.
 		const backup = recordingBackup();
 		const splitDeps = testDeps({ backup });
 		const base = `bk-split-${Date.now()}`;
@@ -232,8 +226,6 @@ describe("runBackup", () => {
 			.from(backups)
 			.where(eq(backups.id, base));
 		expect(done.status).toBe("verified");
-		// The backups table itself grows between the two runs (each run
-		// dumps its own row), so counts are compared without it.
 		const counts = (m: { tables: { name: string; rows: number }[] }) =>
 			Object.fromEntries(
 				m.tables
@@ -246,7 +238,6 @@ describe("runBackup", () => {
 		expect(soloRows.tables.length).toBeGreaterThan(0);
 	});
 
-	/** Runs the first instance with a tiny budget; returns the continuation params. */
 	async function splitFirst(prefix: string) {
 		const backup = recordingBackup();
 		const splitDeps = testDeps({ backup });
@@ -273,7 +264,6 @@ describe("runBackup", () => {
 		const p = await seedPipeline(deps);
 		await seedDelivery(deps, p, { status: "delivered" });
 		const { base, splitDeps, params } = await splitFirst("bk-added");
-		// "aaa_…" sorts first: an index-based resume would shift by one.
 		await deps.db.run(
 			sql`CREATE TABLE aaa_added_mid_run (id TEXT PRIMARY KEY)`,
 		);
@@ -632,7 +622,6 @@ describe("backup cron", () => {
 			backupId: "bk-c",
 			resume: { tableName: "backups", cursor: null, partNo: 1 },
 		};
-		// First attempt: create succeeded, then the step failed before the UPDATE landed.
 		await backup.create({ id: cont.instanceId, params: {} });
 		expect(await startBackupRun(deps, cont, logger)).toBe("duplicate");
 		const [row] = await deps.db

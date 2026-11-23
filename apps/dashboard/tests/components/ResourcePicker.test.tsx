@@ -21,7 +21,6 @@ import { destination, project, source } from "../helpers/fixtures";
 import { renderApp } from "../helpers/render";
 import { apiUrl, server } from "../helpers/server";
 
-/** Cursor pages of 50 rows keyed by their offset, recording each request. */
 function paged(path: string, rows: unknown[]) {
 	const calls: URLSearchParams[] = [];
 	server.use(
@@ -37,7 +36,6 @@ function paged(path: string, rows: unknown[]) {
 	return calls;
 }
 
-/** 201 uniquely identified but identically named sources, as the plan describes. */
 const storeEvents = (n: number) =>
 	Array.from({ length: n }, (_, i) =>
 		source({ id: `src_${i + 1}`, name: "Store events", project_id: "prj_1" }),
@@ -68,7 +66,6 @@ describe("ResourcePicker", () => {
 		expect(
 			await screen.findByRole("option", { name: /src_1\b/ }),
 		).toBeInTheDocument();
-		// Only the first page is requested up front.
 		expect(calls).toHaveLength(1);
 
 		for (const last of [51, 101, 151, 201]) {
@@ -127,8 +124,6 @@ describe("ResourcePicker", () => {
 		expect(
 			screen.getByRole("option", { name: /Store events.*src_dup2.*prj_b/ }),
 		).toBeInTheDocument();
-		// A unique name stays exactly the name, so existing exact-name lookups
-		// keep working.
 		expect(screen.getByRole("option", { name: "Stripe" })).toBeInTheDocument();
 	});
 
@@ -187,7 +182,6 @@ describe("ResourcePicker", () => {
 		expect(
 			await screen.findByRole("option", { name: "Billing API" }),
 		).toBeInTheDocument();
-		// The unloaded deep-link ID is still usable and still shown.
 		expect(trigger).toHaveTextContent("dst_999");
 	});
 
@@ -247,7 +241,6 @@ describe("ResourcePicker", () => {
 		);
 		expect(onChange).toHaveBeenLastCalledWith("dst_888");
 
-		// The backend stays authoritative: typing an ID does not fetch it.
 		expect(detail).not.toHaveBeenCalled();
 	});
 
@@ -308,7 +301,6 @@ describe("ResourcePicker", () => {
 			await screen.findByRole("option", { name: "Beta" }),
 		).toBeInTheDocument();
 		expect(calls.at(-1)?.get("project_id")).toBe("prj_2");
-		// The page owns clearing invalid selections; the picker must not.
 		expect(onChange).not.toHaveBeenCalled();
 	});
 
@@ -447,12 +439,10 @@ describe("ResourcePicker keyboard and loading", () => {
 			await screen.findByRole("option", { name: "Stripe" }),
 		).toBeInTheDocument();
 
-		// Blank exact IDs are not a selection.
 		await user.type(screen.getByLabelText("Exact source ID"), "   ");
 		await user.click(screen.getByRole("button", { name: "Use ID" }));
 		expect(onChange).not.toHaveBeenCalled();
 
-		// Other keys leave the list open; Escape closes it and refocuses the trigger.
 		await user.keyboard("a");
 		expect(trigger).toHaveAttribute("aria-expanded", "true");
 		await user.keyboard("{Escape}");
@@ -526,7 +516,6 @@ describe("ResourceLabel", () => {
 		);
 		expect(calls).toHaveLength(1);
 
-		// A label with no cached page still renders the raw ID and issues no fetch.
 		const isolated = paged("/destinations", [destination()]);
 		renderWith(<ResourceLabel kind="destination" id="dst_999" />);
 		expect(screen.getByText("dst_999")).toBeInTheDocument();
@@ -609,7 +598,6 @@ describe("delegation from the existing selects", () => {
 		await waitFor(() =>
 			expect(screen.getByLabelText("Destination")).toHaveTextContent("Ledger"),
 		);
-		// The page's project scope must reach the destination options request.
 		await waitFor(() =>
 			expect(destinationCalls.at(-1)?.get("project_id")).toBe("prj_1"),
 		);

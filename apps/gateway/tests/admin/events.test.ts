@@ -169,7 +169,6 @@ describe("GET /events", () => {
 
 	it("rejects an invalid project scope on event detail, deliveries, and payload", async () => {
 		const { deps, a } = await fixture();
-		// payload.read is an operator permission.
 		const api = await adminApp(deps, { role: "operator" });
 		for (const suffix of ["", "/deliveries", "/payload"]) {
 			const res = await api.request(

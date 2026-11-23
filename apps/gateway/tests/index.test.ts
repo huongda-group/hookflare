@@ -14,36 +14,39 @@ describe("worker entry", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("routes the DLQ batch to the DLQ consumer", async () => {
-		vi.spyOn(console, "log").mockImplementation(() => {});
-		const deps = testDeps();
-		const p = await seedPipeline(deps);
-		const { deliveryId } = await seedDelivery(deps, p, { status: "retrying" });
-		const msg = fakeMessage({ deliveryId });
-		await worker.queue?.(
-			fakeBatch("hookflare-deliveries-dlq", [msg]),
-			testEnv(),
-		);
-		const [d] = await deps.db
-			.select()
-			.from(deliveries)
-			.where(eq(deliveries.id, deliveryId));
-		expect(d.status).toBe("dead");
-		expect(msg.ack).toHaveBeenCalled();
-	});
+	it.each(["hookflare-deliveries-dlq", "hookflare-deliveries-dlq-staging"])(
+		"routes the %s batch to the DLQ consumer",
+		async (queue) => {
+			vi.spyOn(console, "log").mockImplementation(() => {});
+			const deps = testDeps();
+			const p = await seedPipeline(deps);
+			const { deliveryId } = await seedDelivery(deps, p, {
+				status: "retrying",
+			});
+			const msg = fakeMessage({ deliveryId });
+			await worker.queue?.(fakeBatch(queue, [msg]), testEnv());
+			const [d] = await deps.db
+				.select()
+				.from(deliveries)
+				.where(eq(deliveries.id, deliveryId));
+			expect(d.status).toBe("dead");
+			expect(msg.ack).toHaveBeenCalled();
+		},
+	);
 
 	it("routes any other queue to the delivery consumer", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		vi.spyOn(console, "warn").mockImplementation(() => {});
 		const deps = testDeps();
 		const p = await seedPipeline(deps);
-		// A delivered row: the consumer's lease misses, so it acks and skips
-		// without calling the backend. The DLQ consumer would mark it dead.
 		const { deliveryId } = await seedDelivery(deps, p, {
 			status: "delivered",
 		});
 		const msg = fakeMessage({ deliveryId });
-		await worker.queue?.(fakeBatch("hookflare-deliveries", [msg]), testEnv());
+		await worker.queue?.(
+			fakeBatch("hookflare-deliveries-staging", [msg]),
+			testEnv(),
+		);
 		const [d] = await deps.db
 			.select()
 			.from(deliveries)

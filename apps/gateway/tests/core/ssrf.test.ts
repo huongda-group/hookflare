@@ -28,8 +28,8 @@ describe("checkUrl static checks", () => {
 		["http://example.com/hook", "scheme_not_https"],
 		["https://user:pass@example.com/", "userinfo_not_allowed"],
 		["https://127.0.0.1/", "ip_literal"],
-		["https://2130706433/", "ip_literal"], // decimal form of 127.0.0.1
-		["https://0x7f.1/", "ip_literal"], // hex short form
+		["https://2130706433/", "ip_literal"],
+		["https://0x7f.1/", "ip_literal"],
 		["https://[::1]/", "ip_literal"],
 		["https://localhost/", "internal_hostname"],
 		["https://api.localhost/", "internal_hostname"],
@@ -105,14 +105,12 @@ describe("checkUrl DNS cache bound", () => {
 			await checkUrl(`https://h${i}.example.com/`, deps([PUBLIC], 0));
 		}
 		await checkUrl("https://new.example.com/", deps([PUBLIC], 0));
-		// h0 was evicted: it resolves again and sees the new (private) answer.
 		const again = deps(["10.0.0.1"], 1);
 		await expect(checkUrl("https://h0.example.com/", again)).resolves.toEqual({
 			ok: false,
 			reason: "private_address",
 		});
 		expect(again.resolveDns).toHaveBeenCalledTimes(1);
-		// h2 is still cached.
 		const cached = deps(["10.0.0.1"], 1);
 		await expect(checkUrl("https://h2.example.com/", cached)).resolves.toEqual({
 			ok: true,
@@ -140,11 +138,11 @@ describe("isBlockedAddress", () => {
 		"198.51.100.1",
 		"203.0.113.1",
 		"::",
-		"::a00:1", // deprecated IPv4-compatible
-		"2002:a00:1::1", // 6to4 of 10.0.0.1
-		"2002:7f00:1::", // 6to4 of 127.0.0.1
-		"2001:0:4136:e378:8000:63bf:3fff:fdd2", // Teredo
-		"64:ff9b:1::5db8:d822", // local-use NAT64
+		"::a00:1",
+		"2002:a00:1::1",
+		"2002:7f00:1::",
+		"2001:0:4136:e378:8000:63bf:3fff:fdd2",
+		"64:ff9b:1::5db8:d822",
 		"100::1",
 		"2001:db8::1",
 		"::1",
@@ -154,20 +152,19 @@ describe("isBlockedAddress", () => {
 		"ff02::1",
 		"::ffff:127.0.0.1",
 		"::ffff:7f00:1",
-		"::ffff:0:7f00:1", // IPv4-translated loopback
-		"::ffff:0:a00:1", // IPv4-translated 10.0.0.1
-		"192.88.99.1", // 6to4 relay
-		"64:ff9b::a00:1", // NAT64 of 10.0.0.1
+		"::ffff:0:7f00:1",
+		"::ffff:0:a00:1",
+		"192.88.99.1",
+		"64:ff9b::a00:1",
 		"fe80::1%eth0",
 		"not-an-ip",
-		// Unparseable IPv6 forms fail closed.
-		"::ffff:1.2.3", // bad embedded IPv4
-		"1::2::3", // two "::"
-		"::g", // non-hex group
-		"12345::1", // group wider than 16 bits
-		"1:2:3", // too few groups without "::"
-		"1:2:3:4:5:6:7:8:9", // too many groups
-		"1:2:3:4::5:6:7:8", // "::" with no room left to fill
+		"::ffff:1.2.3",
+		"1::2::3",
+		"::g",
+		"12345::1",
+		"1:2:3",
+		"1:2:3:4:5:6:7:8:9",
+		"1:2:3:4::5:6:7:8",
 	])("blocks %s", (addr) => {
 		expect(isBlockedAddress(addr)).toBe(true);
 	});
@@ -179,7 +176,7 @@ describe("isBlockedAddress", () => {
 		"2606:2800:220:1::1",
 		"::ffff:93.184.216.34",
 		"64:ff9b::5db8:d822",
-		"2002:5db8:d822::1", // 6to4 of a public address
+		"2002:5db8:d822::1",
 		"2001:4860:4860::8888",
 	])("allows %s", (addr) => {
 		expect(isBlockedAddress(addr)).toBe(false);

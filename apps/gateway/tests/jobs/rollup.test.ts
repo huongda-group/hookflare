@@ -16,12 +16,10 @@ import { faultyDeps } from "../helpers/faults";
 import { type Pipeline, seedDelivery, seedPipeline } from "../helpers/seed";
 
 const logger = createLogger({ LOG_LEVEL: "error" });
-/** A fixed UTC hour; every test uses its own project, so rows never collide. */
 const T = floorHour(1_900_000_000_000);
 const at = (ms: number) => ({ ...testDeps(), now: () => ms });
 
 beforeEach(async () => {
-	// Skip the backfill here; rollup-backfill.test.ts covers it.
 	await testDeps()
 		.db.insert(settings)
 		.values({ key: BACKFILL_KEY, valueJson: '"done"', updatedAt: 0 })
@@ -147,7 +145,6 @@ describe("rollup", () => {
 			status: "delivered",
 			delivery: { completedAt: T - HOUR_MS + 6 * 60_000 },
 		});
-		// The first batch (hour T) fails; T - 1h still runs.
 		const deps = faultyDeps(at(T + 30 * 60_000), {
 			d1: [{ match: /delete from "stats_hourly"/i, on: { nth: 1 } }],
 		});

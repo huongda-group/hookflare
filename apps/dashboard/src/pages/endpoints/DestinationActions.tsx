@@ -19,7 +19,15 @@ import { useCan } from "@/lib/permissions";
 import { invalidateDeliveryViews } from "@/lib/queries/invalidate-delivery-views";
 import { invalidateEndpointViews } from "@/lib/queries/invalidate-endpoint-views";
 
-type Open = null | "edit" | "pause" | "resume" | "disable" | "test" | "rotate";
+type Open =
+	| null
+	| "edit"
+	| "pause"
+	| "resume"
+	| "disable"
+	| "enable"
+	| "test"
+	| "rotate";
 
 export function DestinationActions({
 	destination: d,
@@ -35,7 +43,7 @@ export function DestinationActions({
 	const [secret, setSecret] = useState<string | null>(null);
 	if (!canConfig && !canOperate) return null;
 	const close = (o: boolean) => {
-		/* istanbul ignore else -- @preserve unreachable: these dialogs have no trigger, so Radix only reports closes */
+		/* istanbul ignore else -- @preserve */
 		if (!o) setOpen(null);
 	};
 	const refresh = () =>
@@ -86,6 +94,11 @@ export function DestinationActions({
 							Disable
 						</DropdownMenuItem>
 					)}
+					{canConfig && d.status === "disabled" && (
+						<DropdownMenuItem onSelect={() => setOpen("enable")}>
+							Enable
+						</DropdownMenuItem>
+					)}
 				</DropdownMenuContent>
 			</DropdownMenu>
 			{open === "edit" && (
@@ -128,6 +141,20 @@ export function DestinationActions({
 				onConfirm={async (reason) => {
 					await api.patch(path(), {
 						status: "disabled",
+						reason,
+					});
+					await refresh();
+				}}
+			/>
+			<ConfirmDialog
+				open={open === "enable"}
+				onOpenChange={close}
+				title={`Enable ${d.name}?`}
+				description="New events are delivered to this destination again. Deliveries that already failed stay failed; replay them from Failures."
+				confirmLabel="Enable"
+				onConfirm={async (reason) => {
+					await api.patch(path(), {
+						status: "active",
 						reason,
 					});
 					await refresh();

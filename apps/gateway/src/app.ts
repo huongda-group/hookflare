@@ -16,15 +16,12 @@ export type AppBindings = {
 		requestId: string;
 		logger: Logger;
 		deps: Deps;
-		/** Set by the built-in auth middleware for /api/admin/v1. */
 		actor?: { username: string; role: Role; sessionIdHash?: string };
 	};
 };
 
 export type AppOptions = {
-	/** Timeout for the `/healthz` D1 probe. Injectable for tests. */
 	healthTimeoutMs?: number;
-	/** Builds the per-request Deps. Injectable for tests. */
 	createDeps?: (env: AppEnv) => Deps;
 };
 
@@ -49,8 +46,6 @@ export function createApp(options: AppOptions = {}) {
 	const buildDeps = options.createDeps ?? createDeps;
 	const app = new Hono<AppBindings>();
 
-	// Every request gets a request_id (cf-ray when present) and a bound logger,
-	// so all log lines of one request can be correlated.
 	app.use(async (c, next) => {
 		const requestId = c.req.header("cf-ray") ?? crypto.randomUUID();
 		c.set("requestId", requestId);
@@ -61,21 +56,16 @@ export function createApp(options: AppOptions = {}) {
 
 	app.get("/healthz", async (c) => {
 		const version = c.env.CF_VERSION_METADATA?.id ?? "unknown";
-		// Reported for visibility only; it never changes the health status.
 		const turnstile = turnstileConfig(c.env).mode;
 		try {
 			const deps = c.var.deps;
-			// The D1 probe and the heartbeat read share one timeout.
 			const [, jobs] = await withTimeout(
 				Promise.all([
-					// Wrap in an async fn so a synchronous throw from prepare() is caught too.
 					(async () => c.env.DB.prepare("SELECT 1").first())(),
 					readHeartbeat(deps.db),
 				]),
 				healthTimeoutMs,
 			);
-			// Public and unauthenticated: status, reason, version, and the
-			// Turnstile mode only.
 			if (!jobs)
 				return c.json(
 					{ status: "ok", reason: "jobs_unknown", version, turnstile },
@@ -106,7 +96,6 @@ export function createApp(options: AppOptions = {}) {
 		const logger =
 			c.var.logger ?? createLogger(c.env, { request_id: requestId });
 		logger.error("http.unhandled_error", { error: err });
-		// Never echo the error message or stack to the client.
 		return c.json({ error: "internal_error", request_id: requestId }, 500);
 	});
 

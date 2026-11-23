@@ -1,18 +1,6 @@
 import type { Permission, Role, Settings } from "@hookflare/shared";
 import type { Page } from "@playwright/test";
 
-/**
- * Browser-only route-interception fixtures for the redesign verification
- * suite (Task 13). Every admin API call the SPA makes is answered here with
- * deterministic synthetic JSON, so these tests never touch the real D1 that
- * the parallel real-Worker smoke test owns. No test assumes another worker's
- * admin exists: each test installs its own `/auth/state` + `/me` mocks.
- *
- * Data values mirror `src/test/fixtures.ts` and `src/test/server.ts` (same
- * ids, same shapes) so browser assertions exercise the same contracts the
- * Vitest suite locks in.
- */
-
 export const FIXED_NOW = Date.UTC(2026, 9, 18, 12, 0, 0);
 
 const VIEWER_PERMISSIONS: Permission[] = ["events.read"];
@@ -327,11 +315,6 @@ export function overviewPayload(o: Record<string, unknown> = {}) {
 	};
 }
 
-/**
- * Stress dataset: a 100+ character event id, a 200+ character destination
- * URL, and two destinations sharing one name (disambiguated by id in the
- * UI). Used by the overflow/duplicate-name assertions.
- */
 export function stressDataset() {
 	const longEventId = `evt_${"9".repeat(96)}`;
 	const longUrl = `https://hooks.example.com/${"long-path-segment-".repeat(12)}/callback`;
@@ -370,7 +353,6 @@ export type AppOptions = {
 	role?: Role;
 	username?: string;
 	authState?: { setup_required: boolean; turnstile_site_key: string | null };
-	/** POST /auth/login behaviour for the login-form test. */
 	login?: { kind: "ok" } | { kind: "error"; status: number; code: string };
 	overview?: Record<string, unknown> | { error: string };
 	events?: ListMode;
@@ -380,23 +362,18 @@ export type AppOptions = {
 		| { kind: "missing" }
 		| { kind: "error" };
 	failures?: ListMode;
-	/** When true, any list request carrying a `cursor` param fails. */
 	failNextPage?: boolean;
 	projects?: ListMode;
 	sources?: ListMode;
 	destinations?: ListMode;
 	destinationDetail?: Record<string, unknown> | null;
 	sourceDetail?: Record<string, unknown> | null;
-	/** POST /failures/replay behaviour (`enqueued: false` lands the outcome
-	 * in the dialog's "Awaiting enqueue" section). */
 	bulkReplay?:
 		| { kind: "ok"; enqueued?: boolean }
 		| { kind: "error"; status: number; code: string };
-	/** POST /events/:id/replay behaviour. */
 	singleReplay?:
 		| { kind: "ok" }
 		| { kind: "error"; status: number; code: string };
-	/** PATCH /users/:username behaviour (role-matrix blocked mutation). */
 	patchUser?: { kind: "ok" } | { kind: "error"; status: number; code: string };
 	users?: ListMode;
 	alerts?: ListMode;
@@ -407,11 +384,9 @@ export type AppOptions = {
 	settings?: Settings;
 	backupSummary?: Record<string, unknown>;
 	channels?: Record<string, unknown>[];
-	/** POST /destinations behaviour for the secret-lifecycle test. */
 	createDestination?:
 		| { kind: "ok"; secret?: string }
 		| { kind: "error"; status: number; code: string };
-	/** Deterministic clock (default true). Must be installed pre-navigation. */
 	clock?: boolean;
 };
 
@@ -435,14 +410,6 @@ function isErrorBody(v: unknown): v is { error: { error: string } } {
 	);
 }
 
-/**
- * Install the mocked app shell: deterministic clock + a single API route
- * handler answering every admin endpoint the SPA can call. Returns the
- * request log (for no-auto-fetch assertions), a `setRole` handle that
- * swaps the served role without reinstalling, and an `update` handle that
- * merges new fixture options into the single live route handler. Call it at
- * swaps the `/me` response mid-test (role downgrade without reload races).
- */
 export async function installApp(page: Page, opts: AppOptions = {}) {
 	const requests: LoggedRequest[] = [];
 	const live: AppOptions = { ...opts };
@@ -471,7 +438,6 @@ export async function installApp(page: Page, opts: AppOptions = {}) {
 		const fail = (status: number, code: string) =>
 			json({ error: code, message: code }, status);
 
-		// Cursor pagination failure injection (Task 2 next-page-error path).
 		if (
 			live.failNextPage &&
 			req.method() === "GET" &&
@@ -481,7 +447,6 @@ export async function installApp(page: Page, opts: AppOptions = {}) {
 			return;
 		}
 
-		// --- auth + identity (never the real worker) ---
 		if (path === "/auth/state" && req.method() === "GET")
 			return json(live.authState ?? DEFAULT_AUTH_STATE);
 		if (path === "/me" && req.method() === "GET")
@@ -498,7 +463,6 @@ export async function installApp(page: Page, opts: AppOptions = {}) {
 		if (path === "/me/password" && req.method() === "POST")
 			return route.fulfill({ status: 204, body: "" });
 
-		// --- overview + events ---
 		if (path === "/overview" && req.method() === "GET") {
 			if (live.overview && "error" in live.overview)
 				return fail(500, (live.overview as { error: string }).error);
@@ -540,7 +504,6 @@ export async function installApp(page: Page, opts: AppOptions = {}) {
 			});
 		}
 
-		// --- failures ---
 		if (path === "/failures" && req.method() === "GET")
 			return (() => {
 				const list = toList(live.failures, [rows.failure()]);
@@ -552,9 +515,7 @@ export async function installApp(page: Page, opts: AppOptions = {}) {
 			let ids: string[] = ["dlv_1"];
 			try {
 				ids = (req.postDataJSON()?.delivery_ids as string[]) ?? ids;
-			} catch {
-				/* keep default */
-			}
+			} catch {}
 			return json({
 				replayed: ids.map((id, i) => ({
 					delivery_id: id,
@@ -568,7 +529,6 @@ export async function installApp(page: Page, opts: AppOptions = {}) {
 			});
 		}
 
-		// --- resource lists (cursor paging honoured) ---
 		const paged = (
 			all: Record<string, unknown>[],
 			mode: ListMode | undefined,
@@ -644,7 +604,6 @@ export async function installApp(page: Page, opts: AppOptions = {}) {
 			return json(rows.project({ id }));
 		}
 
-		// --- alerts / archives / audit ---
 		if (path === "/alerts" && req.method() === "GET")
 			return (() => {
 				const list = toList(live.alerts, [rows.alert()]);
@@ -683,7 +642,6 @@ export async function installApp(page: Page, opts: AppOptions = {}) {
 				return isErrorBody(list) ? fail(500, "internal") : json(list);
 			})();
 
-		// --- settings / users / channels / backups ---
 		if (path === "/settings" && req.method() === "GET")
 			return json(live.settings ?? DEFAULT_SETTINGS);
 		if (path === "/settings" && req.method() === "PATCH")
@@ -713,7 +671,6 @@ export async function installApp(page: Page, opts: AppOptions = {}) {
 		if (path.match(/^\/users\/.+\/password$/) && req.method() === "POST")
 			return route.fulfill({ status: 204, body: "" });
 
-		// Anything unmocked is a fixture gap, not the real worker: fail loud.
 		return fail(404, "not_found");
 	});
 
@@ -722,7 +679,6 @@ export async function installApp(page: Page, opts: AppOptions = {}) {
 		setRole(next: Role) {
 			role = next;
 		},
-		/** Merge new fixture options; the single route handler reads them live. */
 		update(patch: AppOptions) {
 			Object.assign(live, patch);
 		},
@@ -732,7 +688,6 @@ export async function installApp(page: Page, opts: AppOptions = {}) {
 	};
 }
 
-/** Page-level horizontal overflow in CSS pixels (must be 0). */
 export async function pageOverflow(page: Page): Promise<number> {
 	return page.evaluate(
 		() =>
@@ -741,7 +696,6 @@ export async function pageOverflow(page: Page): Promise<number> {
 	);
 }
 
-/** Local scroll metrics for a scrollable region (tables/code). */
 export async function regionMetrics(page: Page, selector: string) {
 	const el = page.locator(selector).first();
 	return el.evaluate((node) => ({

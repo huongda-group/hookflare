@@ -25,7 +25,6 @@ export function isProjectCollection(path: string): boolean {
 	return PROJECT_COLLECTIONS.has(path);
 }
 
-/** Notification links issued before the picker have neither scope parameter. */
 export function alertLinkScope(search: URLSearchParams) {
 	if (search.has("project_id")) return "project";
 	if (search.get("scope") === "deployment") return "deployment";
@@ -49,9 +48,7 @@ export function useActiveProject() {
 function remember(id: string) {
 	try {
 		window.localStorage.setItem(STORAGE_KEY, id);
-	} catch {
-		// The in-memory selection remains usable with storage blocked.
-	}
+	} catch {}
 }
 
 export function useProjectSelection(enabled: boolean) {
@@ -99,8 +96,6 @@ export function useProjectSelection(enabled: boolean) {
 		if (!projectId) return;
 		setRemembered(projectId);
 		remember(projectId);
-		// Location can advance while the outlet still has the previous match.
-		// Never normalize the old route using the new location's search.
 		if (
 			!missingScope ||
 			matchedPath?.replace(/\/$/, "") !== location.pathname.replace(/\/$/, "")
@@ -110,12 +105,12 @@ export function useProjectSelection(enabled: boolean) {
 		const opts = { hash: true, replace: true, resetScroll: false } as const;
 		switch (route) {
 			case "/endpoints/sources/$sourceId":
-				/* istanbul ignore else -- @preserve unreachable: the matched route always has this param */
+				/* istanbul ignore else -- @preserve */
 				if (sourceId)
 					void navigate({ ...opts, to: route, params: { sourceId }, search });
 				break;
 			case "/endpoints/destinations/$destinationId":
-				/* istanbul ignore else -- @preserve unreachable: the matched route always has this param */
+				/* istanbul ignore else -- @preserve */
 				if (destinationId)
 					void navigate({
 						...opts,
@@ -125,11 +120,11 @@ export function useProjectSelection(enabled: boolean) {
 					});
 				break;
 			case "/events/$eventId":
-				/* istanbul ignore else -- @preserve unreachable: the matched route always has this param */
+				/* istanbul ignore else -- @preserve */
 				if (eventId)
 					void navigate({ ...opts, to: route, params: { eventId }, search });
 				break;
-			/* istanbul ignore next -- @preserve unreachable: validateSearch drops any scope but "deployment", so this route never lacks project_id while project-scoped */
+			/* istanbul ignore next -- @preserve */
 			case "/alerts/$alertId":
 				if (alertId)
 					void navigate({ ...opts, to: route, params: { alertId }, search });
@@ -151,7 +146,7 @@ export function useProjectSelection(enabled: boolean) {
 	]);
 
 	const selectProject = (id: string) => {
-		/* istanbul ignore if -- @preserve unreachable: the picker offers only loaded projects and Radix Select reports changes only */
+		/* istanbul ignore if -- @preserve */
 		if (id === projectId || !hasProject(id)) return;
 		if (!projectScoped) {
 			setRemembered(id);

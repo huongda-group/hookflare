@@ -9,7 +9,6 @@ import {
 } from "@/lib/time";
 
 const H = 3_600_000;
-// 2026-10-15T17:00Z is local midnight of Oct 16 in Asia/Ho_Chi_Minh (UTC+7).
 const MIDNIGHT = Date.UTC(2026, 9, 15, 17);
 
 describe("time", () => {
@@ -55,7 +54,6 @@ describe("time", () => {
 	});
 
 	it("round-trips datetime-local values in local time", () => {
-		// 10:00 local (UTC+7) on Oct 16.
 		const ms = MIDNIGHT + 10 * H;
 		expect(toLocalInput(ms)).toBe("2026-10-16T10:00");
 		expect(fromLocalInput("2026-10-16T10:00")).toBe(ms);

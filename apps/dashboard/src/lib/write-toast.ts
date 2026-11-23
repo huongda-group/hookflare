@@ -82,7 +82,6 @@ function updateResource(
 	return feedback(`${name} updated`, `update ${label}`);
 }
 
-/** Choose fixed copy; never include resource IDs or request/response values. */
 export function getWriteToast(
 	method: string,
 	path: string,

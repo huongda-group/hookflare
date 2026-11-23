@@ -19,7 +19,6 @@ declare module "@tanstack/react-router" {
 	}
 }
 
-/** These render outside the app shell and have no `/me` to load (spec §6.7). */
 const BARE_ROUTES = new Set(["/setup", "/login"]);
 
 export const Route = createRootRouteWithContext<RouterContext>()({
@@ -38,7 +37,6 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 function RootComponent() {
 	const { pathname } = useLocation();
 	const pageTitle = useMatches({
-		// An unmatched URL can still have a leaf match for its path prefix.
 		select: (matches) =>
 			matches.some((match) => match._notFound)
 				? undefined

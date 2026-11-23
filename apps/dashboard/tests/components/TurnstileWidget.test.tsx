@@ -12,7 +12,6 @@ type RenderOptions = {
 	"error-callback": () => void;
 };
 
-/** A fresh module per test: the script promise is cached at module scope. */
 async function loadWidget() {
 	vi.resetModules();
 	return (await import("@/components/TurnstileWidget")).TurnstileWidget;
@@ -23,10 +22,8 @@ const scripts = () =>
 		(s) => s.src === SCRIPT_SRC,
 	);
 
-/** jsdom never fetches external scripts, so the test settles the tag itself. */
 const settle = async (script: HTMLScriptElement, type: "load" | "error") => {
 	script.dispatchEvent(new Event(type));
-	// Let the load promise's handlers run.
 	await Promise.resolve();
 	await Promise.resolve();
 };
@@ -74,7 +71,6 @@ describe("TurnstileWidget script loading", () => {
 				resetKey={0}
 			/>,
 		);
-		// The failed load is forgotten, so a new mount tries again.
 		expect(scripts()).toHaveLength(1);
 	});
 
@@ -106,7 +102,6 @@ describe("TurnstileWidget script loading", () => {
 		const props = { siteKey: "0xKEY", action: "login" as const, onToken };
 		const view = render(<TurnstileWidget {...props} resetKey={0} />);
 
-		// A reset before the widget exists only drops any token.
 		view.rerender(<TurnstileWidget {...props} resetKey={1} />);
 		expect(onToken).toHaveBeenLastCalledWith(null);
 		expect(reset).not.toHaveBeenCalled();
@@ -125,7 +120,6 @@ describe("TurnstileWidget script loading", () => {
 		expect(onToken).toHaveBeenLastCalledWith(null);
 
 		view.unmount();
-		// A late widget error after unmount still drops the token, without state updates.
 		onToken.mockClear();
 		options["error-callback"]();
 		expect(onToken).toHaveBeenCalledWith(null);

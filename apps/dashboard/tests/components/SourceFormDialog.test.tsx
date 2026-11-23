@@ -15,7 +15,6 @@ import { createQueryClient } from "@/router";
 import { destination, project, source } from "../helpers/fixtures";
 import { apiUrl, server } from "../helpers/server";
 
-/** DirtyFormGuard blocks through the router, so the dialog mounts in one. */
 async function wrap(ui: ReactNode) {
 	const qc = createQueryClient();
 	const rootRoute = createRootRoute({
@@ -63,7 +62,6 @@ describe("SourceFormDialog", () => {
 		await user.click(
 			await screen.findByRole("option", { name: "HMAC signature" }),
 		);
-		// Too short for the shared schema; must not linger once hidden.
 		await user.type(screen.getByLabelText(/^Secret/), "short");
 		await user.click(screen.getByLabelText("Auth type"));
 		await user.click(await screen.findByRole("option", { name: "None" }));
@@ -327,7 +325,6 @@ describe("SourceFormDialog", () => {
 		await user.click(
 			await screen.findByRole("option", { name: "Query parameter" }),
 		);
-		// The token's own "Name" field follows the source name.
 		await user.type(screen.getAllByLabelText("Name")[1], "token");
 		await user.type(
 			screen.getByLabelText(/^Secret/),

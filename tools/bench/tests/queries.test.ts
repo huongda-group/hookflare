@@ -27,7 +27,6 @@ describe("b5Queries", () => {
 		);
 		for (const q of all) expect(q.path.startsWith("/api/admin/v1/")).toBe(true);
 
-		// provider_event_id requires source_id in the API.
 		expect(names).not.toContain("events: provider_event_id miss");
 
 		const scoped = b5Queries({ projectId: "prj_1", sourceId: "src_1" });

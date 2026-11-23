@@ -37,7 +37,6 @@ export type AuditAction =
 
 const SENSITIVE_KEY = /secret|token|password/i;
 
-/** Destination URLs may carry credentials in the path or query (spec §7). */
 function originOf(value: string): string {
 	try {
 		return new URL(value).origin;
@@ -46,7 +45,6 @@ function originOf(value: string): string {
 	}
 }
 
-/** Spec §7: drops sensitive keys at any depth and keeps only the origin of `url`. */
 export function redactDiff(value: unknown): unknown {
 	if (Array.isArray(value)) return value.map(redactDiff);
 	if (value === null || typeof value !== "object") return value;
@@ -69,7 +67,6 @@ export type AuditEntry = {
 	at: number;
 };
 
-/** Unexecuted: put it in the same db.batch as the mutation (M3-7). */
 export function auditInsert(db: Db, e: AuditEntry) {
 	return db.insert(auditLogs).values({
 		id: newId("aud", e.at),
@@ -86,11 +83,6 @@ export function auditInsert(db: Db, e: AuditEntry) {
 	});
 }
 
-/**
- * For a conditional UPDATE in the same db.batch: the audit row is written
- * only if the statement right before it changed a row. D1 runs a batch on
- * one connection in order, so changes() refers to that statement.
- */
 export function auditInsertIfChanged(db: Db, e: AuditEntry) {
 	const diff = e.diff === undefined ? null : JSON.stringify(redactDiff(e.diff));
 	return db.insert(auditLogs).select(

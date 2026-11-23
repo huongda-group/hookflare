@@ -397,7 +397,6 @@ describe("POST /in/:sourceId", () => {
 	it("keeps the R2 object when D1 throws after the event was committed", async () => {
 		const base = testDeps({ queue: recordingQueue() });
 		const p = await seedPipeline(base);
-		// The batch commits, then the call reports an error (e.g. a lost connection).
 		const deps = {
 			...base,
 			db: new Proxy(base.db, {
@@ -687,7 +686,6 @@ describe("ingress best-effort and lookup failures", () => {
 			.select()
 			.from(deliveries)
 			.where(eq(deliveries.eventId, event.id));
-		// The message is already on the queue; the consumer accepts pending deliveries.
 		expect((base.queue as RecordingQueue).sent).toEqual([
 			{ deliveryId: delivery.id },
 		]);

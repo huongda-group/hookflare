@@ -11,12 +11,6 @@ import {
 } from "recharts";
 import { groupByDay } from "@/lib/time";
 
-/**
- * The existing received/delivered/failed series (spec §8.3). Strokes use Task 1
- * status tokens, and the failed series is dashed so failure never depends on
- * color alone (spec §11). A text/table summary accompanies the figure for
- * screen readers and non-visual inspection.
- */
 export function TrendChart({
 	points,
 	range,

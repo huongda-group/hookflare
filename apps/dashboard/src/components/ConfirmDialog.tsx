@@ -24,7 +24,6 @@ type Props = {
 	onConfirm: (reason?: string) => Promise<unknown>;
 };
 
-/** Audited actions can collect an optional reason. */
 export function ConfirmDialog({
 	open,
 	onOpenChange,
@@ -33,7 +32,6 @@ export function ConfirmDialog({
 }: Props) {
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			{/* DialogContent unmounts when closed, so the reason below resets on every close path. */}
 			<DialogContent onCloseAutoFocus={onCloseAutoFocus}>
 				<ConfirmForm onOpenChange={onOpenChange} {...rest} />
 			</DialogContent>

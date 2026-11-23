@@ -9,23 +9,16 @@ import type {
 } from "@/lib/queries/resource-options";
 import { useResourceOptions } from "@/lib/queries/resource-options";
 
-/** Stable so the observer only re-selects when the cached pages change. */
 function indexPages(
 	data: InfiniteData<Page<ResourceOption>> | undefined,
 ): Map<string, ResourceOption> {
 	const byId = new Map<string, ResourceOption>();
 	// biome-ignore format: keeps the coverage hint on the fallback operand
-	for (const page of data?.pages ?? /* istanbul ignore next -- @preserve unreachable: `select` only runs on loaded data */ [])
+	for (const page of data?.pages ?? /* istanbul ignore next -- @preserve */ [])
 		for (const option of page.data) byId.set(option.id, option);
 	return byId;
 }
 
-/**
- * Shows the name of a resource from the pages already cached by a
- * `ResourcePicker` — no request is issued for a label (spec §7: name lookups
- * are decoration). A missing permission, deleted resource, failed lookup, or
- * simply unloaded page falls back to the exact ID.
- */
 export function ResourceLabel({
 	kind,
 	id,
@@ -41,8 +34,6 @@ export function ResourceLabel({
 		Map<string, ResourceOption>
 	>({
 		queryKey: qk.resourceOptions(kind, projectId),
-		// `skipToken` keeps the query disabled: this observer only reads the
-		// shared cache, it never fetches.
 		queryFn: skipToken,
 		select: indexPages,
 	});
@@ -57,12 +48,6 @@ export function ResourceLabel({
 	return <span title={id}>{option.name}</span>;
 }
 
-/**
- * A named in-app link to a resource (spec §7): warms the shared
- * `resource-options` page the label reads, then decorates with the name when
- * the page holding it has loaded. Rows and detail pages share this so a
- * relationship never renders as a bare ID once its page is in cache.
- */
 export function NamedResourceLink({
 	kind,
 	id,
@@ -74,7 +59,6 @@ export function NamedResourceLink({
 	projectId?: string;
 	href: string;
 }) {
-	// Warm only: the label below observes the shared cache and never fetches.
 	void useResourceOptions(kind, projectId);
 	return (
 		<Link

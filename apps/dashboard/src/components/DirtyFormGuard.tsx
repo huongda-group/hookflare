@@ -17,18 +17,6 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 
-/**
- * Warns before discarding dirty configuration (spec §7).
- *
- * - Same-app navigation is blocked while `dirty` (TanStack Router blocker).
- * - A form cancel/close request goes through `requestClose`, so callers keep
- *   their existing close callback and only the guard decides to prompt.
- * - A native `beforeunload` listener is attached only while dirty and removed
- *   on cleanup, so a clean form never blocks a reload.
- * - A successful save clears `dirty` before closing: the deferred request is
- *   flushed without a prompt. The same clear-while-parked rule settles a blocked
- *   navigation by letting it proceed, so no resolver promise is left dangling.
- */
 export function DirtyFormGuard({
 	dirty,
 	children,
@@ -36,8 +24,6 @@ export function DirtyFormGuard({
 	dirty: boolean;
 	children: (requestClose: (close: () => void) => void) => ReactNode;
 }): JSX.Element {
-	// Read the latest value at call time; a save that clears `dirty` and then
-	// closes in the same handler must not prompt.
 	const dirtyRef = useRef(dirty);
 	dirtyRef.current = dirty;
 
@@ -45,7 +31,6 @@ export function DirtyFormGuard({
 
 	const blocker = useBlocker({
 		shouldBlockFn: () => dirtyRef.current,
-		// The unload guard below is attached only while dirty.
 		enableBeforeUnload: false,
 		withResolver: true,
 	});
@@ -60,22 +45,12 @@ export function DirtyFormGuard({
 		return () => window.removeEventListener("beforeunload", onBeforeUnload);
 	}, [dirty]);
 
-	// `dirty` flipped back to false while a close was pending: the save
-	// succeeded, so let the close through without a prompt.
 	useEffect(() => {
 		if (!pendingClose || dirty) return;
 		setPendingClose(null);
 		pendingClose();
 	}, [pendingClose, dirty]);
 
-	// `dirty` flipped back to false while the router blocker is parked: the
-	// unsaved condition is gone (the save the user initiated completed), so the
-	// navigation they already asked for is allowed through — the same "let the
-	// pending action proceed" semantics as the `pendingClose` flush above. The
-	// alternative, `reset()`, would strand the user on the current route with
-	// nothing left to protect. Without this effect the parked resolver promise
-	// never settles: `@tanstack/history` awaits it inline, so the navigation is
-	// silently dropped and the promise leaks.
 	useEffect(() => {
 		if (dirty || blocker.status !== "blocked") return;
 		blocker.proceed();
@@ -109,7 +84,7 @@ export function DirtyFormGuard({
 			<Dialog
 				open={dirty && (blocked || pendingClose !== null)}
 				onOpenChange={(open) => {
-					/* istanbul ignore else -- @preserve unreachable: Radix calls onOpenChange(true) only from a Trigger, and this dialog has none */
+					/* istanbul ignore else -- @preserve */
 					if (!open) keepEditing();
 				}}
 			>

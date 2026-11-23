@@ -52,7 +52,6 @@ const status = async (id: string) =>
 	(
 		await deps.db.select().from(archiveBatches).where(eq(archiveBatches.id, id))
 	)[0];
-/** Select + D1 delete of part 1's first chunk; R2 is left to the caller. */
 async function purgeD1(batchId: string) {
 	const sel = await selectPurgeChunk(deps, batchId, 1, cut, "");
 	const deleted = await deletePurgeChunk(
@@ -81,7 +80,7 @@ describe("verifyBatch", () => {
 			batch_id: batch.id,
 			parts: [{ part_no: 1, item_count: 2 }],
 		});
-		expect(await verifyBatch(deps, batch.id)).toEqual({ ok: true }); // idempotent
+		expect(await verifyBatch(deps, batch.id)).toEqual({ ok: true });
 	});
 
 	it.each(["size", "hash", "count"])(
@@ -112,7 +111,6 @@ describe("verifyBatch", () => {
 			await expect(
 				deletePurgeChunk(deps, batch.id, 1, cut, [events[0].eventId]),
 			).rejects.toThrow(/not verified/);
-			// The failed batch releases its events (I6).
 			const [ev] = await deps.db
 				.select()
 				.from(webhookEvents)
@@ -167,7 +165,6 @@ describe("verifyBatch", () => {
 			.from(archiveParts)
 			.where(eq(archiveParts.batchId, batch.id));
 		const obj = await deps.payloads.get(part.r2Key as string);
-		// Same bytes and size, re-put without a checksum.
 		await deps.payloads.put(
 			part.r2Key as string,
 			await (obj as R2ObjectBody).arrayBuffer(),
@@ -194,11 +191,9 @@ describe("purge", () => {
 				.from(deliveries)
 				.where(eq(deliveries.id, events[0].deliveryId)),
 		).toEqual([]);
-		// R2 still there until the third step (M5-20).
 		expect(await deps.payloads.head(keys[0])).not.toBeNull();
 		expect(await deleteGonePayloads(deps, chunk.rows)).toBe(2);
 		expect(await deps.payloads.head(keys[0])).toBeNull();
-		// Retried steps match nothing and are no-ops.
 		expect(
 			await deletePurgeChunk(
 				deps,
@@ -217,13 +212,12 @@ describe("purge", () => {
 		expect((await status(batch.id)).status).toBe("purged");
 		expect(
 			await listKeys(deps.payloads, `archive/2026/01/02/${batch.id}/`),
-		).toHaveLength(2); // part + manifest stay
+		).toHaveLength(2);
 	});
 
 	it("skips an event that got a replay after its part was built", async () => {
 		const { batch, events } = await built();
 		await verifyBatch(deps, batch.id);
-		// A replay inserts a non-terminal delivery and clears the mark.
 		await deps.db
 			.update(webhookEvents)
 			.set({ archiveBatchId: null, archivePart: null })
@@ -271,8 +265,6 @@ describe("purge", () => {
 		if (!victim?.r2Key || !other?.r2Key)
 			throw new Error("test setup: events have no r2 key");
 		const victimKey = victim.r2Key;
-		// A replay lands between the SELECT step and the D1 delete and clears
-		// the victim's mark, so the delete skips it.
 		beforeNextBatch(deps, () =>
 			deps.db
 				.update(webhookEvents)
@@ -289,7 +281,6 @@ describe("purge", () => {
 		expect(deleted).toBe(1);
 		expect(await eventExists(victim.id)).toBe(true);
 		expect(await deleteGonePayloads(deps, sel.rows)).toBe(1);
-		// The skipped event's payload object survives; the other one is gone.
 		expect(await deps.payloads.head(victimKey)).not.toBeNull();
 		expect(await deps.payloads.head(other.r2Key)).toBeNull();
 	});
@@ -454,7 +445,6 @@ describe("missing R2 payload (re-review)", () => {
 			expect((await purgeD1(batch.id)).deleted).toBe(1);
 			expect(await eventExists(lost.eventId)).toBe(true);
 			expect(await eventExists(kept.eventId)).toBe(false);
-			// finish keeps the parked mark, so no later run marks it again.
 			await finishBatch(deps, batch.id);
 			const [parked] = await deps.db
 				.select()

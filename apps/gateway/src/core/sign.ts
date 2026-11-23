@@ -17,7 +17,6 @@ function secretKeyBytes(secret: string): Uint8Array<ArrayBuffer> {
 	return out;
 }
 
-/** Standard Webhooks v1: HMAC-SHA256 over `${id}.${timestamp}.` ‖ body. */
 export async function signWebhook(input: {
 	id: string;
 	timestampSec: number;
@@ -40,7 +39,6 @@ export async function signWebhook(input: {
 	return `v1,${base64(new Uint8Array(await crypto.subtle.sign("HMAC", key, message)))}`;
 }
 
-/** Spec M3-3: during a grace window both signatures are sent, current first. */
 export async function signWebhookAll(input: {
 	id: string;
 	timestampSec: number;
@@ -58,8 +56,6 @@ function isDenied(name: string, value: string): boolean {
 		isDroppedHeader(name) ||
 		CREDENTIAL_HEADERS.includes(name) ||
 		name.startsWith("webhook-") ||
-		// Gateway-owned markers (x-hookflare-test, x-webhook-event-id) must not be
-		// spoofable by the original sender.
 		name.startsWith("x-hookflare-") ||
 		name === "x-webhook-event-id" ||
 		value === REDACTED ||

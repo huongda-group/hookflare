@@ -1,6 +1,5 @@
 import type { Deps } from "../deps";
 
-/** D1 binds at most 100 parameters per query; id lists stay well below it. */
 export const ENQUEUE_CHUNK = 50;
 
 export function chunks<T>(items: T[], size = ENQUEUE_CHUNK): T[][] {
@@ -10,10 +9,6 @@ export function chunks<T>(items: T[], size = ENQUEUE_CHUNK): T[][] {
 	return out;
 }
 
-/**
- * Send first, then mark (spec §8.1): a mark that fails leaves the row
- * eligible, so the next run re-sends and the lease absorbs the duplicate.
- */
 export async function enqueueThenMark(
 	deps: Deps,
 	ids: string[],

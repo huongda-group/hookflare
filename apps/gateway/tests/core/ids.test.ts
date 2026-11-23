@@ -57,7 +57,7 @@ describe("ids", () => {
 	});
 
 	it("throws on an unknown prefix", () => {
-		// @ts-expect-error - intentionally invalid prefix
+		// @ts-expect-error
 		expect(() => newId("nope")).toThrow(/invalid id prefix/);
 	});
 
@@ -95,8 +95,6 @@ describe("ids", () => {
 	});
 
 	describe("random-part overflow within one millisecond", () => {
-		// The generator keeps per-isolate state, so each case gets a fresh
-		// module instance and forces the random part to all-ones.
 		async function freshIds() {
 			vi.resetModules();
 			return import("../../src/core/ids");

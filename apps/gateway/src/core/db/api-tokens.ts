@@ -16,15 +16,10 @@ export type TokenActor = {
 	lastUsedAt: number | null;
 };
 
-/** Unexecuted, so a creation can insert the token and its audit row in one batch. */
 export function insertApiTokenStmt(db: Db, row: ApiTokenRow) {
 	return db.insert(apiTokens).values(row);
 }
 
-/**
- * Resolves a Bearer token to its user. The user row is read per request, so a
- * disabled user's tokens stop working immediately (spec §6.9).
- */
 export async function findTokenActor(
 	db: Db,
 	tokenHash: string,
@@ -58,7 +53,6 @@ export function touchApiTokenStmt(db: Db, id: string, now: number) {
 		.where(eq(apiTokens.id, id));
 }
 
-/** Newest first; revoked and expired rows stay visible to the UI. */
 export async function listApiTokens(
 	db: Db,
 	username: string,
@@ -71,10 +65,6 @@ export async function listApiTokens(
 		.all();
 }
 
-/**
- * Unexecuted; `.returning()` yields a row only when it was not already revoked,
- * so the route can tell "just revoked" from "was already revoked" (404).
- */
 export function revokeApiTokenStmt(
 	db: Db,
 	username: string,
@@ -94,7 +84,6 @@ export function revokeApiTokenStmt(
 		.returning();
 }
 
-/** Unexecuted; revokes every live token of a user, for an admin password reset. */
 export function revokeUserApiTokensStmt(db: Db, username: string, now: number) {
 	return db
 		.update(apiTokens)
@@ -102,12 +91,6 @@ export function revokeUserApiTokensStmt(db: Db, username: string, now: number) {
 		.where(and(eq(apiTokens.username, username), isNull(apiTokens.revokedAt)));
 }
 
-/**
- * Unexecuted pair for a user disable, in the same batch as (and after) the
- * user update that sets `disabled_at = now`: the revoke applies only if that
- * update did, and the audit row — written only when a token was revoked —
- * lists the IDs read back from the rows it revoked (never a token or hash).
- */
 export function revokeDisabledUserApiTokensStmts(
 	db: Db,
 	a: { username: string; now: number; actor: string; reason: string | null },

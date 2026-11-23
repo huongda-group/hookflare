@@ -47,7 +47,6 @@ async function loadChannel(
 		.get();
 }
 
-/** Spec §6.5. Configs are write-only (M5-9). */
 export function alertChannelRoutes() {
 	const routes = new Hono<AppBindings>();
 	const guard = requirePermission("settings.manage");
@@ -153,7 +152,6 @@ export function alertChannelRoutes() {
 		return c.body(null, 204);
 	});
 
-	/** Synchronous; writes no incident or notification (spec §6.5). */
 	routes.post("/:id/test", guard, async (c) => {
 		const ch = await loadChannel(c, c.req.param("id"));
 		if (!ch) return c.json({ error: "not_found" }, 404);

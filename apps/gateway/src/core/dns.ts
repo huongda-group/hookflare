@@ -1,4 +1,3 @@
-/** The resolver failed (network, HTTP, or a DNS status other than NOERROR/NXDOMAIN). */
 export class DnsError extends Error {
 	override name = "DnsError";
 }
@@ -16,7 +15,6 @@ type DohResponse = {
 	Answer?: Array<{ type: number; data: string }>;
 };
 
-/** A + AAAA via DNS-over-HTTPS (JSON API). CNAME chains are followed by the resolver. */
 export function createDohResolver(fetchFn: typeof fetch): ResolveDns {
 	async function query(
 		host: string,

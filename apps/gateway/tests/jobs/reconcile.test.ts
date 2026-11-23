@@ -37,7 +37,6 @@ async function status(deps: Deps, id: string) {
 	return d;
 }
 
-/** Many deliveries for one event; the batch keeps us under D1's bound-parameter limit. */
 async function seedMany(
 	deps: Deps,
 	p: Pipeline,
@@ -64,9 +63,6 @@ async function seedMany(
 describe("reconcile", () => {
 	beforeEach(async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
-		// One miniflare D1 is shared by every test in this file and reconcile
-		// selects globally by status/time, so wipe rows (pipelines accumulate
-		// harmlessly; only deliveries/events can match a later rule).
 		const deps = testDeps();
 		await deps.db.delete(deliveryAttempts);
 		await deps.db.delete(deliveries);
@@ -242,7 +238,6 @@ describe("reconcile", () => {
 		const deps = faultyDeps(base, {
 			d1: [{ match: /^update "deliveries"/, on: { nth: 1 } }],
 		});
-		// drizzle wraps driver errors in DrizzleQueryError; the fault surfaces as `cause` (as in tests/faults.test.ts).
 		const err = await reconcile(deps).then(
 			() => null,
 			(e: unknown) => e as Error & { cause?: unknown },

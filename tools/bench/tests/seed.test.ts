@@ -14,7 +14,6 @@ import {
 	writeSqlFiles,
 } from "../src/seed";
 
-/** Deterministic RNG for tests (mulberry32). */
 function seeded(seed: number): () => number {
 	let s = seed >>> 0;
 	return () => {
@@ -204,8 +203,6 @@ describe("writeSqlFiles streaming", () => {
 
 	it("measures statement size in UTF-8 bytes, not characters", async () => {
 		const dir = testDir("utf8");
-		// 4,000 chars but 8,000 bytes each: char counting would pack ~22 rows
-		// into one statement and overflow the byte limit.
 		const wide = "é".repeat(4000);
 		function* rows(): Generator<SeedRow> {
 			for (let i = 0; i < 60; i++) {

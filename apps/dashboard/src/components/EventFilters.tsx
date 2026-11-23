@@ -9,14 +9,6 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { EventsSearch } from "@/pages/EventsPage";
 
-/**
- * Committed filters stay in URL state; the text draft inside is local only and
- * never becomes query state. Typing fires no request: values reach the URL
- * (and the API) only through Apply, the search submit, or an immediate
- * committed selection (named pickers, status toggles). Desktop applies
- * committed selections and submitted text, not each keystroke or accidental
- * blur (spec §7).
- */
 export function EventFilters({
 	value,
 	onApply,
@@ -32,10 +24,6 @@ export function EventFilters({
 	const [hint, setHint] = useState<string | null>(null);
 	const [httpError, setHttpError] = useState<string | null>(null);
 
-	// Follow committed URL values without remounting: each draft syncs only
-	// from its own committed field. Unrelated commits (e.g. a status toggle)
-	// leave in-progress text/time drafts alone, while Back/Forward navigation
-	// to a different committed value refreshes the matching draft.
 	useEffect(() => {
 		setProvider(value.provider_event_id ?? "");
 	}, [value.provider_event_id]);
@@ -139,8 +127,6 @@ export function EventFilters({
 					projectId={value.project_id}
 					value={value.source_id}
 					onChange={(source_id) => {
-						// A provider event ID only means something within one source (the
-						// API rejects it without source_id), so drop it with the source.
 						if (source_id) return onApply({ source_id });
 						setProvider("");
 						onApply({ source_id: undefined, provider_event_id: undefined });

@@ -11,7 +11,6 @@ import { permissionsOf } from "../../core/rbac";
 import { hashPassword, verifyPassword } from "../auth/password";
 import { readJson } from "../http";
 
-/** Any active user; the dashboard uses it to show or hide actions (spec §12). */
 export function meRoutes() {
 	const routes = new Hono<AppBindings>();
 	routes.get("/", async (c) => {
@@ -25,7 +24,6 @@ export function meRoutes() {
 		} satisfies Me);
 	});
 
-	// Any logged-in user changes their own password (spec §6.6).
 	routes.post("/password", async (c) => {
 		const actor = c.var.actor;
 		if (!actor) return c.json({ error: "forbidden" }, 403);
@@ -33,14 +31,11 @@ export function meRoutes() {
 		if (!body.ok) return body.response;
 		const { db, now } = c.var.deps;
 		const { current_password, new_password } = body.value;
-		// PBKDF2 is expensive: bound guesses per account before verifying, with
-		// the login route's 429 shape (spec §6.5).
 		const { success } = await c.env.LOGIN_LIMITER.limit({
 			key: `password:${actor.username}`,
 		});
 		if (!success) return c.json({ error: "too_many_attempts" }, 429);
 		const existing = await getUser(db, actor.username);
-		// A wrong current password writes nothing (not even an audit row).
 		if (
 			!existing ||
 			!(await verifyPassword(current_password, existing.passwordHash))
@@ -52,8 +47,6 @@ export function meRoutes() {
 		}
 		const ts = now();
 		const passwordHash = await hashPassword(new_password);
-		// A cookie caller keeps the session that made the change; a token caller
-		// has no `sessionIdHash`, so every session of the user is deleted.
 		await db.batch([
 			db
 				.update(users)

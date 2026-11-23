@@ -33,6 +33,6 @@ export const Route = createFileRoute("/alerts/$alertId")({
 				alertId={alertId}
 				scope={{ project_id: projectId }}
 			/>
-		) : /* istanbul ignore next -- @preserve unreachable: AppShell renders project-scoped outlets only once a project is active */ null;
+		) : /* istanbul ignore next -- @preserve */ null;
 	},
 });

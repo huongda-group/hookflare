@@ -4,13 +4,11 @@ import type { AuthType } from "../core/db/schema";
 export type VerifyInput = {
 	headers: Headers;
 	url: URL;
-	/** Raw request bytes: signatures are always checked before any parsing. */
 	body: Uint8Array<ArrayBuffer>;
 	config: Record<string, unknown>;
 	secret: string | null;
 };
 
-/** Why verification failed: logged only, the caller always answers a bare 401 (spec §6.1). */
 export type VerifyFailure =
 	| "missing_secret"
 	| "missing_header"
@@ -50,7 +48,6 @@ function decodeBase64(value: string): Uint8Array<ArrayBuffer> | null {
 	}
 }
 
-/** Constant-time for equal lengths; length itself is not secret here. */
 function equalBytes(
 	a: Uint8Array<ArrayBufferLike>,
 	b: Uint8Array<ArrayBufferLike>,
@@ -104,7 +101,6 @@ const tokenVerifier: Verifier = {
 		if (given === null) {
 			return fail("missing_header");
 		}
-		// Compare fixed-size digests so the timing does not reveal the secret's length.
 		const [a, b] = await Promise.all([
 			crypto.subtle.digest("SHA-256", encoder.encode(given)),
 			crypto.subtle.digest("SHA-256", encoder.encode(secret)),
@@ -119,7 +115,6 @@ export const verifiers: Record<AuthType, Verifier> = {
 	token: tokenVerifier,
 };
 
-/** The header that carries the credential, redacted before the headers are stored. */
 export function authHeaderName(
 	type: AuthType,
 	config: Record<string, unknown>,

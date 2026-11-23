@@ -1,11 +1,3 @@
-/**
- * PBKDF2-HMAC-SHA256 password hashing, stored as
- * `pbkdf2-sha256$<iterations>$<salt b64>$<hash b64>` so the cost can rise
- * later without invalidating existing hashes.
- */
-
-/** Workers caps PBKDF2 at 100 000 iterations; the count is also read back from
- * each stored hash, so raising this constant is enough to raise the cost. */
 export const PBKDF2_ITERATIONS = 100_000;
 
 const ALGORITHM = "pbkdf2-sha256";
@@ -20,8 +12,6 @@ type ParsedHash = {
 	hash: Uint8Array;
 };
 
-/** A well-formed hash that no password can produce: the dummy target keeps a
- * login for an unknown username as expensive as one for a known username. */
 const DUMMY_HASH: ParsedHash = {
 	iterations: PBKDF2_ITERATIONS,
 	salt: new Uint8Array(SALT_BYTES),
@@ -37,8 +27,6 @@ function toBase64(bytes: Uint8Array): string {
 	return btoa(binary);
 }
 
-/** Accepts padded standard base64 and unpadded base64url; returns null instead
- * of throwing so a corrupted stored hash fails closed. */
 function fromBase64(value: string): Uint8Array | null {
 	const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
 	const pad = normalized.length % 4;
@@ -76,7 +64,6 @@ function parseHash(stored: string | null): ParsedHash | null {
 		return null;
 	}
 	const iterations = Number(iterationsRaw);
-	// Above the runtime cap deriveBits can only throw, so treat it as malformed.
 	if (
 		!Number.isSafeInteger(iterations) ||
 		iterations < 1 ||
@@ -117,23 +104,16 @@ async function derive(
 	return new Uint8Array(bits);
 }
 
-/** Constant-time for equal lengths; lengths are not secret here. */
 function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
 	return a.byteLength === b.byteLength && crypto.subtle.timingSafeEqual(a, b);
 }
 
-/** The password is used verbatim: never trimmed, lowercased, or normalized. */
 export async function hashPassword(password: string): Promise<string> {
 	const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
 	const hash = await derive(password, salt, PBKDF2_ITERATIONS);
 	return `${ALGORITHM}$${PBKDF2_ITERATIONS}$${toBase64(salt)}$${toBase64(hash)}`;
 }
 
-/**
- * A `null` or malformed `stored` value still runs one PBKDF2 pass (against
- * `DUMMY_HASH`) and returns false, so login timing does not reveal which
- * usernames exist. Never throws.
- */
 export async function verifyPassword(
 	password: string,
 	stored: string | null,

@@ -7,7 +7,6 @@ describe("TrendChart", () => {
 		const previousTimezone = process.env.TZ;
 		process.env.TZ = "Asia/Ho_Chi_Minh";
 		try {
-			// Oct 15 17:00Z is Oct 16 midnight in Asia/Ho_Chi_Minh.
 			render(
 				<TrendChart
 					range="7d"

@@ -99,7 +99,6 @@ export function DestinationDetailPage({
 	);
 }
 
-/** Spec §10: an empty policy field falls back to the `/settings` retry defaults. */
 function PolicySection({ destination: d }: { destination: Destination }) {
 	const defaults = useSettings().data?.retry_defaults;
 	return (

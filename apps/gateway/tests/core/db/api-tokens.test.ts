@@ -17,10 +17,8 @@ import type { Deps } from "../../../src/deps";
 import { testDeps } from "../../helpers/deps";
 
 const T0 = 1_800_000_000_000;
-/** Only "IS NOT NULL" matters here; the value itself is never parsed. */
 const PASSWORD_HASH = "pbkdf2-sha256$100000$c2FsdA==$aGFzaA==";
 
-/** Storage may be shared across a file, so keys are unique per test. */
 function uid(prefix = "u") {
 	return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 }
@@ -168,7 +166,6 @@ describe("revokeApiTokenStmt", () => {
 		const row = token({ username });
 		await insertApiTokenStmt(deps.db, row);
 
-		// Another owner cannot revoke it: the update matches nothing.
 		const [[wrongOwner]] = await deps.db.batch([
 			revokeApiTokenStmt(deps.db, other, row.id, T0),
 		]);

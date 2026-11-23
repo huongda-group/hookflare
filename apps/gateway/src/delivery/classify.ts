@@ -6,7 +6,6 @@ import { retryAfterDelaySeconds, retryDelaySeconds } from "./backoff";
 export type { SendResult };
 
 export type AttemptContext = {
-	/** attempt_count + 1 for this attempt. */
 	attemptNo: number;
 	policy: Policy;
 	now: number;
@@ -16,7 +15,6 @@ export type AttemptContext = {
 export type AttemptOutcome = {
 	errorKind: ErrorKind | null;
 	httpStatus: number | null;
-	/** Short, non-sensitive; stored as last_error / error_message. */
 	error: string | null;
 } & (
 	| { status: "retrying"; delaySeconds: number }
@@ -25,14 +23,12 @@ export type AttemptOutcome = {
 
 const RETRYABLE_4XX = new Set([408, 429]);
 
-/** Spec §7.1. Pure: the caller passes the clock and the jitter source. */
 export function classifyAttempt(
 	result: SendResult,
 	ctx: AttemptContext,
 ): AttemptOutcome {
 	const failure = failureOf(result, ctx.policy.timeoutMs);
 	if (result.kind === "error") {
-		// failure is non-null for every error result
 		const f = failure as NonNullable<typeof failure>;
 		return retryable(f.errorKind, null, f.message, ctx, null);
 	}

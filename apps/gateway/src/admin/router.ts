@@ -20,11 +20,8 @@ import { userRoutes } from "./routes/users";
 
 export const ADMIN_API_PREFIX = "/api/admin/v1";
 
-/** Built-in auth, first-project prerequisite, then per-route permissions. */
 export function adminRoutes() {
 	const routes = new Hono<AppBindings>();
-	// Public auth routes are registered before the middleware, so their
-	// handlers respond first and authMiddleware never runs for /auth/*.
 	routes.route("/auth", authRoutes());
 	routes.use("*", authMiddleware());
 	routes.use("*", async (c, next) => {

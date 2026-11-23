@@ -59,7 +59,6 @@ describe("Retry-After", () => {
 		"1.5",
 		"-5",
 		"2026-10-15",
-		// Shaped like an IMF-fixdate, but not a real date.
 		"Mon, 15 Foo 2026 10:00:00 GMT",
 	])("rejects %j", (value) => {
 		expect(parseRetryAfter(value, NOW)).toBeNull();

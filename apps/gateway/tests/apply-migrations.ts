@@ -3,10 +3,6 @@ import { env } from "cloudflare:workers";
 import { beforeEach } from "vitest";
 
 declare global {
-	// Test-only bindings injected via miniflare `bindings` in
-	// vitest.config.ts. (Plain fixed test values, not real credentials.)
-	// `env` from "cloudflare:workers" is typed as `Cloudflare.Env`,
-	// so augment that interface rather than the global `Env`.
 	namespace Cloudflare {
 		interface Env {
 			TEST_MIGRATIONS: D1Migration[];

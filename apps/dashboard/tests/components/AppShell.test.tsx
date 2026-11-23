@@ -231,7 +231,6 @@ describe("AppShell", () => {
 		expect(
 			await screen.findByText("Current password is incorrect"),
 		).toBeInTheDocument();
-		// A wrong_password 401 is not an expired session: the user stays put.
 		expect(
 			screen.queryByRole("button", { name: "Sign in" }),
 		).not.toBeInTheDocument();
@@ -322,7 +321,6 @@ describe("AppShell", () => {
 		await screen.findByText("admin@example.com");
 		const nav = screen.getByRole("navigation", { name: "Main" });
 		const events = within(nav).getByRole("link", { name: "Events" });
-		// Background plus weight, not color alone (spec §6).
 		expect(events).toHaveClass("bg-selected");
 		expect(events).toHaveClass("font-medium");
 		expect(events).toHaveAttribute("aria-current", "page");
@@ -341,11 +339,9 @@ describe("AppShell", () => {
 		const trigger = screen.getByRole("button", { name: "Open navigation" });
 		await user.click(trigger);
 		const drawer = await screen.findByRole("dialog");
-		// Two copies of the links legitimately exist while the drawer is open.
 		expect(
 			within(drawer).getByRole("link", { name: "Events" }),
 		).toBeInTheDocument();
-		// Focus moves into the drawer and stays there when tabbing past its end.
 		expect(drawer.contains(document.activeElement)).toBe(true);
 		await user.tab();
 		await user.tab();
@@ -419,7 +415,6 @@ describe("AppShell", () => {
 				queryFn: () => import("@/lib/api").then((m) => m.api.get("/projects")),
 			})
 			.catch(() => {});
-		// The shell refetches /me and downgrades its administrative controls.
 		await screen.findByText("viewer@example.com");
 		expect(
 			screen.queryByRole("link", { name: "Audit" }),

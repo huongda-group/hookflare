@@ -20,7 +20,6 @@ import {
 import { requirePermission } from "../auth/permission";
 import { readQuery } from "../http";
 
-/** null when nothing completed: 0 % would claim every delivery failed. */
 export function successRate(delivered: number, failed: number): number | null {
 	const done = delivered + failed;
 	return done === 0 ? null : delivered / done;
@@ -42,7 +41,6 @@ export function overviewRoutes() {
 		const projectAlert = scope.projectId
 			? eq(alerts.projectId, scope.projectId)
 			: undefined;
-		// Legacy scoped callers also count system alerts unless they opt out.
 		const alertScope =
 			projectAlert && !q.value.alert_scope
 				? or(projectAlert, isNull(alerts.projectId))

@@ -41,7 +41,7 @@ describe("consumer and retry defaults", () => {
 			) as unknown as typeof fetch,
 		});
 		const p = await seedPipeline(deps);
-		await loadRetryDefaults(deps); // caches DEFAULT_POLICY (20 attempts)
+		await loadRetryDefaults(deps);
 		await upsertRetryDefaults(
 			deps.db,
 			{
@@ -60,8 +60,6 @@ describe("consumer and retry defaults", () => {
 		now += SETTINGS_CACHE_TTL_MS;
 		const second = await seedDelivery(deps, p);
 		await processDelivery(deps, second.deliveryId, logger);
-		// A 503 is retryable, so an exhausted budget lands on "dead"
-		// (consumer.test.ts asserts the same for destination budgets).
 		expect(await statusOf(deps, second.deliveryId)).toBe("dead");
 	});
 

@@ -55,14 +55,12 @@ export function LoginPage({ next }: { next?: string }) {
 	const submit = form.handleSubmit(
 		async (values) => {
 			setError(null);
-			// Drop any root error from a previous attempt so only the latest shows.
 			form.clearErrors("root");
 			try {
 				await login({ ...values, turnstile_token: token ?? undefined });
 				qc.removeQueries({ queryKey: qk.me });
 				await navigate({ href: safeNext(next) });
 			} catch (err) {
-				// Turnstile tokens are single-use: drop it and reset the widget.
 				setToken(null);
 				setResetKey((k) => k + 1);
 				if (err instanceof ApiError && err.status === 401) {

@@ -167,11 +167,19 @@ describe("Destination actions", () => {
 		);
 	});
 
-	it("offers neither Pause, Resume nor Disable on a disabled destination", async () => {
+	it("re-enables a disabled destination with the given reason and offers neither Pause, Resume nor Disable", async () => {
+		const patches: unknown[] = [];
 		server.use(
 			http.get(apiUrl("/destinations/dst_1"), () =>
 				HttpResponse.json(destination({ status: "disabled" })),
 			),
+			http.patch(apiUrl("/destinations/dst_1"), async ({ request }) => {
+				patches.push({
+					scope: new URL(request.url).searchParams.get("project_id"),
+					body: await request.json(),
+				});
+				return HttpResponse.json(destination());
+			}),
 		);
 		const { user } = renderApp(DESTINATION);
 		await screen.findByRole("heading", { name: "Billing API" });
@@ -181,6 +189,35 @@ describe("Destination actions", () => {
 		).toBeInTheDocument();
 		for (const name of ["Pause", "Resume", "Disable"])
 			expect(screen.queryByRole("menuitem", { name })).not.toBeInTheDocument();
+		await user.click(screen.getByRole("menuitem", { name: "Enable" }));
+		const dialog = within(
+			await screen.findByRole("dialog", { name: "Enable Billing API?" }),
+		);
+		expect(dialog.getByText(/replay them from Failures/)).toBeInTheDocument();
+		await user.type(dialog.getByLabelText("Reason (optional)"), "back");
+		await user.click(dialog.getByRole("button", { name: "Enable" }));
+		await waitFor(() =>
+			expect(patches).toEqual([
+				{ scope: "prj_1", body: { status: "active", reason: "back" } },
+			]),
+		);
+	});
+
+	it("offers no Enable on an active destination", async () => {
+		server.use(
+			http.get(apiUrl("/destinations/dst_1"), () =>
+				HttpResponse.json(destination()),
+			),
+		);
+		const { user } = renderApp(DESTINATION);
+		await screen.findByRole("heading", { name: "Billing API" });
+		await user.click(screen.getByRole("button", { name: "Actions" }));
+		expect(
+			await screen.findByRole("menuitem", { name: "Disable" }),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByRole("menuitem", { name: "Enable" }),
+		).not.toBeInTheDocument();
 	});
 
 	it("opens the menu from the keyboard without leaving the list", async () => {

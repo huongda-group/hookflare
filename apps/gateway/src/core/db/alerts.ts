@@ -13,9 +13,7 @@ export type AlertKey = {
 export type ActiveAlert = AlertKey & {
 	projectId: string | null;
 	details: Record<string, unknown>;
-	/** Kept active by a quiet period (new_dead, consecutive_failures) although the condition is clear this run. */
 	carryOver?: boolean;
-	/** consecutive_failures only: write `details` onto the open incident (its cleared_at changed). */
 	updateDetails?: boolean;
 };
 export type OpenAlertRow = typeof alerts.$inferSelect;
@@ -25,7 +23,6 @@ export type ChannelRoute = {
 	projectIds: string[];
 };
 
-/** Takes plain strings so OpenAlertRow (rule: string) fits without a cast. */
 export const keyOf = (k: {
 	rule: string;
 	resourceType: string;
@@ -53,7 +50,6 @@ export async function listChannelRoutes(db: Db): Promise<ChannelRoute[]> {
 	}));
 }
 
-/** Spec §6.3: empty = all; incidents without a project only reach unscoped channels. */
 export function matchChannels(
 	routes: ChannelRoute[],
 	rule: string,
@@ -85,10 +81,6 @@ function notificationRows(
 	}));
 }
 
-/**
- * M5-11: the partial unique index makes a concurrent open a no-op, and the
- * notifications only land when this run's row exists (same batch).
- */
 export function openAlertStatements(
 	db: Db,
 	a: ActiveAlert,
@@ -120,14 +112,6 @@ export function openAlertStatements(
 	return { alertId, stmts };
 }
 
-/**
- * Resolve/remind carry the same conditional-insert pattern as the open path:
- * the notification only lands when this run's own state change is visible
- * (resolved_at / last_notified_at = now), and the per-channel NOT EXISTS
- * clause drops the duplicate when two runs share a timestamp. The remind
- * update additionally compares-and-swaps on the observed last_notified_at so
- * only the first overlapping run's update takes effect.
- */
 export function resolveAlertStatements(
 	db: Db,
 	alert: OpenAlertRow,

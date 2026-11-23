@@ -8,11 +8,9 @@ export const PUBLIC_IP = "93.184.216.34";
 
 export type RecordingQueue = Queue<DeliveryMessage> & {
 	sent: DeliveryMessage[];
-	/** delaySeconds of each send, parallel to `sent`. */
 	delays: (number | undefined)[];
 };
 
-/** Stands in for env.QUEUE: a real send would run the consumer inside tests. */
 export function recordingQueue(
 	options: { fail?: boolean } = {},
 ): RecordingQueue {
@@ -37,7 +35,6 @@ export function recordingQueue(
 	return queue as unknown as RecordingQueue;
 }
 
-/** Records create() calls; get().status() reports `status` (default "complete"). */
 export function fakeArchive(status = "complete") {
 	const created: string[] = [];
 	const archive = {
@@ -58,7 +55,6 @@ export function fakeArchive(status = "complete") {
 	return archive as unknown as Workflow & { created: string[] };
 }
 
-/** Same shape as fakeArchive, for the M6 backup Workflow binding. */
 export function fakeBackup(status = "complete") {
 	return fakeArchive(status) as unknown as Workflow & { created: string[] };
 }
@@ -74,7 +70,6 @@ export function testDeps(overrides: Partial<Deps> = {}): Deps {
 		) as unknown as typeof fetch,
 		resolveDns: vi.fn(async () => [PUBLIC_IP]),
 		now: () => Date.now(),
-		// Unlimited destinations never call it (M5-6); a test that sets limits injects fakeLimiter().
 		limiter: () => {
 			throw new Error("limiter not stubbed: use fakeLimiter()");
 		},
@@ -86,7 +81,6 @@ export function testDeps(overrides: Partial<Deps> = {}): Deps {
 	};
 }
 
-/** A Db whose batch() rejects like an unavailable D1; everything else is real. */
 export function withFailingBatch(db: Db): Db {
 	return new Proxy(db, {
 		get(target, prop, receiver) {

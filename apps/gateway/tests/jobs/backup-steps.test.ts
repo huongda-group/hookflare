@@ -47,7 +47,6 @@ async function seedBackup(
 	});
 }
 
-/** Dump every non-empty table under prefix; returns the collected PartMeta list. */
 async function dumpAll(prefix: string) {
 	const tables = await listTables(deps.db);
 	const parts: Awaited<ReturnType<typeof dumpPage>>["part"][] = [];
@@ -79,7 +78,6 @@ async function dumpAll(prefix: string) {
 	};
 }
 
-/** A backup of just the `backups` table: one part plus its manifest. */
 async function smallBackup(id: string, prefix: string) {
 	await seedBackup(id, prefix, Date.now());
 	const table = (await listTables(deps.db)).find((t) => t.name === "backups");
@@ -90,7 +88,6 @@ async function smallBackup(id: string, prefix: string) {
 	return part;
 }
 
-/** deps whose backups bucket serves `head` through `rewrite` (null = missing). */
 function withHead(
 	rewrite: (key: string, head: R2Object | null) => unknown,
 	extra: Partial<Record<"get", (key: string) => unknown>> = {},
@@ -286,7 +283,6 @@ describe("verifyBackup", () => {
 	it("fails when a part has the right size but another sha256", async () => {
 		const part = await smallBackup("bk_psha", "test/backup/steps/psha/");
 		const obj = await deps.backups.get(part.key);
-		// Same bytes, stored without a checksum: R2 reports no sha256.
 		await deps.backups.put(part.key, await (obj as R2ObjectBody).arrayBuffer());
 		expect(await verifyBackup(deps, "bk_psha")).toEqual({
 			ok: false,
@@ -350,7 +346,6 @@ describe("expireBackups", () => {
 		await seedBackup("bk_newest", "test/backup/steps/newest/", now, "verified");
 		await deps.backups.put(`${oldPrefix}a.ndjson.gz`, new Uint8Array([1]));
 		await deps.backups.put(`${oldPrefix}b.ndjson.gz`, new Uint8Array([2]));
-		// Deletes the first key, then fails: half the backup is gone.
 		const flaky = {
 			...deps,
 			backups: new Proxy(deps.backups, {
@@ -418,7 +413,6 @@ describe("expireBackups", () => {
 		for (const k of ["a", "b", "c"])
 			await deps.backups.put(`${done}${k}`, new Uint8Array([1]));
 		await deps.backups.put(`${running}a`, new Uint8Array([1]));
-		// One key per list page: the loop must follow the cursor.
 		const paged = {
 			...deps,
 			backups: new Proxy(deps.backups, {

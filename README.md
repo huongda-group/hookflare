@@ -74,11 +74,12 @@ pnpm install
 cp apps/gateway/.dev.vars.example apps/gateway/.dev.vars
 # Set SECRETS_KEY to the output of: openssl rand -base64 32
 # (the Turnstile test keys already have usable defaults.)
+pnpm build              # builds the dashboard (without it, / shows a "Dashboard not built" placeholder)
 pnpm db:migrate:local   # applies migrations to local D1
 pnpm dev                # gateway on http://localhost:8787 (admin API + built dashboard)
 ```
 
-Open http://localhost:8787, create the first admin on the onboarding page (setup needs no token and closes after the first admin is created), and log in. Local D1, R2, Queues, Durable Objects, and Workflows are all simulated by `wrangler dev`.
+Open http://localhost:8787, create the first admin on the onboarding page (setup needs no token and closes after the first admin is created), then create the first project when the dashboard asks for it. Local D1, R2, Queues, Durable Objects, and Workflows are all simulated by `wrangler dev`.
 
 For dashboard development with hot reload, also run `pnpm dev:dashboard` and open http://localhost:5173 (Vite proxies `/api` to the Worker).
 
@@ -104,7 +105,7 @@ pnpm exec wrangler r2 bucket create hookflare-payloads
 pnpm exec wrangler r2 bucket create hookflare-backups
 ```
 
-Put the `database_id` printed by `d1 create` into `apps/gateway/wrangler.jsonc` → `d1_databases[0].database_id` (the committed value is the maintainers' production database). The ingress rate limiter, cron triggers, the `DestinationLimiter` Durable Object, and the `hookflare-archive`/`hookflare-backup` Workflows are declared in the config and created by the deploy.
+Put the `database_id` printed by `d1 create` into `apps/gateway/wrangler.jsonc` → `d1_databases[0].database_id` (the committed value is the maintainers' production database). The ingress and login rate limiters, cron triggers, the `DestinationLimiter` Durable Object, and the `hookflare-archive`/`hookflare-backup` Workflows are declared in the config and created by the deploy.
 
 **2. Set the encryption key**
 
@@ -115,11 +116,7 @@ pnpm exec wrangler secret put SECRETS_KEY --config apps/gateway/wrangler.jsonc
 
 `SECRETS_KEY` encrypts source secrets, signing secrets, and alert channel configs. A backup cannot replace it: without it a restored database is unreadable.
 
-**3. Create the first admin right after the first deploy**
-
-Open the Worker URL and create the first admin immediately, before the URL is public — setup is first-come, needs no token, and closes once a password-bearing account exists.
-
-**4. (Optional) Turnstile**
+**3. (Optional) Turnstile**
 
 Create a Turnstile widget for the Worker's hostname — either in the Cloudflare dashboard (Turnstile → Add widget), or via the Cloudflare API MCP server:
 
@@ -136,44 +133,50 @@ pnpm exec wrangler secret put TURNSTILE_SECRET_KEY --config apps/gateway/wrangle
 
 Turnstile protects the login and onboarding forms. Both values must be set, or neither: with neither set the pages show a "Turnstile is off" notice (and `/healthz` reports it); with only one set, login and setup fail closed. If the ingress hostname differs from the admin hostname, also set `PUBLIC_BASE_URL` in `apps/gateway/wrangler.jsonc` → `vars` (e.g. `https://hooks.example.com`) so `ingress_url` in admin responses points at it.
 
-**5. Deploy**
+**4. Deploy**
 
 ```bash
-pnpm run deploy -- --skip-smoke   # first deploy: no sink or API token yet
-curl https://<your-worker-domain>/healthz   # {"status":"ok","version":"<worker version id>"}
+pnpm run deploy -- --skip-smoke   # no sink or API token yet
+curl https://<your-worker-domain>/healthz   # {"status":"ok",...,"version":"<worker version id>",...}
 ```
 
-`pnpm run deploy` runs [`scripts/deploy.mjs`](scripts/deploy.mjs): it records a restore point (D1 Time Travel bookmark and the live Worker version), builds the dashboard, applies remote D1 migrations, deploys the Worker, smoke-tests, and prints the exact rollback commands. Later deploys should run the smoke test; see [`docs/runbook.md#deploy-and-smoke`](docs/runbook.md#deploy-and-smoke). (`pnpm deploy` is a built-in pnpm command, so always use `pnpm run deploy`.)
+`pnpm run deploy` runs [`scripts/deploy.mjs`](scripts/deploy.mjs): it builds the dashboard, records a restore point (D1 Time Travel bookmark and the live Worker version), applies remote D1 migrations, deploys the Worker, smoke-tests, and prints the exact rollback commands. Later deploys should run the smoke test; see [`docs/runbook.md#deploy-and-smoke`](docs/runbook.md#deploy-and-smoke). (`pnpm deploy` is a built-in pnpm command, so always use `pnpm run deploy`.)
 
-Open `https://<your-worker-domain>/`, create the first admin on the onboarding page (no token; first-come, so create it before the URL is public), and continue in the dashboard: create a project, a destination, and a source, then add alert channels and review Settings › Storage (retention and backups).
+On the very first deploy the Worker does not exist yet: the script records `previousVersion: "none"`, and the printed rollback list has no Worker rollback, only the D1 restore.
+
+**5. Create the first admin immediately**
+
+Open `https://<your-worker-domain>/` and create the first admin on the onboarding page right away, before the URL is shared: setup is first-come, needs no token, and closes once a password-bearing account exists. Then continue in the dashboard: create a project, a destination, and a source, add alert channels, and review Settings › Storage (retention and backups).
+
+**6. (Optional) Smoke test**
+
+Deploy the sink (`pnpm --filter sink run deploy`), create an admin API token in Settings › Users, then run `HOOKFLARE_URL=https://<your-worker-domain> HOOKFLARE_API_TOKEN=<token> SINK_URL=https://<sink-domain> pnpm run smoke`. See [`docs/runbook.md#setup`](docs/runbook.md#setup).
 
 ### Receive your first webhook
 
-This uses the local instance from option A. On a deployed Worker, replace the host and authenticate with an API token (create one in Settings › Users).
+This uses the local instance from option A, after you have created the first admin and the first project in the dashboard. Admin API calls authenticate with an API token: in Settings › Users, choose **API tokens** on your account, create one, and copy the `hf_…` value (shown only once). On a deployed Worker, replace the host.
+
+The dashboard login is protected by Turnstile (the local `.dev.vars` uses Cloudflare's test keys), so a `curl` login without a Turnstile token gets `403 turnstile_failed`; use the API token instead.
 
 ```bash
+export HOOKFLARE_API_TOKEN='hf_...'
 API=http://localhost:8787/api/admin/v1
-# Log in: the session cookie lands in jar. Cookie requests to non-GET
-# endpoints must also send an Origin header.
-curl -c jar -b jar -H "origin: http://localhost:8787" -X POST $API/auth/login \
-  -H 'content-type: application/json' -d '{"username":"admin","password":"<password>"}'
-# From here on, -b jar -H "origin: http://localhost:8787" authenticates you.
-# (Or skip the jar: -H "authorization: Bearer $HOOKFLARE_API_TOKEN" instead.)
-PROJECT=$(curl -s -b jar -H "origin: http://localhost:8787" -X POST $API/projects -H 'content-type: application/json' \
-  -d '{"name":"Shop"}' | jq -r .id)
-curl -s -b jar -H "origin: http://localhost:8787" -X POST $API/destinations -H 'content-type: application/json' \
-  -d "{\"project_id\":\"$PROJECT\",\"name\":\"Backend\",\"url\":\"https://backend.example.com/hooks\"}"
-# → save signing_secret: it is shown only once
-DEST=<destination id from the response>
-curl -s -b jar -H "origin: http://localhost:8787" -X POST $API/sources -H 'content-type: application/json' \
-  -d "{\"project_id\":\"$PROJECT\",\"destination_id\":\"$DEST\",\"name\":\"Provider\",\"auth_type\":\"hmac\",\"auth_config\":{\"header\":\"x-signature\",\"algorithm\":\"sha256\",\"encoding\":\"hex\"}}"
-# → save secret and ingress_url: the secret is shown only once
-SOURCE_SECRET=<secret from the response>
-INGRESS_URL=<ingress_url from the response>
+AUTH="authorization: Bearer $HOOKFLARE_API_TOKEN"
+PROJECT=$(curl -fsS "$API/projects" -H "$AUTH" | jq -er '.data[0].id')
+DEST=$(curl -fsS "$API/destinations" -H "$AUTH" \
+  --json "{\"project_id\":\"$PROJECT\",\"name\":\"Backend\",\"url\":\"https://backend.example.com/hooks\"}")
+# → save .signing_secret: it is shown only once
+DEST_ID=$(printf %s "$DEST" | jq -er .id)
+SOURCE=$(curl -fsS "$API/sources" -H "$AUTH" \
+  --json "{\"project_id\":\"$PROJECT\",\"destination_id\":\"$DEST_ID\",\"name\":\"Provider\",\"auth_type\":\"hmac\",\"auth_config\":{\"header\":\"x-signature\",\"algorithm\":\"sha256\",\"encoding\":\"hex\"}}")
+# → .secret is shown only once
+SOURCE_SECRET=$(printf %s "$SOURCE" | jq -er .secret)
+INGRESS_URL=$(printf %s "$SOURCE" | jq -er .ingress_url)
 BODY='{"id":"evt_1","type":"order.paid"}'
-SIG=$(printf %s "$BODY" | openssl dgst -sha256 -hmac "$SOURCE_SECRET" | awk '{print $2}')
-curl -i -X POST "$INGRESS_URL" -H 'content-type: application/json' -H "x-signature: $SIG" -d "$BODY"
-# → 202 {"event_id":"evt_..."}; then GET $API/events/<event_id> shows the delivery and its attempt
+SIG=$(printf %s "$BODY" | openssl dgst -sha256 -hmac "$SOURCE_SECRET" | awk '{print $NF}')
+curl -i "$INGRESS_URL" -H "x-signature: $SIG" --json "$BODY"
+# → 202 {"event_id":"evt_..."}; then this shows the delivery and its attempts:
+# curl -fsS "$API/events/<event_id>" -H "$AUTH" | jq .deliveries
 ```
 
 Destination URLs must be public HTTPS (the SSRF guard rejects private addresses), so point the destination at a real endpoint or a request bin. Verify the signature in your backend with any [Standard Webhooks library](https://github.com/standard-webhooks/standard-webhooks#reference-implementations). Source changes made with `PATCH` can take up to 30 seconds to reach ingress.
@@ -190,30 +193,83 @@ gateway for Cloudflare Workers, and verify it runs locally.
    openssl, curl, jq. Report anything missing instead of installing system
    packages without asking me.
 2. Clone the repo (latest release: `git checkout 1.0.0`) and run `pnpm install`
-   at the repository root.
+   and `pnpm build` at the repository root.
 3. Copy `apps/gateway/.dev.vars.example` to `apps/gateway/.dev.vars`. Set
    SECRETS_KEY to a fresh `openssl rand -base64 32` (the
    Turnstile test keys already have usable defaults). Never commit
    `.dev.vars` or print the key back to me.
 4. Run `pnpm db:migrate:local`, then start `pnpm dev` in the background and
    wait until `curl http://localhost:8787/healthz` returns "status":"ok".
-5. Open http://localhost:8787/setup, create the first admin (no token
-   needed), then follow the README section "Receive
-   your first webhook" against http://localhost:8787 (log in with
-   `curl -c jar -b jar -H "origin: http://localhost:8787"`) and confirm
-   ingress returns 202 with an event_id.
+5. Ask me to open http://localhost:8787/setup, create the first admin and
+   the first project, and create an API token in Settings > Users (export it
+   myself as HOOKFLARE_API_TOKEN). Then follow the README section "Receive
+   your first webhook" against http://localhost:8787 and confirm ingress
+   returns 202 with an event_id.
 6. Run `pnpm test`, `pnpm typecheck`, and `pnpm lint`; report any failure with
    its output instead of changing code to make it pass.
 7. Stop. Do NOT run `wrangler login`, create Cloudflare resources, set secrets,
-   or deploy unless I explicitly ask. If I do, follow README "Option B" and
-   `docs/runbook.md#setup` step by step, show me each command that changes my
-   Cloudflare account before running it, and use `pnpm run deploy`
-   (never `pnpm deploy`). If the Cloudflare API MCP server is connected, use it
-   for account operations (README "Cloudflare operations with the Cloudflare
-   MCP server") and wrangler only for local dev and `pnpm run deploy`.
+   or deploy unless I explicitly ask. If I do, use the README prompt "Deploy
+   to your Cloudflare account with an AI coding agent".
 
 Finish with a short summary: what was installed, the local URLs, and what is
 left for a Cloudflare deployment.
+```
+
+### Deploy to your Cloudflare account with an AI coding agent
+
+Once the local install works, paste this prompt into the same agent to deploy your own production instance. It changes your Cloudflare account, so the agent shows every account-changing step before running it, and you type the secrets yourself.
+
+```text
+Deploy Hookflare from this checkout to MY Cloudflare account as a production
+instance. Follow README "Option B: deploy to Cloudflare" and
+docs/runbook.md#setup. Rules for the whole task:
+- Show me each command or API call that creates, changes, or deletes anything
+  in my Cloudflare account, and wait for my OK before running it.
+- Never read, print, log, or commit secret values (SECRETS_KEY,
+  TURNSTILE_SECRET_KEY, API tokens). When a secret must be set, give me the
+  exact command to run myself with the `!` prefix.
+- Use `pnpm run deploy`, never `pnpm deploy`. Do not run SQL against the
+  remote D1 database.
+
+1. Preflight: confirm `pnpm test` passes on the checked-out release. Find my
+   account: use the Cloudflare API MCP server if it is connected (pass the
+   account ID explicitly), otherwise `pnpm exec wrangler whoami` (if it is not
+   logged in, ask me to run `! pnpm exec wrangler login`). If several accounts
+   are listed, ask me which one. Confirm the account is on Workers Paid and
+   has a workers.dev subdomain (or ask me for a custom domain).
+2. Check for name clashes first: D1 database `hookflare`, queues
+   `hookflare-deliveries` and `hookflare-deliveries-dlq`, R2 buckets
+   `hookflare-payloads` and `hookflare-backups`, Worker `hookflare`. If any
+   exist, stop and ask me whether to reuse them or pick new names (new names
+   must then be updated in apps/gateway/wrangler.jsonc).
+3. Create the missing resources. Put the new D1 `database_id` into
+   apps/gateway/wrangler.jsonc -> d1_databases[0].database_id: the committed
+   ID belongs to the maintainers, so the deploy must never use it.
+4. SECRETS_KEY: tell me to run
+   `! openssl rand -base64 32` and save the value in my password manager, then
+   `! pnpm exec wrangler secret put SECRETS_KEY --config apps/gateway/wrangler.jsonc`
+   and paste it. Remind me that a backup cannot replace this key.
+5. Turnstile (ask me whether I want it): create a managed widget for the
+   Worker hostname, put the site key in vars.TURNSTILE_SITE_KEY, and have me
+   set TURNSTILE_SECRET_KEY with `! pnpm exec wrangler secret put ...`. Both
+   or neither. If ingress will use a different hostname, set
+   vars.PUBLIC_BASE_URL.
+6. Deploy with `pnpm run deploy -- --skip-smoke`. If any step fails, stop
+   and show me the output with its rollback lines; do not work around the
+   script. Then confirm `curl https://<worker-host>/healthz` returns
+   "status":"ok".
+7. Immediately tell me to open https://<worker-host>/setup and create the
+   first admin myself, before sharing the URL (setup is first-come). Do not
+   create the admin for me.
+8. Optional, ask first: deploy the sink (`pnpm --filter sink run deploy`),
+   have me create an admin API token in Settings > Users, and run
+   `pnpm run smoke` with HOOKFLARE_URL, HOOKFLARE_API_TOKEN, and SINK_URL that
+   I export myself.
+
+Finish with: the account and resource names/IDs used, the Worker URL, the
+health check result, the wrangler.jsonc changes to commit to my fork (never
+.dev.vars or secrets), the rollback commands printed by the deploy, and what
+is left (first admin, alert channels, Settings > Storage).
 ```
 
 ### Cloudflare operations with the Cloudflare MCP server
@@ -241,7 +297,7 @@ The Git-connected Workers Builds trigger runs `pnpm install --frozen-lockfile` a
 
 ## Dashboard
 
-Pages: Overview, Projects, Endpoints (sources and destinations), Events, Failures, Alerts, Archives, Audit log, and Settings (retry defaults, storage and backups, users). What a user can do depends on their role: **viewer** reads events and deliveries, **operator** also sees payloads, replays, and pauses/resumes destinations, **admin** also changes configuration (projects, endpoints, alert channels), manages users and settings, and reads the audit log.
+Pages: Overview, Projects, Endpoints (sources and destinations), Events, Failures, Alerts, Archives, Audit log, and Settings (retry defaults, storage and backups, alert channels and rules, users). What a user can do depends on their role: **viewer** reads events and deliveries, **operator** also sees payloads, replays, and pauses/resumes destinations, **admin** also changes configuration (projects, endpoints, alert channels), manages users and settings, and reads the audit log.
 
 For local development, run `pnpm dev` (create the first admin via the onboarding page — no token needed), plus `pnpm dev:dashboard` (Vite on port 5173, proxying `/api` to the Worker).
 
@@ -259,7 +315,7 @@ Feedback on the [roadmap](docs/roadmap.md) is welcome. Please open an issue to d
 
 ## Releases
 
-See [`CHANGELOG.md`](CHANGELOG.md) for released versions. To run a specific release, check out its tag before installing. Use the docs in that checkout rather than assuming the current docs also apply to older releases.
+See [`CHANGELOG.md`](CHANGELOG.md) for released versions. To run a specific release, check out its tag before installing. The docs in that checkout describe that release.
 
 ## License
 

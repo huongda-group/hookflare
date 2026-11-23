@@ -61,8 +61,7 @@ export function failureRoutes() {
 			next_cursor:
 				rows.length > q.value.limit && last
 					? encodeCursor(
-							last.completedAt ??
-								/* istanbul ignore next -- @preserve unreachable: listFailures filters completed_at IS NOT NULL */ 0,
+							last.completedAt ?? /* istanbul ignore next */ 0,
 							last.id,
 						)
 					: null,

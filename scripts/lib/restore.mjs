@@ -1,9 +1,3 @@
-/**
- * Path-B restore orchestration shared by `restore-backup.mjs` and
- * `verify-restore.mjs`. Every wrangler call goes through injected deps
- * (`r2Get`, `query`, `execute`), so the guards, streaming, resume, and
- * verify checks are unit-tested against a local SQLite database.
- */
 import { createHash } from "node:crypto";
 import {
 	copyFileSync,
@@ -25,42 +19,8 @@ import {
 	tableOrder,
 } from "./restore-sql.mjs";
 
-/**
- * @typedef {import("./restore-sql.mjs").Manifest} Manifest
- * @typedef {import("./restore-sql.mjs").ManifestTable} ManifestTable
- */
-
-/**
- * Wrangler-backed side effects, injectable for tests.
- * @typedef {object} RestoreDeps
- * @property {(key: string, dest: string) => Promise<void>} r2Get Download one backup object to a local file.
- * @property {(sql: string) => Promise<Record<string, unknown>[]>} query Run one read query on the target database.
- * @property {(file: string) => Promise<void>} execute Apply one SQL file to the target database.
- * @property {(message: string) => void} log
- */
-
-/**
- * @typedef {object} RestoreOptions
- * @property {string} prefix Backup prefix (`d1/YYYY/MM/DD/<id>/`).
- * @property {string} config Wrangler config whose `DB` binding is the target.
- * @property {boolean} dryRun Generate SQL and orphans.json only.
- * @property {boolean} allowKnownDb Allow the staging database as the target.
- * @property {number | null} from Apply from this file number on (`--from 0007` -> 7).
- * @property {string} cwd `.restore/<id>/` is created under it.
- * @property {string} productionConfig
- * @property {string} stagingConfig
- * @property {number} [maxFileBytes] Per-SQL-file byte cap (default 50 MB).
- */
-
-/** Rows per `preload` batch for self-referencing tables. */
 const PRELOAD_BATCH = 1000;
 
-/**
- * The backup id is the last path segment of the prefix
- * (`d1/2026/10/16/<id>/` -> `<id>`).
- * @param {string} prefix
- * @returns {string}
- */
 export function backupIdOf(prefix) {
 	const segments = prefix.split("/").filter((s) => s.length > 0);
 	if (segments.length === 0) {
@@ -69,21 +29,10 @@ export function backupIdOf(prefix) {
 	return segments[segments.length - 1];
 }
 
-/**
- * Quote an identifier with `"` doubled.
- * @param {string} s
- * @returns {string}
- */
 function ident(s) {
 	return `"${s.replace(/"/g, '""')}"`;
 }
 
-/**
- * The `database_id` of a wrangler config's `DB` binding (or its only D1
- * database).
- * @param {string} path
- * @returns {string}
- */
 export function configDatabaseId(path) {
 	const config = parseJsonc(readFileSync(path, "utf8"));
 	const dbs = Array.isArray(config.d1_databases) ? config.d1_databases : [];
@@ -94,12 +43,6 @@ export function configDatabaseId(path) {
 	return String(db.database_id);
 }
 
-/**
- * Refuse a target that is the production database (always) or the
- * staging database (unless `allowKnownDb`).
- * @param {{ config: string, allowKnownDb: boolean, productionConfig: string, stagingConfig: string }} options
- * @returns {void}
- */
 export function checkKnownDb({
 	config,
 	allowKnownDb,
@@ -119,11 +62,6 @@ export function checkKnownDb({
 	}
 }
 
-/**
- * Hex sha256 of a file, streamed.
- * @param {string} path
- * @returns {Promise<string>}
- */
 export async function sha256File(path) {
 	const hash = createHash("sha256");
 	for await (const chunk of createReadStream(path)) {
@@ -132,19 +70,12 @@ export async function sha256File(path) {
 	return hash.digest("hex");
 }
 
-/**
- * Stream the rows of one gzipped NDJSON part without holding the whole
- * part in memory.
- * @param {string} path
- * @returns {AsyncGenerator<Record<string, unknown>>}
- */
 export async function* readPartRows(path) {
 	const gunzip = pipeline(createReadStream(path), createGunzip(), () => {});
 	gunzip.setEncoding("utf8");
 	let rest = "";
 	for await (const chunk of gunzip) {
 		const lines = (rest + chunk).split("\n");
-		// split() always returns at least one element, so pop() is defined.
 		/* node:coverage ignore next */
 		rest = lines.pop() ?? "";
 		for (const line of lines) {
@@ -158,12 +89,6 @@ export async function* readPartRows(path) {
 	}
 }
 
-/**
- * Decoded byte count of each `{ $b64 }` BLOB value in a row.
- * @param {ManifestTable} table
- * @param {Record<string, unknown>} row
- * @returns {Record<string, number>}
- */
 function rowBlobBytes(table, row) {
 	const out = {};
 	for (const c of table.columns) {
@@ -172,7 +97,7 @@ function rowBlobBytes(table, row) {
 		}
 		const value = row[c.name] ?? null;
 		if (typeof value === "object" && value !== null && "$b64" in value) {
-			const b64 = /** @type {{ $b64: string }} */ (value).$b64;
+			const b64 = value.$b64;
 			const pad = b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0;
 			out[c.name] = (b64.length * 3) / 4 - pad;
 		}
@@ -180,13 +105,6 @@ function rowBlobBytes(table, row) {
 	return out;
 }
 
-/**
- * Download every part not already on disk with the right sha256.
- * @param {Manifest} manifest
- * @param {string} outDir
- * @param {RestoreDeps} deps
- * @returns {Promise<void>}
- */
 async function downloadParts(manifest, outDir, deps) {
 	for (const table of manifest.tables) {
 		for (const part of table.parts) {
@@ -206,24 +124,15 @@ async function downloadParts(manifest, outDir, deps) {
 	}
 }
 
-/**
- * Stream every part through the orphan filter and write SQL files.
- * Self-referencing tables get a key-only preload pass first.
- * @param {Manifest} manifest
- * @param {string} outDir
- * @param {number | undefined} maxFileBytes
- * @returns {Promise<{ files: string[], orphans: Record<string, unknown> }>}
- */
 async function generateSql(manifest, outDir, maxFileBytes) {
 	const sqlDir = join(outDir, "sql");
 	rmSync(sqlDir, { recursive: true, force: true });
 	const writer = new SqlFileWriter(sqlDir, maxFileBytes);
 	const filter = createOrphanFilter(manifest);
-	/** @type {Record<string, Record<string, number>>} */
 	const orphanBlobs = {};
 	const byName = new Map(manifest.tables.map((t) => [t.name, t]));
 	for (const name of tableOrder(manifest)) {
-		const table = /** @type {ManifestTable} */ (byName.get(name));
+		const table = byName.get(name);
 		if (table.foreign_keys.some((fk) => fk.table === table.name)) {
 			for (const part of table.parts) {
 				let batch = [];
@@ -253,10 +162,8 @@ async function generateSql(manifest, outDir, maxFileBytes) {
 			}
 		}
 	}
-	/** @type {Record<string, unknown>} */
 	const orphans = {};
 	for (const [name, entry] of Object.entries(filter.report())) {
-		// Every orphaned row creates orphanBlobs[name], so it is always set.
 		/* node:coverage ignore next */
 		orphans[name] = { ...entry, blob_bytes: orphanBlobs[name] ?? {} };
 	}
@@ -267,12 +174,6 @@ async function generateSql(manifest, outDir, maxFileBytes) {
 	return { files: writer.close(), orphans };
 }
 
-/**
- * Refuse a target whose applied migrations differ from the backup's.
- * @param {Manifest} manifest
- * @param {RestoreDeps} deps
- * @returns {Promise<void>}
- */
 async function checkMigrations(manifest, deps) {
 	const rows = await deps.query("SELECT name FROM d1_migrations ORDER BY id");
 	const applied = rows.map((r) => String(r.name));
@@ -290,12 +191,6 @@ async function checkMigrations(manifest, deps) {
 	}
 }
 
-/**
- * Refuse a target with rows in any manifest table.
- * @param {Manifest} manifest
- * @param {RestoreDeps} deps
- * @returns {Promise<void>}
- */
 async function checkEmpty(manifest, deps) {
 	if (manifest.tables.length === 0) {
 		return;
@@ -314,19 +209,6 @@ async function checkEmpty(manifest, deps) {
 	}
 }
 
-/**
- * `.restore/<id>/applied.json`: SQL files already applied to a database.
- * @typedef {{ database_id: string, files: { name: string, sha256: string }[] }} Applied
- */
-
-/**
- * Restore a backup: guards, download, SQL generation, then apply each SQL
- * file, recording progress in `applied.json` so a re-run resumes after
- * the last applied file.
- * @param {RestoreOptions} options
- * @param {RestoreDeps} deps
- * @returns {Promise<{ outDir: string, files: string[], orphans: Record<string, unknown> }>}
- */
 export async function restoreBackup(options, deps) {
 	const backupId = backupIdOf(options.prefix);
 	const outDir = join(options.cwd, ".restore", backupId);
@@ -335,7 +217,6 @@ export async function restoreBackup(options, deps) {
 	const databaseId = configDatabaseId(options.config);
 
 	const appliedPath = join(outDir, "applied.json");
-	/** @type {Applied} */
 	const applied = existsSync(appliedPath)
 		? JSON.parse(readFileSync(appliedPath, "utf8"))
 		: { database_id: databaseId, files: [] };
@@ -351,7 +232,6 @@ export async function restoreBackup(options, deps) {
 	const manifestPath = join(outDir, "manifest.json");
 	deps.log(`restore: downloading ${manifestKey}`);
 	await deps.r2Get(manifestKey, manifestPath);
-	/** @type {Manifest} */
 	const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 	if (manifest.version !== 1) {
 		throw new Error(
@@ -373,9 +253,7 @@ export async function restoreBackup(options, deps) {
 		options.maxFileBytes,
 	);
 	for (const [name, entry] of Object.entries(orphans)) {
-		deps.log(
-			`restore: ${name}: ${/** @type {{ count: number }} */ (entry).count} orphaned row(s) skipped`,
-		);
+		deps.log(`restore: ${name}: ${entry.count} orphaned row(s) skipped`);
 	}
 	deps.log(
 		`restore: wrote ${files.length} SQL file(s) to ${join(outDir, "sql")}`,
@@ -421,27 +299,8 @@ export async function restoreBackup(options, deps) {
 	return { outDir, files, orphans };
 }
 
-/**
- * One verify check: expected and actual as JSON strings.
- * @typedef {{ check: string, expected: string, actual: string, ok: boolean }} VerifyCheck
- */
-
-/**
- * Compare a restored database with its manifest: the manifest's own row
- * totals agree with its parts, integrity_check is ok, foreign_key_check
- * is empty, row counts and BLOB byte totals match the manifest minus
- * orphans, and the applied migrations match.
- * @param {{ manifest: Manifest, orphans: Record<string, { count: number, blob_bytes?: Record<string, number> }>, query: RestoreDeps["query"] }} input
- * @returns {Promise<VerifyCheck[]>}
- */
 export async function verifyChecks({ manifest, orphans, query }) {
-	/** @type {VerifyCheck[]} */
 	const checks = [];
-	/**
-	 * @param {string} name
-	 * @param {unknown} expected
-	 * @param {unknown} actual
-	 */
 	function check(name, expected, actual) {
 		const exp = JSON.stringify(expected);
 		const got = JSON.stringify(actual);
@@ -498,16 +357,6 @@ export async function verifyChecks({ manifest, orphans, query }) {
 	return checks;
 }
 
-/**
- * Copy exactly the manifest's migrations from `srcDir` into a fresh
- * `outDir`, so `wrangler d1 migrations apply` with `migrations_dir`
- * pointed at it brings a new database to the backup's schema. Refuses,
- * copying nothing, when a listed migration is not in `srcDir`.
- * @param {Pick<Manifest, "d1_migrations">} manifest
- * @param {string} srcDir
- * @param {string} outDir
- * @returns {string[]} The copied file names.
- */
 export function prepareMigrations(manifest, srcDir, outDir) {
 	const missing = manifest.d1_migrations.filter(
 		(m) => !existsSync(join(srcDir, m)),

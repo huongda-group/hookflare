@@ -61,7 +61,6 @@ describe("JsonViewer", () => {
 	});
 
 	it("collapses by byte length, not character count", () => {
-		// 140k two-byte characters: under 256K chars, over 256 KB.
 		const big = JSON.stringify({ blob: { data: "é".repeat(140_000) } });
 		expect(big.length).toBeLessThan(256 * 1024);
 		render(<JsonViewer text={big} contentType="application/json" />);
@@ -118,7 +117,6 @@ describe("JsonViewer", () => {
 	describe("Download", () => {
 		afterEach(() => vi.restoreAllMocks());
 
-		/** Captures what a Download click hands to the browser. */
 		function captureDownloads() {
 			const blobs: Blob[] = [];
 			const names: string[] = [];

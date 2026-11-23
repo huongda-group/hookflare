@@ -7,10 +7,6 @@ const deliverySteps = [
 	{ label: "Attempt", detail: "recorded", Icon: ListChecks },
 ] as const;
 
-/**
- * Shared first-run and sign-in frame. The illustration describes the actual
- * event → delivery → attempt relationship, without invented activity data.
- */
 export function AuthLayout({
 	title,
 	description,
@@ -115,11 +111,6 @@ export function AuthLayout({
 	);
 }
 
-/**
- * WCAG 2.2 intent (spec §11): the first invalid field receives focus after a
- * failed submit. Pages pass their ordered field-name → element-id map and a
- * predicate over the submit-time error object.
- */
 export function focusFirstInvalidField(
 	ids: Record<string, string>,
 	hasError: (name: string) => boolean,

@@ -2,11 +2,6 @@ import { drizzle } from "drizzle-orm/d1";
 import * as schema from "../../src/core/db/schema";
 import type { Deps } from "../../src/deps";
 
-/**
- * Fails a call whose text matches `match`: always (default), only on the
- * n-th match, or from the n-th match on. Faults wrap the raw bindings, so
- * production code has no test hooks (spec §10.1).
- */
 export type FaultRule = {
 	match: RegExp;
 	on?: "always" | { nth: number } | { from: number };
@@ -34,7 +29,6 @@ function bound<T extends object>(target: T, prop: string | symbol) {
 	return typeof value === "function" ? value.bind(target) : value;
 }
 
-/** A batch fails when any of its statements matches. */
 export function faultyD1(db: D1Database, rules: FaultRule[]): D1Database {
 	const trip = tripwire(rules, "D1_ERROR");
 	const real = new WeakMap<object, D1PreparedStatement>();
@@ -83,7 +77,6 @@ export function faultyD1(db: D1Database, rules: FaultRule[]): D1Database {
 	});
 }
 
-/** Matches the method name: "send" or "sendBatch". */
 export function faultyQueue<T>(queue: Queue<T>, rules: FaultRule[]): Queue<T> {
 	const trip = tripwire(rules, "Queue error");
 	return new Proxy(queue, {
@@ -100,7 +93,6 @@ export function faultyQueue<T>(queue: Queue<T>, rules: FaultRule[]): Queue<T> {
 	});
 }
 
-/** Matches "<method> <key>" for put/get/head/delete; every call is logged. */
 export function faultyR2(
 	bucket: R2Bucket,
 	rules: FaultRule[] = [],
@@ -129,7 +121,6 @@ export function faultyR2(
 	}) as R2Bucket & { log: string[] };
 }
 
-/** Deps whose bindings fail per the rules; everything else is `base`. */
 export function faultyDeps(
 	base: Deps,
 	f: { d1?: FaultRule[]; queue?: FaultRule[]; r2?: FaultRule[] },

@@ -20,7 +20,6 @@ import { auditStmt, readJson } from "../http";
 
 const DAY_MS = 86_400_000;
 
-/** `token_hash` is deliberately not part of this shape (spec §6.9). */
 function toApiToken(r: ApiTokenRow): ApiToken {
 	return {
 		id: r.id,
@@ -33,17 +32,17 @@ function toApiToken(r: ApiTokenRow): ApiToken {
 	};
 }
 
-/**
- * Mounted by `userRoutes()` at `/:username/tokens`, so the parent path supplies
- * the user every operation is scoped to (spec §6.9).
- */
 export function apiTokenRoutes() {
 	const routes = new Hono<AppBindings>();
 	const guard = requirePermission("users.manage");
 
 	routes.get("/", guard, async (c) => {
+		const { db } = c.var.deps;
 		const username = (c.req.param("username") ?? "").trim().toLowerCase();
-		const rows = await listApiTokens(c.var.deps.db, username);
+		if (!(await getUser(db, username))) {
+			return c.json({ error: "not_found" }, 404);
+		}
+		const rows = await listApiTokens(db, username);
 		return c.json({ data: rows.map(toApiToken) });
 	});
 
@@ -52,19 +51,15 @@ export function apiTokenRoutes() {
 		if (!body.ok) return body.response;
 		const { db, now } = c.var.deps;
 		const username = (c.req.param("username") ?? "").trim().toLowerCase();
-		// A token belongs to an existing user; the FK would otherwise 500.
 		const target = await getUser(db, username);
 		if (!target) {
 			return c.json({ error: "not_found" }, 404);
 		}
-		// A token for a password-less user could never authenticate:
-		// `findTokenActor` requires `password_hash IS NOT NULL`.
 		if (target.passwordHash === null) {
 			return c.json({ error: "user_has_no_password" }, 409);
 		}
 		const { name, expires_in_days, reason } = body.value;
 		const at = now();
-		// The plaintext is returned once; only its SHA-256 hex is stored.
 		const token = randomToken("hf_");
 		const row: ApiTokenRow = {
 			id: newId("tok", at),
@@ -83,7 +78,6 @@ export function apiTokenRoutes() {
 				resourceType: "api_token",
 				resourceId: row.id,
 				reason,
-				// Never the token or its hash (spec §6.9).
 				diff: { username, name },
 			}),
 		]);
@@ -95,21 +89,16 @@ export function apiTokenRoutes() {
 		const username = (c.req.param("username") ?? "").trim().toLowerCase();
 		const id = c.req.param("id");
 		const at = now();
-		// The audit is guarded by the revoke's `changes()`,
-		// so a no-op revoke writes nothing.
 		const [rows] = await db.batch([
 			revokeApiTokenStmt(db, username, id, at),
 			auditInsertIfChanged(db, {
-				actor:
-					c.var.actor?.username ??
-					/* istanbul ignore next -- @preserve unreachable: requirePermission already rejected a request without an actor */ "",
+				actor: c.var.actor?.username ?? /* istanbul ignore next */ "",
 				action: "api_token.revoked",
 				resourceType: "api_token",
 				resourceId: id,
 				at,
 			}),
 		]);
-		// No row means already revoked, unknown, or owned by another user.
 		if (!rows[0]) return c.json({ error: "not_found" }, 404);
 		return c.body(null, 204);
 	});

@@ -15,8 +15,6 @@ import { createQueryClient } from "@/router";
 import { renderApp } from "../helpers/render";
 import { apiUrl, server } from "../helpers/server";
 
-/** Renders the page without the root auth-state guard, so pending/failed
- *  auth-state is observable instead of blocking navigation. */
 function renderBare(page: ReactNode) {
 	const queryClient = createQueryClient();
 	const rootRoute = createRootRoute({ component: () => page });
@@ -33,7 +31,6 @@ function renderBare(page: ReactNode) {
 	return { user };
 }
 
-/** `/setup` only renders while onboarding is open, so keep the state true. */
 function setupOpen() {
 	server.use(
 		http.get(apiUrl("/auth/state"), () =>
@@ -53,7 +50,6 @@ function setupWithSiteKey() {
 	);
 }
 
-/** Stands in for the Turnstile `api.js` script the widget loads at runtime. */
 function stubTurnstile() {
 	const challenge: {
 		callback?: (token: string) => void;

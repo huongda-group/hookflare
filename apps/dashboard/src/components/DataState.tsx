@@ -4,19 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { errorText } from "@/lib/forms";
 
-/**
- * The three recoverable data states in one place (spec §7):
- *
- * - initial loading: a geometry-stable skeleton with an accessible status and
- *   no placeholder values, so the layout does not jump when data arrives;
- * - initial failure: a human-readable panel with Retry, never an empty/success
- *   state, because nothing loaded;
- * - failed background refresh (`error` with `hasData`): the loaded `children`
- *   stay on screen with a non-destructive warning and Retry — stale data is
- *   never replaced by an error panel.
- *
- * `onRetry` is only wired to a failure state; a healthy table never calls it.
- */
 export function DataState({
 	pending,
 	error,
@@ -63,10 +50,6 @@ export function DataState({
 	);
 }
 
-/**
- * Table/page geometry at rest: fixed-height bars in the shape of rows, with an
- * accessible "Loading" status and no invented identifiers or counts.
- */
 function DataSkeleton(): JSX.Element {
 	return (
 		<div

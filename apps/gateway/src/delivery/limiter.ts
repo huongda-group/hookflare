@@ -4,7 +4,6 @@ import type { AppEnv } from "../env";
 export type AcquireRequest = {
 	maxInFlight: number | null;
 	ratePerS: number | null;
-	/** timeout + LEASE_GRACE_MS: a slot never outlives the D1 lease (M5-3). */
 	leaseMs: number;
 };
 export type AcquireResult =
@@ -15,19 +14,9 @@ export type LimiterStub = {
 	release(slotId: string): Promise<void>;
 };
 
-/**
- * In-flight rejections wait at most this long: a slot is usually released when its
- * delivery finishes, long before its lease expires.
- */
 export const IN_FLIGHT_RETRY_MS = 5_000;
-/** Rate rejections are spread over successive token times, up to this far ahead. */
 export const RATE_RETRY_MAX_MS = 30_000;
 
-/**
- * Spec §5.2. A pure counter: the consumer passes the limits on every call,
- * so a policy change applies to the next delivery (M5-2). All state lives in
- * SQLite storage, so eviction resets nothing (M5-4).
- */
 export class DestinationLimiter
 	extends DurableObject<AppEnv>
 	implements LimiterStub
@@ -54,10 +43,8 @@ export class DestinationLimiter
 
 	acquireAt(req: AcquireRequest, now: number): AcquireResult {
 		return this.ctx.storage.transactionSync(() => {
-			// 1. Expired slots belong to workers that died without releasing (M5-3).
 			this.sql.exec("DELETE FROM slots WHERE expires_at <= ?", now);
 
-			// 2. Concurrency.
 			if (req.maxInFlight !== null) {
 				const { n, earliest } = this.sql
 					.exec<{ n: number; earliest: number | null }>(
@@ -76,7 +63,6 @@ export class DestinationLimiter
 				}
 			}
 
-			// 3. Rate: token bucket with at most one second of burst.
 			if (req.ratePerS !== null) {
 				const cap = req.ratePerS;
 				const row = this.sql
@@ -97,7 +83,6 @@ export class DestinationLimiter
 				this.saveBucket(tokens - 1, now);
 			}
 
-			// 4. Every accepted call gets a slot, so release is uniform.
 			const slotId = crypto.randomUUID();
 			this.sql.exec(
 				"INSERT INTO slots (id, expires_at) VALUES (?, ?)",
@@ -112,11 +97,6 @@ export class DestinationLimiter
 		this.sql.exec("DELETE FROM slots WHERE id = ?", slotId);
 	}
 
-	/**
-	 * Each rejected caller is told a later token time than the one before, so a
-	 * backlog returns spread over time instead of all at the next token. A hint
-	 * reserves nothing: whoever comes first when a token is back takes it.
-	 */
 	private rateHint(tokens: number, ratePerS: number, now: number): number {
 		const intervalMs = 1000 / ratePerS;
 		const nextToken = now + Math.ceil((1 - tokens) * intervalMs);

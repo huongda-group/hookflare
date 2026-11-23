@@ -23,7 +23,6 @@ export function useProjectCatalog(enabled: boolean) {
 	});
 }
 
-/** For selects: one page of up to 200 (listQuery max) is enough for an internal tool. */
 export function useProjectsList() {
 	return useQuery({
 		queryKey: qk.projects.list({ all: true }),

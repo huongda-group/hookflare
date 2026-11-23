@@ -32,13 +32,6 @@ export type ResourcePickerProps = {
 	allowAll?: boolean;
 };
 
-/**
- * A cursor-aware named-resource combobox (spec §7). Radix `Select` cannot
- * paginate, so this is a small accessible combobox: a labelled search input
- * that filters the *loaded* options only, a listbox of loaded options, an
- * explicit **Load more**, and an exact-ID escape hatch. It never fetches a
- * page per option and never fetches every page eagerly.
- */
 export function ResourcePicker({
 	id,
 	kind,
@@ -64,9 +57,6 @@ export function ResourcePicker({
 		[query.data],
 	);
 
-	// A new project (or kind) is a new query; drop the local filter with it so
-	// it cannot hide the first page of the new scope. Resetting during render is
-	// React's "adjust state when a prop changes" pattern.
 	const scope = `${kind}|${projectId ?? ""}`;
 	const [stateScope, setStateScope] = useState(scope);
 	if (stateScope !== scope) {
@@ -94,8 +84,6 @@ export function ResourcePicker({
 		};
 	}, [open]);
 
-	// Only duplicate names need the ID/project to stay distinguishable; a
-	// unique name keeps its exact accessible name.
 	const duplicates = useMemo(() => {
 		const counts = new Map<string, number>();
 		for (const option of options)
@@ -142,8 +130,7 @@ export function ResourcePicker({
 	const renderOption = (option: ResourceOption) => {
 		const duplicate =
 			(duplicates.get(option.name) ??
-				/* istanbul ignore next -- @preserve unreachable: duplicates counts every loaded option */ 0) >
-			1;
+				/* istanbul ignore next -- @preserve */ 0) > 1;
 		return (
 			<button
 				key={option.id}

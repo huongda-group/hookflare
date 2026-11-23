@@ -1,11 +1,6 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { seedDeadDelivery } from "./seed";
 
-/**
- * The Turnstile widget (always-pass test keys) gates submit until it
- * yields a token. Click its checkbox once when it needs one; with the
- * test keys a single click passes.
- */
 async function passTurnstile(page: Page, submit: Locator) {
 	const box = page
 		.frameLocator('iframe[src*="challenges.cloudflare.com"]')
@@ -17,9 +12,6 @@ async function passTurnstile(page: Page, submit: Locator) {
 			await box.click({ timeout: 15_000 });
 		}
 	} catch (e) {
-		// The widget already passed (or is absent with Turnstile off).
-		// Log instead of swallowing: a widget that never renders (e.g. a
-		// CSP regression) would otherwise surface only as a 30s timeout below.
 		console.log("turnstile passthrough:", String(e));
 	}
 	await expect(submit).toBeEnabled({ timeout: 30_000 });
@@ -28,7 +20,6 @@ async function passTurnstile(page: Page, submit: Locator) {
 test("exit criteria: configure everything from the UI, then see the DLQ", async ({
 	page,
 }) => {
-	// Fresh D1 per run, so onboarding is open: claim the first admin.
 	await page.goto("/");
 	await expect(page).toHaveURL(/\/setup$/);
 	await page.getByLabel("Username", { exact: true }).fill("e2e-admin");
@@ -51,7 +42,6 @@ test("exit criteria: configure everything from the UI, then see the DLQ", async 
 	const run = `e2e-${Date.now().toString(36)}`;
 	const projectName = `E2E ${run}`;
 
-	// Exit criterion 2: project → destination → source, UI only.
 	await page
 		.locator("header", { has: page.getByRole("heading", { name: "Projects" }) })
 		.getByRole("button", { name: "New project" })
@@ -74,7 +64,6 @@ test("exit criteria: configure everything from the UI, then see the DLQ", async 
 	await page.goto("/endpoints?tab=destinations");
 	const picker = page.getByRole("combobox", { name: "Active project" });
 	await expect(picker).toHaveText(projectName);
-	// Header and empty-state buttons both open the same dialog.
 	await page.getByRole("button", { name: "New destination" }).first().click();
 	await page.getByLabel("Name").fill(`Dest ${run}`);
 	await page.getByLabel("URL").fill("https://example.com/hooks");
@@ -95,13 +84,11 @@ test("exit criteria: configure everything from the UI, then see the DLQ", async 
 	const row = page.getByRole("row", { name: new RegExp(`Src ${run}`) });
 	await expect(row.getByText(/\/in\/src_/)).toBeVisible();
 
-	// Collect the IDs the UI created, via the same admin API the UI uses.
 	const api = (path: string) =>
 		page.request.get(`/api/admin/v1${path}`).then((r) => r.json());
 	const dest = (await api(`/destinations?project_id=${project.id}`)).data[0];
 	const src = (await api(`/sources?project_id=${project.id}`)).data[0];
 
-	// Seed a second pipeline through the real API and verify the list boundary.
 	const origin = new URL(page.url()).origin;
 	const create = async (path: string, data: Record<string, unknown>) => {
 		const res = await page.request.post(`/api/admin/v1${path}`, {
@@ -149,7 +136,6 @@ test("exit criteria: configure everything from the UI, then see the DLQ", async 
 		page.getByRole("link", { name: `Other destination ${run}`, exact: true }),
 	).toHaveCount(0);
 
-	// Exit criterion 1: a dead delivery appears under Failures › Dead Letter.
 	const { deliveryId, eventId } = seedDeadDelivery({
 		projectId: project.id,
 		sourceId: src.id,
@@ -167,11 +153,9 @@ test("exit criteria: configure everything from the UI, then see the DLQ", async 
 	await expect(page).toHaveURL(
 		new RegExp(`/events/${eventId}\\?project_id=${project.id}$`),
 	);
-	// Scoped to this delivery's timeline: "dead" also appears in badges elsewhere.
 	const timeline = page.locator("section").filter({ hasText: deliveryId });
 	await expect(timeline.locator('li[data-step="dead"]')).toBeVisible();
 
-	// M5c smoke: the new pages render their headings.
 	await page.goto("/alerts");
 	await expect(page.getByRole("heading", { name: "Alerts" })).toBeVisible();
 	await page.goto("/archives");
@@ -183,15 +167,12 @@ test("exit criteria: configure everything from the UI, then see the DLQ", async 
 		page.getByRole("heading", { name: "Archive runs" }),
 	).toBeVisible();
 
-	// run_worker_first: an unknown API path is the Worker's JSON 404, not index.html.
 	const nope = await page.request.get("/api/admin/v1/nope");
 	expect(nope.status()).toBe(404);
 	expect(nope.headers()["content-type"]).toContain("application/json");
-	// And a client-side route deep link gets the SPA shell.
 	const deep = await page.request.get("/events/evt_missing");
 	expect(deep.headers()["content-type"]).toContain("text/html");
 
-	// Log out and back in as the onboarded admin.
 	await page.getByRole("button", { name: /^Account:/ }).click();
 	await page.getByRole("menuitem", { name: "Log out" }).click();
 	await page

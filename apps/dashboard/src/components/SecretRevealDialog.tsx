@@ -11,7 +11,6 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 
-/** Shown once; the secret lives only in the caller's state and is dropped on close (spec §11). */
 export function SecretRevealDialog({
 	secret,
 	label,
@@ -25,12 +24,10 @@ export function SecretRevealDialog({
 		<Dialog
 			open={secret !== null}
 			onOpenChange={(o) => {
-				// Every close path (Escape, outside click, X) is gated inside the content.
-				/* istanbul ignore else -- @preserve unreachable: Radix calls onOpenChange(true) only from a Trigger, and this dialog has none */
+				/* istanbul ignore else -- @preserve */
 				if (!o) onClose();
 			}}
 		>
-			{/* Keyed on the secret so each new secret starts with "stored" unticked. */}
 			<SecretRevealContent
 				key={secret ?? ""}
 				secret={secret}
@@ -77,8 +74,7 @@ function SecretRevealContent({
 					size="sm"
 					onClick={() =>
 						void navigator.clipboard?.writeText(
-							secret ??
-								/* istanbul ignore next -- @preserve unreachable: the dialog is closed while secret is null */ "",
+							secret ?? /* istanbul ignore next -- @preserve */ "",
 						)
 					}
 				>

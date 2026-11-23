@@ -7,16 +7,6 @@ import {
 	stressDataset,
 } from "./fixtures";
 
-/**
- * Browser verification for the light dashboard redesign (Task 13).
- *
- * Every test installs browser-only route-interception fixtures (see
- * `fixtures.ts`) and never mutates the real D1 that the parallel
- * real-Worker `smoke.spec.ts` owns. The 8 named screens are attached as
- * screenshots for the review record; screenshots stay in Playwright's
- * output dir and are never committed.
- */
-
 const WIDTHS = [1440, 1280, 768, 390, 320] as const;
 
 for (const width of [390, 1440]) {
@@ -110,7 +100,6 @@ test("navigation has no page-level overflow from 1440px down to 320px", async ({
 			await expect(
 				page.getByRole("button", { name: "Open navigation" }),
 			).toBeVisible();
-			// The sidebar copy is CSS-hidden below 1024px; the drawer opens it.
 			await page.getByRole("button", { name: "Open navigation" }).click();
 			await expect(
 				page.getByRole("dialog").getByRole("link", { name: "Events" }),
@@ -228,7 +217,6 @@ test("setup separates labels, inputs, and adjacent fields on mobile", async ({
 test("setup and login render explicit states and stay keyboard operable", async ({
 	page,
 }) => {
-	// Setup: onboarding open, bot protection notice, keyboard-operable fields.
 	const setup = await installApp(page, {
 		role: "admin",
 		authState: { setup_required: true, turnstile_site_key: null },
@@ -271,7 +259,6 @@ test("setup and login render explicit states and stay keyboard operable", async 
 	await expect(confirm).toHaveAttribute("type", "text");
 	expect(await pageOverflow(page)).toBe(0);
 
-	// Login: wrong credentials stay inline, never a session-expiry redirect.
 	setup.update({
 		authState: { setup_required: false, turnstile_site_key: null },
 		login: { kind: "error", status: 401, code: "invalid_credentials" },
@@ -390,19 +377,15 @@ test("role matrix hides admin UI and viewer direct links fetch nothing protected
 	await page.goto("/");
 	const nav = page.getByRole("navigation", { name: "Main" });
 	await expect(nav).toContainText("Overview");
-	// The Audit entry needs `audit.read`; Archives and the degraded Settings
-	// entry stay visible on `events.read` alone.
 	await expect(nav).not.toContainText("Audit");
 	await expect(nav).toContainText("Archives");
 
-	// Direct navigation as a viewer must not request protected audit data.
 	await page.goto("/audit");
 	await expect(
 		page.getByText("The audit log requires the admin role."),
 	).toBeVisible();
 	expect(fixture.requests.some((r) => r.path.startsWith("/audit"))).toBe(false);
 
-	// Settings degrades to the readable retry tab only.
 	await page.goto("/settings");
 	await expect(page.getByRole("tab", { name: "Retry defaults" })).toBeVisible();
 	await expect(page.getByRole("tab", { name: "Users" })).not.toBeVisible();
@@ -467,7 +450,6 @@ test("blocked role mutation shows feedback and a downgrade removes admin UI", as
 		.click();
 	await expect(page.getByText(/forbidden/)).toBeVisible();
 
-	// The downgraded session loses administrative controls on next load.
 	fixture.setRole("viewer");
 	await page.goto("/settings?tab=users");
 	await expect(page.getByRole("tab", { name: "Users" })).not.toBeVisible();
@@ -478,8 +460,6 @@ test("zoom approximation (640 CSS px viewport plus CSS zoom) keeps every screen 
 	page,
 }, testInfo) => {
 	await installApp(page, { role: "admin" });
-	// 1280px at 200% zoom == 640 CSS px (viewport equivalence, not a
-	// browser-zoom proof on its own).
 	await page.setViewportSize({ width: 640, height: 900 });
 	for (const [name, url] of [
 		["overview", "/"],
@@ -497,10 +477,6 @@ test("zoom approximation (640 CSS px viewport plus CSS zoom) keeps every screen 
 			contentType: "image/png",
 		});
 	}
-	// Programmatic CSS zoom is an approximation: it exercises the engine's
-	// zoom layout but is NOT manual browser zoom (no CDP-driven real zoom
-	// is available in this environment). Manual browser-zoom verification
-	// is an OPEN follow-up recorded in the review doc.
 	await page.setViewportSize({ width: 1280, height: 900 });
 	await page.goto("/events");
 	await page.evaluate(() => {
@@ -524,7 +500,6 @@ test("drawer and dialogs close on Escape and restore focus", async ({
 	await expect(drawer).not.toBeVisible();
 	await expect(trigger).toBeFocused();
 
-	// Skip link targets the main content landmark (operated by keyboard).
 	const skip = page.getByRole("link", { name: "Skip to content" });
 	await skip.focus();
 	await page.keyboard.press("Enter");
@@ -538,8 +513,6 @@ test("drawer and dialogs close on Escape and restore focus", async ({
 		}),
 	).toBe(true);
 
-	// State-driven dialogs (no Radix trigger association) return focus to
-	// the opener on every close path, with no focus trap.
 	await page.goto("/projects");
 	const opener = page.getByRole("button", { name: "New project" });
 	await opener.click();
@@ -552,7 +525,6 @@ test("drawer and dialogs close on Escape and restore focus", async ({
 	).not.toBeVisible();
 	await expect(opener).toBeFocused();
 
-	// The Close (X) button path restores the opener too.
 	await opener.click();
 	await expect(
 		page.getByRole("heading", { name: "New project" }),
@@ -576,10 +548,8 @@ test("payload needs an explicit action, stays bounded, and missing disables repl
 	await page.getByRole("button", { name: "Show payload" }).click();
 	await expect(page.getByRole("tabpanel")).toContainText("ok");
 	expect(fixture.payloadRequests()).toHaveLength(1);
-	// The payload/code region may scroll locally; the page must not.
 	expect(await pageOverflow(page)).toBe(0);
 
-	// Confirmed-missing payload explains itself and disables replay.
 	fixture.update({ payload: { kind: "missing" } });
 	await page.goto("/events/evt_1");
 	await page.getByRole("tab", { name: "Payload" }).click();
@@ -624,7 +594,6 @@ test("long ids, long urls, and duplicate names never break the viewport", async 
 		});
 	}
 
-	// Duplicate display names stay disambiguated by id in the picker.
 	await page.setViewportSize({ width: 1280, height: 900 });
 	await page.goto("/events");
 	const picker = page.getByRole("combobox", { name: "Active project" });
@@ -639,7 +608,6 @@ test("long ids, long urls, and duplicate names never break the viewport", async 
 test("empty, error, and one-time-secret states behave and recover", async ({
 	page,
 }, testInfo) => {
-	// Empty events: message plus a working scope-clearing action.
 	await installApp(page, {
 		role: "admin",
 		events: { kind: "empty" },
@@ -651,7 +619,6 @@ test("empty, error, and one-time-secret states behave and recover", async ({
 		contentType: "image/png",
 	});
 
-	// Failed overview: named retry, content preserved after recovery.
 	const failed = await installApp(page, {
 		role: "admin",
 		overview: { error: "internal" },
@@ -666,7 +633,6 @@ test("empty, error, and one-time-secret states behave and recover", async ({
 		true,
 	);
 
-	// One-time secret: shown once behind an acknowledgment, then gone.
 	await installApp(page, { role: "admin" });
 	await page.goto("/endpoints?tab=destinations");
 	await page.getByRole("button", { name: "New destination" }).click();
@@ -716,7 +682,6 @@ test("named screens render their headings and landmarks", async ({
 			contentType: "image/png",
 		});
 	}
-	// Setup screen with onboarding open.
 	await installApp(page, {
 		role: "admin",
 		authState: { setup_required: true, turnstile_site_key: null },

@@ -135,7 +135,6 @@ describe("Audit", () => {
 		const { user, router } = renderApp("/audit?action=destination.updated");
 		const actorCell = await screen.findByText("ops-lead");
 		const cells = actorCell.closest("tr")?.querySelectorAll("td") ?? [];
-		// Reason and Diff columns both fall back to a dash.
 		expect(cells[4]).toHaveTextContent("—");
 		expect(cells[5]).toHaveTextContent("—");
 		expect(screen.queryByRole("button", { name: "Show diff" })).toBeNull();

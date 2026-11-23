@@ -27,10 +27,6 @@ export type SkipReason =
 
 export type Skip = { delivery_id: string; reason: SkipReason };
 
-/**
- * Spec §9.2. Checks in table order; the first failing check names the skip.
- * An R2 error propagates: it is an infra error, never a per-item skip.
- */
 export async function precheck(
 	deps: Deps,
 	targets: ReplayTarget[],
@@ -63,7 +59,6 @@ export async function precheck(
 				continue;
 			}
 		}
-		// Also covers two failures of the same pair in one bulk request.
 		const pair = `${t.eventId}|${t.destinationId}`;
 		if (active.has(pair) || claimed.has(pair)) {
 			skip("replay_in_progress");
@@ -75,12 +70,6 @@ export async function precheck(
 	return { ready, skipped };
 }
 
-/**
- * The `delivery.replayed` audit row, built in SQL after the conditional
- * inserts of the same batch: it lists only the replays that were created
- * (their fresh IDs exist), adds the lost ones to `skipped` as
- * `replay_in_progress`, and is written only if at least one was created.
- */
 function replayAuditStmt(
 	deps: Deps,
 	a: {
@@ -121,13 +110,6 @@ function replayAuditStmt(
 	);
 }
 
-/**
- * Spec §9.3: one batch of conditional replay inserts plus one audit row, then
- * enqueue the created non-paused ones. A replay that lost a race to a
- * concurrent one (precheck passed, insert did not) is returned in `lost` with
- * the precheck's `replay_in_progress` reason. A failed send leaves rows
- * pending for the reconciler.
- */
 export async function writeReplays(
 	c: Context<AppBindings>,
 	input: {
@@ -139,9 +121,7 @@ export async function writeReplays(
 	},
 ) {
 	const deps = c.var.deps;
-	const actor =
-		c.var.actor?.username ??
-		/* istanbul ignore next -- @preserve unreachable: every caller is a requirePermission-guarded route, so an actor is set */ "";
+	const actor = c.var.actor?.username ?? /* istanbul ignore next */ "";
 	const now = deps.now();
 	const rows = input.ready.map((t) => ({
 		source: t.sourceDeliveryId,
@@ -168,7 +148,7 @@ export async function writeReplays(
 	const [first, ...rest] = rows.map((r) =>
 		insertReplayIfIdleStmt(deps.db, r.row),
 	);
-	/* istanbul ignore next -- @preserve unreachable: rows is non-empty here (checked above); only narrows the type */
+	/* istanbul ignore next */
 	if (!first) return { replayed: [], lost };
 	const results = await deps.db.batch([
 		first,

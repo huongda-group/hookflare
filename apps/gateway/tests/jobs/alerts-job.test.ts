@@ -41,7 +41,6 @@ import { faultyDeps } from "../helpers/faults";
 import { seedDelivery, seedPipeline } from "../helpers/seed";
 
 const logger = createLogger({ LOG_LEVEL: "error" });
-/** One INSERT per row: a single multi-row insert passes D1's bound-variable limit. */
 const insertMany = (deps: Deps, rows: (typeof alerts.$inferInsert)[]) =>
 	deps.db.batch(
 		rows.map((r) => deps.db.insert(alerts).values(r)) as unknown as [
@@ -133,9 +132,6 @@ describe("runAlerts", () => {
 		const deps = testDeps();
 		await resetAlerts(deps);
 		await deps.db.delete(settings).where(eq(settings.key, "alert_rules"));
-		// Keep backup_stale quiet unless a test says otherwise: the file's
-		// fake clock (T) is years past the test D1's migration timestamps, so
-		// the fresh-deploy grace never holds here without a recent backup.
 		await deps.db.delete(backups);
 		await deps.db.delete(settings).where(eq(settings.key, STORAGE_SETTING.key));
 		await deps.db.insert(backups).values({
@@ -193,7 +189,6 @@ describe("runAlerts", () => {
 		await runAlerts(deps, logger);
 		const [open] = await incidents(deps, p.destination.id);
 
-		// One success, then a new streak, a few times: one incident, no resolve.
 		for (let i = 0; i < 3; i++) {
 			await failing(deps, p.destination.id, 0);
 			advance(60_000);
@@ -208,7 +203,6 @@ describe("runAlerts", () => {
 		expect(await kinds(open.id)).toEqual(["opened"]);
 		expect(deps.fetch).toHaveBeenCalledTimes(1);
 
-		// Clear, but a run just short of the quiet period keeps it open.
 		await failing(deps, p.destination.id, 0);
 		advance(60_000);
 		await runAlerts(deps, logger);
@@ -216,7 +210,6 @@ describe("runAlerts", () => {
 		expect((await runAlerts(deps, logger)).resolved).toBe(0);
 		expect((await incidents(deps, p.destination.id))[0].status).toBe("open");
 
-		// Clear for the whole quiet period: resolved, notified once.
 		advance(1);
 		expect((await runAlerts(deps, logger)).resolved).toBe(1);
 		const [resolved] = await incidents(deps, p.destination.id);
@@ -266,7 +259,6 @@ describe("runAlerts", () => {
 		});
 		await runAlerts(deps, logger);
 		const [alert] = await incidents(deps, p.destination.id);
-		// Two runs read the same snapshot at the same timestamp.
 		const later = T + 3_601_000;
 		const first = remindAlertStatements(deps.db, alert, later, ["ach_a"]);
 		const second = remindAlertStatements(deps.db, alert, later, ["ach_a"]);
@@ -287,7 +279,6 @@ describe("runAlerts", () => {
 		await runAlerts(deps, logger);
 		await failing(deps, p.destination.id, 0);
 		const [alert] = await incidents(deps, p.destination.id);
-		// Two runs read the same open snapshot at the same timestamp.
 		const later = T + 60_000;
 		const first = resolveAlertStatements(deps.db, alert, later, ["ach_a"]);
 		const second = resolveAlertStatements(deps.db, alert, later, ["ach_a"]);
@@ -434,7 +425,7 @@ describe("runAlerts", () => {
 
 	it("advances the dead cursor and detects dead deliveries from the budget and the DLQ", async () => {
 		const { deps, advance } = clockDeps(T);
-		await runAlerts(deps, logger); // initialises the cursor
+		await runAlerts(deps, logger);
 		const p = await seedPipeline(deps);
 		advance(30_000);
 		const { seedDelivery } = await import("../helpers/seed");
@@ -467,7 +458,7 @@ describe("runAlerts", () => {
 
 	it("counts every fresh new_dead batch, even equal-sized ones (I4)", async () => {
 		const { deps, advance } = clockDeps(T);
-		await runAlerts(deps, logger); // initialises the cursor at T − 10 s
+		await runAlerts(deps, logger);
 		const p = await seedPipeline(deps);
 		const a = await seedDelivery(deps, p, {
 			status: "dead",
@@ -488,7 +479,7 @@ describe("runAlerts", () => {
 			last_dead_at: T + 55_000,
 		});
 		advance(60_000);
-		await runAlerts(deps, logger); // quiet run
+		await runAlerts(deps, logger);
 		const [same] = await incidents(deps, p.destination.id);
 		expect(same.status).toBe("open");
 		expect(same.detailsJson).toBe(inc.detailsJson);
@@ -522,7 +513,6 @@ describe("runAlerts", () => {
 		expect(first.opened).toBe(MAX_CHANGES_PER_RUN);
 		advance(60_000);
 		const second = await runAlerts(deps, logger);
-		// Other active rules in the shared database may take some of the first run's slots.
 		expect(second.opened).toBeGreaterThanOrEqual(3);
 		for (const id of ids) expect(await incidents(deps, id)).toHaveLength(1);
 	});
@@ -605,7 +595,6 @@ describe("runAlerts", () => {
 		const { deps, advance } = clockDeps(T);
 		await addChannel(deps, "ach_a");
 		const n = MAX_CHANGES_PER_RUN + 2;
-		// Open new_dead incidents stay active through the quiet period (carry-over).
 		await insertMany(
 			deps,
 			Array.from({ length: n }, (_, i) => ({
@@ -616,7 +605,6 @@ describe("runAlerts", () => {
 				projectId: null,
 				status: "open" as const,
 				openedAt: T - 2 * 3_600_000,
-				// The first one was opened with no channel to notify.
 				lastNotifiedAt: i === 0 ? null : T - 2 * 3_600_000,
 				detailsJson: JSON.stringify({ last_dead_at: T - 60_000 }),
 			})),
@@ -718,8 +706,7 @@ describe("sendPendingNotifications (outbox)", () => {
 		let overlap: Promise<unknown> | null = null;
 		let deps!: Deps;
 		const fetchImpl = vi.fn(async () => {
-			now += 2_000; // each send takes 2 s
-			// The next minute's cron fires while this run is still sending.
+			now += 2_000;
 			if (!overlap && now >= T + 61_000)
 				overlap = sendPendingNotifications(deps, logger);
 			await new Promise((r) => setTimeout(r, 1));
@@ -842,7 +829,7 @@ describe("sendPendingNotifications (outbox)", () => {
 	it("hands unsent claims back as untried once the send budget is spent", async () => {
 		let now = T;
 		const fetchImpl = vi.fn(async () => {
-			now += 4_000; // ten parallel sends push the run past SEND_BUDGET_MS
+			now += 4_000;
 			return new Response(null, { status: 204 });
 		});
 		const deps = testDeps({
@@ -880,9 +867,7 @@ describe("sendPendingNotifications (outbox)", () => {
 			await seedNotifications(deps, p.destination.id, p.project.id, 12);
 			return sendPendingNotifications(deps, logger);
 		};
-		// The first ten sends take 14 s: the last two still start.
 		expect(await run(1_400)).toEqual({ sent: 12, failed: 0 });
-		// They take 15 s: the budget is spent and the last two wait.
 		expect(await run(1_500)).toEqual({ sent: 10, failed: 0 });
 	});
 
@@ -908,7 +893,6 @@ describe("sendPendingNotifications (outbox)", () => {
 			{ status: "sending", tries: 1 },
 			{ status: "sending", tries: 1 },
 		]);
-		// A run past CLAIM_STALE_MS takes the claims over and sends them.
 		now += CLAIM_STALE_MS + 1;
 		expect(await sendPendingNotifications(base, logger)).toEqual({
 			sent: 2,
@@ -971,7 +955,6 @@ describe("sendPendingNotifications (outbox)", () => {
 	it("drops a claimed notification whose channel was deleted mid-run without sending it", async () => {
 		let deps!: Deps;
 		const fetchImpl = vi.fn(async () => {
-			// An operator deletes channel b (and its outbox rows) while the first chunk sends.
 			await deps.db
 				.delete(alertNotifications)
 				.where(eq(alertNotifications.channelId, "ach_b"));

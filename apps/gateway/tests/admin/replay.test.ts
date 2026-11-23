@@ -194,7 +194,7 @@ describe("POST /events/:id/replay", () => {
 		const body = await res.json<ReplayResult>();
 		expect(body).toMatchObject({ status: "pending", enqueued: false });
 		const rows = await eventDeliveries(deps, eventId);
-		expect(rows[1].status).toBe("pending"); // the reconciler picks it up
+		expect(rows[1].status).toBe("pending");
 	});
 
 	it("forbids a viewer", async () => {
@@ -374,7 +374,6 @@ describe("POST /failures/replay", () => {
 			}),
 		};
 		const p = await seedPipeline(deps);
-		// Over 64 KiB, so seedDelivery stores the body in R2.
 		const first = await seedDelivery(deps, p, {
 			status: "dead",
 			body: new Uint8Array(65 * 1024),
@@ -405,11 +404,6 @@ describe("POST /failures/replay", () => {
 	});
 });
 
-/**
- * Holds every replay batch (one that inserts into `deliveries`) until `n` of
- * them are waiting, so concurrent requests all pass precheck before any
- * writes: the race the conditional insert must close.
- */
 function replayBarrier(deps: ReturnType<typeof testDeps>, n: number) {
 	const batch = deps.db.batch.bind(deps.db);
 	const waiting: (() => void)[] = [];
@@ -489,8 +483,6 @@ describe("concurrent replays", () => {
 		const own = await seedDelivery(deps, p, { status: "failed_final" });
 		const missing = newId("dlv");
 		const api = await adminApp(deps, { role: "operator" });
-		// Both pass precheck; then the single replay commits first and the bulk
-		// one loses `shared`.
 		const batch = deps.db.batch.bind(deps.db);
 		let bulkArrived: () => void = () => {};
 		const bulkWaiting = new Promise<void>((r) => {
@@ -510,7 +502,6 @@ describe("concurrent replays", () => {
 			if (!isReplay) return batch(queries);
 			calls++;
 			if (queries.length > 3) {
-				// The bulk batch (two inserts) waits for the single one.
 				bulkArrived();
 				await singleDone;
 				return batch(queries);

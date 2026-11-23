@@ -25,7 +25,6 @@ const telegram = {
 } as const;
 
 function fetchReturning(status: number, headers: Record<string, string> = {}) {
-	// 204/205/304 cannot carry a body — use null for null-body statuses.
 	const body = status === 204 || status === 205 || status === 304 ? null : "x";
 	return vi.fn(
 		async () => new Response(body, { status, headers }),

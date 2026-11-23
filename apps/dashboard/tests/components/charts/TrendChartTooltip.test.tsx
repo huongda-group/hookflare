@@ -3,9 +3,6 @@ import { cloneElement, type ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { TrendChart } from "@/components/charts/TrendChart";
 
-// jsdom has no layout, so the responsive container measures 0×0 and recharts
-// never shows a tooltip. Give the chart a fixed size and surface the tooltip's
-// label for a known point, which is what a pointer hover would display.
 vi.mock("recharts", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("recharts")>();
 	return {

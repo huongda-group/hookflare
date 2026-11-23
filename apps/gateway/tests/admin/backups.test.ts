@@ -112,11 +112,9 @@ describe("backups API", () => {
 				status: "failed",
 				error: "start failed: Error: workflows unavailable",
 			});
-			// The run was requested, so its audit row stays.
 			expect((await auditRows(deps, rows[0].id)).map((a) => a.action)).toEqual([
 				"backup.run",
 			]);
-			// A failed row does not hold the one-running slot.
 			backup.create = fakeBackup("running").create;
 			expect((await app.request("POST", "/backups/run", {})).status).toBe(202);
 		} finally {

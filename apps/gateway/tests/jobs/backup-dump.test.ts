@@ -52,7 +52,6 @@ async function readLines(key: string): Promise<Record<string, unknown>[]> {
 	return lines.map((l) => JSON.parse(l) as Record<string, unknown>);
 }
 
-/** Stored R2 sha256 back to lowercase hex whatever its runtime shape. */
 function storedSha256Hex(obj: R2Object): string | null {
 	const v: unknown =
 		(obj.checksums as unknown as Record<string, unknown> | undefined)?.sha256 ??
@@ -78,7 +77,6 @@ describe("listTables", () => {
 		expect(names).toContain("archive_parts");
 		expect(names).not.toContain("d1_migrations");
 		expect(names).not.toContain("_cf_KV");
-		// Every table comes after the tables it references (bar self references).
 		for (const [i, t] of tables.entries()) {
 			for (const fk of t.foreignKeys) {
 				if (fk.table !== t.name) {
@@ -329,7 +327,6 @@ describe("dumpPage", () => {
 		expect(first.part).not.toBeNull();
 		expect((await deps.backups.list({ prefix })).objects).toHaveLength(2);
 
-		// The step's result was lost; by the retry the rows are gone.
 		await deps.db.delete(archiveParts);
 		expect(await dumpPart(deps, table, prefix, 1, null)).toEqual({
 			part: null,
